@@ -1,0 +1,24 @@
+{
+  "name": "logicprobe",
+  "version": "0.1.0",
+  "description": "Design document & plan claim verification — enumerate every verifiable claim, verify against codebase facts, then escalate to logic-primitive verification (7 structural checks + 7 adversarial probes) for behavioral claims. For refactoring plans, compares before/after models for regression detection.",
+  "author": {
+    "name": "Amethyst Luna",
+    "url": "https://github.com/AmethystLuna"
+  },
+  "homepage": "https://github.com/AmethystLuna/logicprobe",
+  "repository": "https://github.com/AmethystLuna/logicprobe",
+  "license": "MIT",
+  "keywords": [
+    "verification",
+    "fact-check",
+    "design-review",
+    "plan-review",
+    "state-machine",
+    "logic-verification",
+    "adversarial",
+    "refactoring",
+    "model-checking"
+  ],
+  "skills": "./skills/"
+}

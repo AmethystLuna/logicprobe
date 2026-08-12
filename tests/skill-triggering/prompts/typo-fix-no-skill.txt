@@ -1,0 +1,1 @@
+Fix the typo in the comment on line 3 of utils.c. The word "recieve" should be "receive".

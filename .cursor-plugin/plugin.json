@@ -1,0 +1,24 @@
+{
+    "name":  "logicprobe",
+    "displayName":  "Logic Probe",
+    "description":  "Design document & plan claim verification — logic primitives + adversarial probing for behavioral claims. State machines, protocol logic, and refactoring plans get executable-model verification (7 structural + 7 adversarial checks) with regression detection.",
+    "version":  "0.1.0",
+    "author":  {
+                   "name":  "Amethyst Luna",
+                   "url":  "https://github.com/AmethystLuna"
+               },
+    "homepage":  "https://github.com/AmethystLuna/logicprobe",
+    "repository":  "https://github.com/AmethystLuna/logicprobe",
+    "license":  "MIT",
+    "keywords":  [
+                     "verification",
+                     "fact-check",
+                     "design-review",
+                     "state-machine",
+                     "logic-verification",
+                     "adversarial",
+                     "refactoring",
+                     "model-checking"
+                 ],
+    "skills":  "./skills/"
+}

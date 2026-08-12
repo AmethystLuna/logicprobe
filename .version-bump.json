@@ -1,0 +1,11 @@
+{
+  "version": "0.1.0",
+  "files": {
+    ".claude-plugin/plugin.json": "version",
+    ".claude-plugin/marketplace.json": "plugins[0].version",
+    ".codex-plugin/plugin.json": "version",
+    ".cursor-plugin/plugin.json": "version",
+    ".kimi-plugin/plugin.json": "version",
+    "package.json": "version"
+  }
+}

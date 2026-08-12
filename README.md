@@ -1,0 +1,161 @@
+[中文](README.zh-CN.md)
+
+---
+
+# Logic Probe
+
+Design documents are not truth — code is. A claim-verification skill that checks every verifiable claim in design docs, architecture specs, and refactoring plans against the actual codebase — and escalates to executable-model verification for behavioral claims. v0.1.0.
+
+**Cross-platform** — works with Claude Code, Codex CLI, Cursor, Kimi CLI, OpenCode, and ZCode. Built on the [Agent Skills](https://agentskills.io) open standard.
+
+## What It Does
+
+| Phase | What |
+|-------|------|
+| Phase 1-2 | Enumerate every verifiable claim (API names, file paths, enum values, counts, mechanism feasibility) → verify each against the codebase with evidence |
+| Phase 2a | **7 structural checks** on extracted state-machine models: reachability, deadlock, liveness, determinism, event/guard completeness, invariant validity |
+| Phase 2b | **7 adversarial probes**: unexpected events, race interleaving, order permutation, pair symmetry (lock/unlock), boundary blast, resource injection, minimal counter-example |
+| Refactoring | Before/after model comparison — behavioral preservation, invariant continuity, deadlock regression, complexity claims |
+| Output | Structured findings with exact file:line evidence, severity classification, correction direction — never inline fixes |
+
+The model is always shown as a transition table and **confirmed with the user before running** — extraction errors are the dominant failure mode.
+
+## Installation
+
+### Marketplace install (recommended)
+
+Add the marketplace to `~/.claude/settings.json`:
+
+```json
+{
+  "extraKnownMarketplaces": {
+    "logicprobe": {
+      "source": { "source": "github", "repo": "AmethystLuna/logicprobe" }
+    }
+  }
+}
+```
+
+Then install from CLI:
+
+```bash
+claude plugin install logicprobe@logicprobe
+```
+
+### Manual install
+
+```bash
+git clone https://github.com/AmethystLuna/logicprobe.git ~/.claude/plugins/dev/logicprobe
+```
+
+Then enable in `~/.claude/settings.json`:
+
+```json
+{
+  "enabledPlugins": {
+    "logicprobe@dev": true
+  }
+}
+```
+
+## Usage
+
+The plugin auto-injects a capability notification at session start. The skill activates when its `Use when` description matches your task:
+
+- **Design doc / plan review** — "Review this design document" → claim enumeration and codebase verification
+- **Behavioral questions** — "could this state machine deadlock", "is this retry limit safe", "check this timing for bugs" → the skill is proactively suggested (not auto-loaded) as an optional verification pass
+- **Refactoring plans** — the pipeline compares before/after models to flag undocumented behavioral changes
+
+The skill auto-classifies depth (LIGHTWEIGHT / STANDARD / ESCALATED) from plan features in Phase 0, and appends a `## Plan Verification` summary block as the audit trail.
+
+Python is optional: when available, the reusable harness at `references/verification-harness.py` runs the checks; when not (air-gapped machines), the guide at `references/logic-verification-guide.md` provides a manual verification mode.
+
+## Codex CLI
+
+This plugin also supports OpenAI Codex CLI. Skills follow the Agent Skills standard and work identically across both platforms.
+
+### Codex install
+
+```bash
+# Add as a marketplace
+codex plugin marketplace add AmethystLuna/logicprobe
+
+# Install
+codex plugin install logicprobe
+```
+
+Or manually:
+
+```bash
+git clone https://github.com/AmethystLuna/logicprobe.git ~/.codex/plugins/logicprobe
+```
+
+Skills are invoked with `$logicprobe` or auto-selected by Codex based on task context.
+
+## Cursor
+
+Cursor 2.5+ has built-in plugin support.
+
+### Cursor install
+
+```bash
+# Clone to Cursor plugins directory
+git clone https://github.com/AmethystLuna/logicprobe.git ~/.cursor/plugins/logicprobe
+```
+
+Or install from the Cursor plugin marketplace UI: `/add-plugin AmethystLuna/logicprobe`
+
+## Kimi CLI
+
+Kimi CLI discovers skills from `.claude/skills/` paths automatically. The `.kimi-plugin/plugin.json` manifest registers the plugin for Kimi's plugin manager.
+
+### Kimi install
+
+```bash
+# Via Kimi plugin manager
+/plugins install https://github.com/AmethystLuna/logicprobe.git
+
+# Or clone manually
+git clone https://github.com/AmethystLuna/logicprobe.git ~/.kimi/plugins/logicprobe
+```
+
+Skills are invoked with `/skill:logicprobe`.
+
+## OpenCode
+
+Skills are auto-discovered from `.claude/skills/` and `.codex/skills/` paths. Add to your `opencode.json`:
+
+```json
+{
+  "plugin": ["logicprobe@git+https://github.com/AmethystLuna/logicprobe.git"]
+}
+```
+
+Or install via `skop` which consumes the Claude marketplace manifest. See `.opencode/INSTALL.md` for detailed instructions.
+
+## ZCode (Z.AI)
+
+ZCode 3.0+ follows the Agent Skills standard. No plugin marketplace — manually copy skills to `.zcode/skills/`:
+
+```bash
+git clone https://github.com/AmethystLuna/logicprobe.git
+cp -r logicprobe/skills/* .zcode/skills/
+```
+
+Skills are invoked with `$logicprobe`. See `.zcode/INSTALL.md` for details.
+
+## Requirements
+
+- Claude Code v2.1+ / Codex CLI latest / Cursor 2.5+ / Kimi CLI latest / OpenCode latest / ZCode 3.0+
+- Python 3.6+ optional (only for the automated harness; manual fallback mode requires none)
+
+## Related Plugins
+
+| Plugin | Description |
+|--------|-------------|
+| [embedded-workbench](https://github.com/AmethystLuna/embedded-workbench) | Embedded C/C++ toolbox whose Plan Verification Gate uses this skill. This plugin was split out of embedded-workbench v0.6.0. |
+| [powershell-safety](https://github.com/AmethystLuna/powershell-safety) | PowerShell safety rules — file encoding pitfalls, quoting, and destructive command patterns |
+
+## Acknowledgments
+
+The claim-verification methodology (logic primitives, adversarial probing, refactoring before/after comparison) and the trigger test framework (`tests/skill-triggering/`) follow the conventions of [Superpowers](https://github.com/obra/superpowers) by Jesse Vincent (MIT License), as adapted in the [embedded-workbench](https://github.com/AmethystLuna/embedded-workbench) plugin.

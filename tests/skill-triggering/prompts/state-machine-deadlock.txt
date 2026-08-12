@@ -1,0 +1,1 @@
+We have an async protocol where a sensor sends data and we ACK every message. If a message is lost we retry up to 3 times, then give up and go to an error state. Could this logic ever get stuck waiting forever?

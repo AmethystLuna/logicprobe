@@ -1,0 +1,15 @@
+{
+  "name": "logicprobe-dev",
+  "description": "Development marketplace for Logic Probe plugin",
+  "owner": {
+    "name": "Amethyst Luna"
+  },
+  "plugins": [
+    {
+      "name": "logicprobe",
+      "description": "Design document & plan claim verification — logic primitives + adversarial probing for behavioral claims.",
+      "version": "0.1.0",
+      "source": "./"
+    }
+  ]
+}
