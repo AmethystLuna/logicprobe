@@ -166,7 +166,6 @@ Skills are invoked with `$logicprobe`. See `.zcode/INSTALL.md` for details.
 | Plugin | Description |
 |--------|-------------|
 | [embedded-workbench](https://github.com/AmethystLuna/embedded-workbench) | Embedded C/C++ toolbox whose Plan Verification Gate uses this skill. This plugin was split out of embedded-workbench v0.6.0. |
-| [powershell-safety](https://github.com/AmethystLuna/powershell-safety) | PowerShell safety rules — file encoding pitfalls, quoting, and destructive command patterns |
 
 ## Acknowledgments
 

@@ -164,7 +164,6 @@ cp -r logicprobe/skills/* .zcode/skills/
 | 插件 | 说明 |
 |------|------|
 | [embedded-workbench](https://github.com/AmethystLuna/embedded-workbench) | 嵌入式 C/C++ 工具箱，其 Plan Verification Gate 依赖本技能。本插件自 embedded-workbench v0.6.0 拆分而来。 |
-| [powershell-safety](https://github.com/AmethystLuna/powershell-safety) | PowerShell 安全规则——文件编码陷阱、引号、破坏性命令模式 |
 
 ## 致谢
 
