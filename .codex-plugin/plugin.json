@@ -25,6 +25,11 @@
     "shortDescription": "Claim verification for design docs & plans — logic primitives + adversarial probing",
     "longDescription": "Documents are not truth — code is. Verifies every verifiable claim in design documents, architecture specs, and refactoring plans against the actual codebase, then escalates to executable-model verification for behavioral claims: 7 structural checks (reachability, deadlock, liveness, determinism, guard/invariant completeness) and 7 adversarial probes (unexpected events, race interleaving, boundary blast, resource injection). Refactoring plans get before/after model comparison for regression detection. Python harness included, with manual fallback for air-gapped machines.",
     "developerName": "Amethyst Luna",
+    "category": "Development",
+    "capabilities": [
+      "Interactive",
+      "Read"
+    ],
     "websiteURL": "https://github.com/AmethystLuna/logicprobe"
   }
 }
