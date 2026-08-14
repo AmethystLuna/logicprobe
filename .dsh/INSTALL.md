@@ -65,7 +65,7 @@ To change the gate text or disable injection, override the row by id in your pro
 - DSH has no plugin marketplace for this repo — manual install only.
 - The session-start gate injection is provided natively by the root bundle (Option D). This plugin is the verification half of the embedded-workbench ecosystem: the embedded-workbench bundle's Plan Verification Gate routes plan approval through this skill.
 - No custom agents — this plugin is skill-only; nothing else to port.
-- **Gate injection semantics**: the gate is injected exactly once per session lifecycle via the official `agent/session-start` event — on `startup`, `clear`, and `compact` (matching the Claude SessionStart matcher); `resume` keeps the gate already in durable history. The gate text is the dsh-shaped twin of `hooks/session-start-content.md` — review it per deployment and override via `gateContent`.
+- **Gate injection semantics**: the gate is injected exactly once per session lifecycle via the official `agent/session-start` event — on `startup`, `clear`, and `compact` (matching the Claude SessionStart matcher); `resume` keeps the gate already in durable history. The gate text is the dsh-native adaptation of `hooks/session-start-content.md` — behavior rules synced, presentation adapted to the dsh skill catalog (the trigger list lives in the skill description); review it per deployment and override via `gateContent`.
 
 ## Tool Mapping
 
