@@ -159,6 +159,7 @@ Skills are invoked with `$logicprobe`. See `.zcode/INSTALL.md` for details.
 ## Requirements
 
 - Claude Code v2.1+ / Codex CLI latest / Cursor 2.5+ / Kimi CLI latest / OpenCode latest / ZCode 3.0+
+- DeepSeek Harness (dsh): dev preview — verified on mainline 2026-08-14 (gate bundle loaded and injected in-session)
 - Python 3.6+ optional (only for the automated harness; manual fallback mode requires none)
 
 ## Related Plugins

@@ -157,6 +157,7 @@ cp -r logicprobe/skills/* .zcode/skills/
 ## 环境要求
 
 - Claude Code v2.1+ / Codex CLI 最新 / Cursor 2.5+ / Kimi CLI 最新 / OpenCode 最新 / ZCode 3.0+
+- DeepSeek Harness (dsh): dev preview — 已实测 mainline 2026-08-14（gate bundle 加载并注入会话成功）
 - Python 3.6+ 可选（仅自动验证工具需要；手动兜底模式无需任何依赖）
 
 ## 关联插件
