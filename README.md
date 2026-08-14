@@ -58,6 +58,16 @@ Then enable in `~/.claude/settings.json`:
 }
 ```
 
+## DeepSeek Harness (dsh)
+
+Native dsh support ships as a cordis plugin bundle in [`packages/dsh-plugin/`](packages/dsh-plugin/README.md):
+
+- The skill is discovered as-is by dsh's `skill-filesystem` provider (Agent Skills open standard) — zero code.
+- The `logicprobe-dsh` bundle injects the claim-verification gate (1% Rule / Red Flags / proactive suggestion) into the first model step of every agent session — the dsh-native counterpart of the Claude `SessionStart` hook. It also registers a model-visible catalog entry (`cordis_inspect`).
+- Together with the embedded-workbench bundle's Plan Verification Gate, this closes the claim-verification loop in dsh.
+
+Install: see [`.dsh/INSTALL.md`](.dsh/INSTALL.md) (four options, from plain skill copy to `dsh plugin add`).
+
 ## Usage
 
 The plugin auto-injects a capability notification at session start. The skill activates when its `Use when` description matches your task:
