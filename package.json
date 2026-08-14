@@ -1,7 +1,49 @@
 {
     "name":  "logicprobe",
     "version":  "0.1.0",
-    "description":  "Design document & plan claim verification — enumerate claims, verify against codebase facts, then escalate to logic-primitive verification (7 structural checks + 7 adversarial probes) for behavioral claims. Before/after model comparison for refactoring regression detection.",
+    "description":  "Design document & plan claim verification — enumerate claims, verify against codebase facts, then escalate to logic-primitive verification (7 structural checks + 7 adversarial probes) for behavioral claims. Before/after model comparison for refactoring regression detection. Ships a native DeepSeek Harness (dsh) bundle that injects the claim-verification gate into the first model step.",
+    "type":  "module",
+    "main":  "lib/index.js",
+    "types":  "lib/types/index.d.ts",
+    "exports":  {
+                    ".":  {
+                              "types":  "./lib/types/index.d.ts",
+                              "default":  "./lib/index.js"
+                          },
+                    "./cordis.patch.yml":  "./cordis.patch.yml",
+                    "./package.json":  "./package.json"
+                },
+    "files":  [
+                  "lib",
+                  "src",
+                  "cordis.patch.yml"
+              ],
+    "dsh":  {
+                "bundle":  {
+                               "patch":  "./cordis.patch.yml"
+                           }
+            },
+    "scripts":  {
+                    "build":  "tsc -p tsconfig.json",
+                    "typecheck":  "tsc -p tsconfig.json --noEmit"
+                },
+    "dependencies":  {
+                         "@deepseek-ai/schemastery":  "^3.18.1"
+                     },
+    "peerDependencies":  {
+                             "@deepseek-ai/cordis":  "^4.0.1",
+                             "@deepseek-ai/dsh-agent":  "^0.1.0-rc.6",
+                             "@deepseek-ai/dsh-llm":  "^0.0.1-rc.1",
+                             "@deepseek-ai/dsh-session":  "^0.0.1-rc.1"
+                         },
+    "devDependencies":  {
+                            "@deepseek-ai/cordis":  "^4.0.1",
+                            "@deepseek-ai/dsh-agent":  "^0.1.0-rc.6",
+                            "@deepseek-ai/dsh-cordis-host-runner":  "^0.1.0-rc.6",
+                            "@deepseek-ai/dsh-llm":  "^0.0.1-rc.1",
+                            "@deepseek-ai/dsh-session":  "^0.0.1-rc.1",
+                            "typescript":  "^5.0.0"
+                        },
     "author":  {
                    "name":  "Amethyst Luna",
                    "url":  "https://github.com/AmethystLuna"
@@ -19,6 +61,7 @@
                      "refactoring",
                      "model-checking",
                      "agentskills",
-                     "plugin"
+                     "plugin",
+                     "dsh"
                  ]
 }
