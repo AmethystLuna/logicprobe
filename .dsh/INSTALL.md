@@ -1,0 +1,65 @@
+# Installing Logic Probe for DeepSeek Harness (dsh)
+
+DeepSeek Harness (`dsh`) discovers skills via the Agent Skills open standard (agentskills.io) — the same `skill-name/SKILL.md` + frontmatter layout this plugin already uses. The logicprobe skill is discovered as-is; no content changes required.
+
+## Install
+
+### Option A — user-level, cross-harness (recommended)
+
+Copy the skills into `~/.agents/skills/` — DSH discovery root rank 500, and a shared directory that other Agent-Skills-standard harnesses also read:
+
+```bash
+git clone https://github.com/AmethystLuna/logicprobe.git
+mkdir -p ~/.agents/skills
+cp -r logicprobe/skills/* ~/.agents/skills/
+```
+
+### Option B — project-level
+
+Copy the skills into your project's `.dsh/skills/` (DSH discovery root rank 100 — highest priority, scoped to that project only):
+
+```bash
+mkdir -p .dsh/skills
+cp -r logicprobe/skills/* .dsh/skills/
+```
+
+### Option C — zero-copy (advanced)
+
+If your `dsh` configuration supports `customSkillDirs` (rank 300), point it at this repository's `skills/` directory instead of copying. See the dsh configuration docs for the exact key placement.
+
+### Option D — native plugin (session-start gate injection)
+
+Install the bundle from [packages/dsh-plugin](../packages/dsh-plugin/README.md):
+
+```bash
+npx -p @deepseek-ai/dsh dsh plugin --profile web add "github:AmethystLuna/logicprobe"
+```
+
+This mounts a native cordis plugin that folds the session-start gate text (claim-verification doctrine / 1% Rule / Red Flags / proactive suggestion) into the first model step — the dsh-native counterpart of the Claude Code `SessionStart` hook.
+
+## Verify
+
+Ask in a `dsh` session: "你有设计文档 / 计划 claim 核查相关的 skill 吗?"
+
+## Notes
+
+- Skill frontmatter already matches the DSH expectations: `name` is kebab-case and matches the directory name; `description` is present. The policy keys `disable-model-invocation` / `user-invocable` are omitted, which defaults to model- AND user-invocable — the intended behavior.
+- DSH is in v0.1 developer preview; breaking changes are expected. Pin your `dsh` version.
+- DSH has no plugin marketplace for this repo — manual install only.
+- The session-start gate injection is provided natively by the `logicprobe-dsh` bundle (Option D). This plugin is the verification half of the embedded-workbench ecosystem: the embedded-workbench bundle's Plan Verification Gate routes plan approval through this skill.
+- No custom agents — this plugin is skill-only; nothing else to port.
+
+## Tool Mapping
+
+When the skill references Claude Code tools:
+
+| Skill text | DeepSeek Harness equivalent |
+|---|---|
+| `Skill("logicprobe")` | Skills are model-invocable by default; the model loads them through the skills catalog (`ctx.skills`) |
+| `Read` / `Write` / `Edit` / `Bash` | Native dsh tools (`ctx.tools` registry) |
+| `ExitPlanMode` / plan-mode gates | dsh-native: `@deepseek-ai/dsh-plan-mode` (`exit_plan_mode` tool); the embedded-workbench bundle's gate text routes plan verification to this skill |
+
+## Getting Help
+
+- Issues: [https://github.com/AmethystLuna/logicprobe/issues](https://github.com/AmethystLuna/logicprobe/issues)
+- Docs: [https://github.com/AmethystLuna/logicprobe](https://github.com/AmethystLuna/logicprobe)
