@@ -3,8 +3,9 @@
  * Injects the session-start gate text (claim-verification doctrine, 1% Rule,
  * Red Flags, proactive suggestion) into the first model step of every agent
  * session, mirroring the SessionStart hook the Claude Code plugin installs.
- * The skill itself is discovered by dsh's `skill-filesystem` provider and
- * needs no code.
+ * The skill ships in this package's `skills/` directory and is registered at
+ * apply time into dsh's `ctx.skills` registry through the standard filesystem
+ * provider, so it appears in every session catalog without a manual copy step.
  *
  * Injection listens on the official `agent/session-start` lifecycle event
  * (once before the first turn) and seeds the gate via `agent.inject`, so
@@ -22,6 +23,7 @@
 import type { Context } from '@deepseek-ai/cordis';
 import z from '@deepseek-ai/schemastery';
 export declare const name = "logicprobe";
+export declare const inject: string[];
 export interface Config {
     enabled: boolean;
     gateContent: string;

@@ -3,8 +3,9 @@
  * Injects the session-start gate text (claim-verification doctrine, 1% Rule,
  * Red Flags, proactive suggestion) into the first model step of every agent
  * session, mirroring the SessionStart hook the Claude Code plugin installs.
- * The skill itself is discovered by dsh's `skill-filesystem` provider and
- * needs no code.
+ * The skill ships in this package's `skills/` directory and is registered at
+ * apply time into dsh's `ctx.skills` registry through the standard filesystem
+ * provider, so it appears in every session catalog without a manual copy step.
  *
  * Injection listens on the official `agent/session-start` lifecycle event
  * (once before the first turn) and seeds the gate via `agent.inject`, so
@@ -20,13 +21,24 @@
  * @module logicprobe-dsh
  */
 
+import { fileURLToPath } from 'node:url'
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import type { UserMessage } from '@deepseek-ai/dsh-session'
 import type { HostCordisInspectProviderRegistration } from '@deepseek-ai/dsh-cordis-host-runner'
+import { FileSystemSkillProvider } from '@deepseek-ai/dsh-skill-filesystem'
 
 export const name = 'logicprobe'
+
+// Skills are contributed through the registry service, which dsh-base always
+// mounts before bundle rows such as this one apply.
+export const inject = ['skills']
+
+// Absolute path of the package's shipped skills directory. `lib/index.js`
+// lives one level below the package root, so `../skills` from the module URL
+// lands on `<package>/skills` regardless of where the package was installed.
+const SKILLS_DIR = fileURLToPath(new URL('../skills', import.meta.url))
 
 const GATE_PLUGIN_ID = 'logicprobe'
 
@@ -128,6 +140,20 @@ export function apply(ctx: Context, config: Config): void {
     }
   }
   registerProvider()
+  // Ship the bundled skill through the registry: reuse the standard
+  // filesystem provider over this package's own `skills/` directory, so
+  // catalog discovery, frontmatter parsing, and SKILL.md loading behave
+  // exactly like project/user skills while the plugin stays self-contained.
+  // Registration lands in the global registry layer (this row mounts at the
+  // profile root), so every agent preset sees the skill. `registerProvider`
+  // returns the effect disposer; its teardown unregisters and invalidates.
+  ctx.skills.registerProvider((control) => {
+    return new FileSystemSkillProvider(ctx, control, {
+      providerName: 'logicprobe',
+      includeDefaultRoots: false,
+      customSkillDirs: [SKILLS_DIR],
+    })
+  })
   if (!config.enabled) return
   // Inject the gate exactly once per session lifecycle — the dsh-native
   // counterpart of the Claude SessionStart matcher (startup|clear|compact).

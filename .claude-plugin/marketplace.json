@@ -8,7 +8,7 @@
     {
       "name": "logicprobe",
       "description": "Design document & plan claim verification — logic primitives + adversarial probing for behavioral claims.",
-      "version": "0.1.0",
+      "version": "0.2.0",
       "source": "./"
     }
   ]
