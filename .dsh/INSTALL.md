@@ -42,7 +42,7 @@ To change the gate text or disable injection, override the row by id in your pro
 ```yaml
 - insert:
     - id: logicprobe
-      name: 'logicprobe'
+      name: '@amethystluna/logicprobe'
       config:
         enabled: true
         gateContent: |

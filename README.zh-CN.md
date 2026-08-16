@@ -174,7 +174,7 @@ cp -r logicprobe/skills/* .zcode/skills/
 ```yaml
 - insert:
     - id: logicprobe
-      name: 'logicprobe'
+      name: '@amethystluna/logicprobe'
       config:
         enabled: true
         gateContent: |
