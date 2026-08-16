@@ -6,6 +6,6 @@
 
 - insert:
     - id: logicprobe
-      name: 'logicprobe'
+      name: '@amethystluna/logicprobe'
       config:
         enabled: true

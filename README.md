@@ -176,7 +176,7 @@ To change it, override the row by id in your profile's `cordis.patch.yml`:
 ```yaml
 - insert:
     - id: logicprobe
-      name: 'logicprobe'
+      name: '@amethystluna/logicprobe'
       config:
         enabled: true
         gateContent: |
