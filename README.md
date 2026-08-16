@@ -162,6 +162,67 @@ Skills are invoked with `$logicprobe`. See `.zcode/INSTALL.md` for details.
 - DeepSeek Harness (dsh): dev preview — verified on mainline 2026-08-14 (gate bundle loaded and injected in-session)
 - Python 3.6+ optional (only for the automated harness; manual fallback mode requires none)
 
+## Configuration
+
+In DeepSeek Harness, the bundle accepts a small configuration object:
+
+| Key | Type | Default | Description |
+|---|---|---|---|
+| `enabled` | boolean | `true` | Set to `false` to disable the session-start gate injection. |
+| `gateContent` | string | built-in gate text | Override the text injected into the first model step. |
+
+To change it, override the row by id in your profile's `cordis.patch.yml`:
+
+```yaml
+- insert:
+    - id: logicprobe
+      name: 'logicprobe'
+      config:
+        enabled: true
+        gateContent: |
+          ...
+```
+
+## Uninstall
+
+- If you installed through the DSH plugin manager, remove the `logicprobe` plugin from the target profile using the same manager you used to install it.
+- If you copied `skills/*` manually, delete the copied skill directories from `~/.agents/skills/` or the project `.dsh/skills/`.
+- If you added the bundle as a `cordis.patch.yml` row, remove the row with `id: logicprobe` from the profile patch and restart DSH.
+
+## Permissions & Data
+
+- The plugin runtime reads only the `skills/` directory shipped inside the package, in order to register skills through DSH's standard filesystem skill provider.
+- It injects the configured gate text into the first model step of a session.
+- It does not read credentials, open network connections, or access user data outside the DSH session context.
+- When the skill is actually used, the model may read project files as directed by the user, just like any other coding skill.
+
+## Troubleshooting
+
+- Skill not visible in DSH: confirm you are on a DSH version that supports `ctx.skills`/Agent Skills discovery, and restart the profile after install.
+- Gate not injected: check that `enabled` is not `false` and that the row id `logicprobe` is present in the active profile patch.
+- Plugin manager rejects installation: make sure `@deepseek-ai/*` packages are declared as `peerDependencies`, not regular `dependencies`.
+- After manual copy, DSH still doesn't see the skill: use the native bundle install (`dsh plugin add "github:AmethystLuna/logicprobe"`) instead of copying.
+
+## Development
+
+```bash
+npm install
+npm run typecheck
+npm run build
+```
+
+Trigger tests are under `tests/skill-triggering/`; run them with:
+
+```bash
+bash tests/skill-triggering/run-all.sh
+```
+
+## License & Security
+
+Licensed under MIT. See [LICENSE](LICENSE).
+
+To report a security vulnerability, do **not** open a public issue. Use the private Security Advisory path or the contact method in [SECURITY.md](SECURITY.md).
+
 ## Related Plugins
 
 | Plugin | Description |
