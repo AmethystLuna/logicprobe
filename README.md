@@ -70,9 +70,11 @@ Native dsh support ships as a cordis plugin bundle at the repository root (the r
 
 Install: see [`.dsh/INSTALL.md`](.dsh/INSTALL.md) (four options, from plain skill copy to `dsh plugin add`).
 
+> DSH install note: the package name is scoped as `@amethystluna/logicprobe`. In the web profile's `package.json`, both the dependency key and the `dsh.profile.bundles` entry must use the scoped name; the old unscoped name causes the dsh loader to fail with `ERR_MODULE_NOT_FOUND`.
+
 ## Usage
 
-The plugin auto-injects a capability notification at session start. The skill activates when its `Use when` description matches your task:
+The plugin auto-injects a capability notification into the first model step. The skill activates when its `Use when` description matches your task:
 
 - **Design doc / plan review** — "Review this design document" → claim enumeration and codebase verification
 - **Behavioral questions** — "could this state machine deadlock", "is this retry limit safe", "check this timing for bugs" → the skill is proactively suggested (not auto-loaded) as an optional verification pass

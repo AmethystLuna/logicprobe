@@ -68,9 +68,11 @@ git clone https://github.com/AmethystLuna/logicprobe.git ~/.claude/plugins/dev/l
 
 安装：参见 [`.dsh/INSTALL.md`](.dsh/INSTALL.md)（四种方式，从纯技能拷贝到 `dsh plugin add`）。
 
+> DSH 安装注意：包名已使用 scoped 形式 `@amethystluna/logicprobe`。在 web profile 的 `package.json` 中，依赖键与 `dsh.profile.bundles` 必须写 `@amethystluna/logicprobe`；否则 dsh 加载器会因找不到 `node_modules/@amethystluna/logicprobe` 而启动失败。
+
 ## 使用
 
-插件在会话启动时自动注入能力通知。技能在任务匹配其 `Use when` 描述时激活：
+插件在会话首个模型步骤自动注入能力通知。技能在任务匹配其 `Use when` 描述时激活：
 
 - **设计文档 / 计划审查** — "Review this design document" → 声称枚举与代码库核查
 - **行为类问题** — "could this state machine deadlock"、"is this retry limit safe"、"check this timing for bugs" → 主动建议（不自动加载）作为可选验证
@@ -166,7 +168,7 @@ cp -r logicprobe/skills/* .zcode/skills/
 
 | 键 | 类型 | 默认值 | 说明 |
 |---|---|---|---|
-| `enabled` | boolean | `true` | 设为 `false` 可关闭会话开始时的 gate 注入。 |
+| `enabled` | boolean | `true` | 设为 `false` 可关闭首步 Gate 注入。 |
 | `gateContent` | string | 内置 gate 文本 | 覆盖注入到首轮模型上下文中的文本。 |
 
 在 profile 的 `cordis.patch.yml` 中按 row id 覆盖：
