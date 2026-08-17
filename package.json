@@ -1,6 +1,6 @@
 {
     "name":  "@amethystluna/logicprobe",
-    "version": "0.2.0",
+    "version": "0.2.1",
     "description":  "Design document & plan claim verification — enumerate claims, verify against codebase facts, then escalate to logic-primitive verification (7 structural checks + 7 adversarial probes) for behavioral claims. Before/after model comparison for refactoring regression detection. Ships a native DeepSeek Harness (dsh) bundle that injects the claim-verification gate into the first model step.",
     "type":  "module",
     "main":  "lib/index.js",
