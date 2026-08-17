@@ -4,6 +4,10 @@ on:
   push:
     paths:
       - 'src/**'
+      - 'tests/**'
+      - 'skills/**'
+      - 'CLAUDE.md'
+      - '.markdownlint.json'
       - 'lib/**'
       - '.dsh/**'
       - 'cordis.patch.yml'
@@ -16,6 +20,10 @@ on:
   pull_request:
     paths:
       - 'src/**'
+      - 'skills/**'
+      - 'tests/**'
+      - 'CLAUDE.md'
+      - '.markdownlint.json'
       - 'lib/**'
       - '.dsh/**'
       - 'cordis.patch.yml'
@@ -41,6 +49,8 @@ jobs:
         run: npm run typecheck
       - name: Build
         run: npm run build
+      - name: Engine regression fixtures
+        run: node tests/engine/run.mjs && node tests/apply-smoke.mjs
       - name: Committed build artifact is current
         run: git diff --exit-code -- lib
 
@@ -49,4 +59,4 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Lint dsh docs
-        run: npx --yes markdownlint-cli@0.42.0 ".dsh/**/*.md" "README.md" "README.zh-CN.md" "RELEASE.md"
+        run: npx --yes markdownlint-cli@0.42.0 --ignore "**/node_modules/**" .

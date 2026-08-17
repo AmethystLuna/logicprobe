@@ -1,0 +1,42 @@
+{
+  "schemaVersion": 1,
+  "init": "INIT",
+  "states": [
+    {
+      "id": "INIT"
+    },
+    {
+      "id": "IDLE"
+    },
+    {
+      "id": "DONE",
+      "terminal": true
+    },
+    {
+      "id": "ERROR",
+      "terminal": true
+    }
+  ],
+  "transitions": [
+    {
+      "from": "INIT",
+      "event": "ready",
+      "to": "IDLE"
+    },
+    {
+      "from": "INIT",
+      "event": "fail",
+      "to": "ERROR"
+    },
+    {
+      "from": "IDLE",
+      "event": "done",
+      "to": "DONE"
+    },
+    {
+      "from": "IDLE",
+      "event": "fail",
+      "to": "ERROR"
+    }
+  ]
+}

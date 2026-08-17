@@ -13,7 +13,7 @@ This plugin's claim-verification methodology (claim enumeration, logic primitive
 - Skill content must remain **domain-neutral** — this plugin is not embedded-specific. Do not hardcode project-specific details (file paths, version numbers, product names).
 - Chinese content should have English equivalents and vice versa (README, session-start content).
 - The verification harness (`references/verification-harness.py`) must remain generic — it is a template filled in per model, never hardcoded to one project.
-- Model extraction must always require user confirmation before running the harness (the #1 failure mode of verification).
+- Model extraction must require user confirmation before running the harness (the #1 failure mode of verification) — except when the runtime reports `logicprobe interaction=auto`; in auto mode require evidence-cited extraction plus round-trip validation and an `UNCONFIRMED` label.
 
 ## Before Submitting
 

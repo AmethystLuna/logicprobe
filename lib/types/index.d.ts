@@ -28,15 +28,19 @@ import type { Context } from '@deepseek-ai/cordis';
 import z from '@deepseek-ai/schemastery';
 export declare const name = "logicprobe";
 export declare const inject: string[];
+export type InteractionMode = 'ask' | 'auto' | 'follow-approval';
 export interface Config {
     enabled: boolean;
     gateContent: string;
+    interaction: InteractionMode;
 }
 export declare const Config: z<Schemastery.ObjectS<{
     enabled: z<boolean, boolean>;
     gateContent: z<string, string>;
+    interaction: z<"ask" | "auto" | "follow-approval", "ask" | "auto" | "follow-approval">;
 }>, Schemastery.ObjectT<{
     enabled: z<boolean, boolean>;
     gateContent: z<string, string>;
+    interaction: z<"ask" | "auto" | "follow-approval", "ask" | "auto" | "follow-approval">;
 }>>;
 export declare function apply(ctx: Context, config: Config): void;

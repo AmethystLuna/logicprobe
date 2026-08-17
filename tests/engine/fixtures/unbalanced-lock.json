@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "init": "INIT",
+  "states": [
+    {
+      "id": "INIT"
+    },
+    {
+      "id": "LOCKED",
+      "terminal": true
+    }
+  ],
+  "transitions": [
+    {
+      "from": "INIT",
+      "event": "do_lock",
+      "to": "LOCKED"
+    },
+    {
+      "from": "LOCKED",
+      "event": "keep_working",
+      "to": "LOCKED"
+    }
+  ],
+  "resourcePairs": [
+    {
+      "resource": "lock",
+      "acquireEvent": "do_lock",
+      "releaseEvent": "do_unlock"
+    }
+  ]
+}

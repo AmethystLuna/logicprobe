@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "init": "INIT",
+  "states": [
+    {
+      "id": "INIT"
+    },
+    {
+      "id": "A",
+      "terminal": true
+    }
+  ],
+  "transitions": [
+    {
+      "from": "INIT",
+      "event": "go",
+      "to": "A"
+    }
+  ],
+  "invariants": [
+    {
+      "id": "not-init",
+      "description": "INIT must not be reachable",
+      "kind": "never-states",
+      "states": [
+        "INIT"
+      ]
+    }
+  ]
+}

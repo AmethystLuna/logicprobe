@@ -31,7 +31,10 @@ import z from '@deepseek-ai/schemastery'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import type { Session, UserMessage } from '@deepseek-ai/dsh-session'
 import type { HostCordisInspectProviderRegistration } from '@deepseek-ai/dsh-cordis-host-runner'
+import type { AssembleContext, PromptContext } from '@deepseek-ai/dsh-system-prompt'
 import { FileSystemSkillProvider } from '@deepseek-ai/dsh-skill-filesystem'
+import { logicProbeVerifyTool } from './tool.js'
+import { ENGINE_SCHEMA_VERSION } from './engine.js'
 
 export const name = 'logicprobe'
 
@@ -45,6 +48,8 @@ export const inject = ['skills']
 const SKILLS_DIR = fileURLToPath(new URL('../skills', import.meta.url))
 
 const GATE_PLUGIN_ID = 'logicprobe'
+
+export type InteractionMode = 'ask' | 'auto' | 'follow-approval'
 
 const DEFAULT_GATE_CONTENT = `<EXTREMELY_IMPORTANT>
 Plugin logicprobe is active. Documents are not truth — code is. Verify every verifiable claim before accepting or acting on any design.
@@ -60,17 +65,21 @@ Plugin logicprobe is active. Documents are not truth — code is. Verify every v
 | "I'll verify while implementing" | Verification happens before implementation, not during. |
 | "I can check this with reasoning alone" | Behavioral claims are verified with code/models, not intuition. One counter-example refutes a universal claim. |
 
+**Native verification path**: In dsh, prefer the \`logicprobe_verify\` tool for executable state-machine checks. The skill's Python harness remains the fallback for non-dsh hosts.
+
 **Proactive suggestion**: When a user asks code-level behavioral questions — "could this state machine deadlock", "is this retry limit safe", "check this timing sequence for bugs" — suggest logicprobe as an optional verification pass (do not auto-escalate).
 </EXTREMELY_IMPORTANT>`
 
 export interface Config {
   enabled: boolean
   gateContent: string
+  interaction: InteractionMode
 }
 
 export const Config = z.object({
   enabled: z.boolean().default(true),
   gateContent: z.string().default(DEFAULT_GATE_CONTENT),
+  interaction: z.union(['ask', 'auto', 'follow-approval']).default('follow-approval'),
 })
 
 function gateMessage(text: string): UserMessage {
@@ -81,20 +90,72 @@ function gateMessage(text: string): UserMessage {
   })
 }
 
+interface SessionEventLike {
+  type: string
+  data?: Record<string, unknown>
+}
+
+function lastApprovalPolicy(session: Session): 'ask' | 'never' | undefined {
+  const events = session.events as readonly SessionEventLike[]
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const event = events[index]
+    if (event.type === 'approval/policy') {
+      return event.data?.policy === 'never' ? 'never' : 'ask'
+    }
+  }
+  return undefined
+}
+
+function planModeActive(session: Session): boolean {
+  const events = session.events as readonly SessionEventLike[]
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const event = events[index]
+    if (event.type === 'plan/mode') return event.data?.active === true
+  }
+  return false
+}
+
+function resolveInteraction(config: Config, session: Session): 'ask' | 'auto' {
+  if (config.interaction === 'ask' || config.interaction === 'auto') return config.interaction
+  return lastApprovalPolicy(session) === 'never' ? 'auto' : 'ask'
+}
+
+function modeContextText(config: Config, session: Session): string {
+  const interaction = resolveInteraction(config, session)
+  const lines = [
+    'logicprobe: use the `logicprobe_verify` tool for executable state-machine verification.',
+    interaction === 'auto'
+      ? 'logicprobe interaction=auto: do NOT call ask_user_question for model confirmation; run round-trip validation of the extracted transition table and mark the result UNCONFIRMED.'
+      : 'logicprobe interaction=ask: show the extracted transition table and get user confirmation before running verification.',
+  ]
+  if (planModeActive(session)) {
+    lines.push('Plan mode active: before exit_plan_mode, run logicprobe Phase 0 and append the "## Plan Verification" block to the plan file.')
+  }
+  return lines.join(' ')
+}
+
+interface ToolRegistryLike {
+  register(definition: unknown): () => void
+}
+
+interface SystemPromptLike {
+  context(contribution: PromptContext): () => void
+}
+
 /**
  * Model-visible catalog entry (cordis_inspect_list / cordis_inspect_query):
  * lets the model read this plugin's runtime status without guessing. Mirrors
  * the registration pattern of the official dsh-tool-cordis host providers.
  */
-function inspectProvider(config: Config): HostCordisInspectProviderRegistration {
+function inspectProvider(config: Config, isToolRegistered: () => boolean): HostCordisInspectProviderRegistration {
   return {
     manifest: {
       id: 'logicprobe',
-      description: 'Session-start gate injection for the Logic Probe toolbox — folds the claim-verification doctrine (1% Rule / Red Flags / proactive suggestion) into the first model step of every agent session.',
+      description: 'Session-start gate injection and native verification tooling for the Logic Probe toolbox — folds the claim-verification doctrine (1% Rule / Red Flags / proactive suggestion) into the first model step of every agent session and registers the logicprobe_verify tool.',
       methods: [
         {
           name: 'status',
-          description: 'Read whether the gate injection is active and how large the injected gate text is.',
+          description: 'Read gate injection status, interaction mode, tool registration state, and engine schema version.',
           inputSchema: {
             type: 'object',
             properties: {},
@@ -106,8 +167,11 @@ function inspectProvider(config: Config): HostCordisInspectProviderRegistration 
             properties: {
               enabled: { type: 'boolean', description: 'Whether the gate folds into the first model step.' },
               gateContentLength: { type: 'integer', description: 'Length in characters of the injected gate text.' },
+              interaction: { type: 'string', enum: ['ask', 'auto', 'follow-approval'], description: 'Configured interaction mode. follow-approval resolves per session from approval/policy.' },
+              toolRegistered: { type: 'boolean', description: 'Whether the logicprobe_verify tool is registered on ctx.tools.' },
+              engineSchemaVersion: { type: 'integer', description: 'Model schema version the bundled verification engine accepts.' },
             },
-            required: ['enabled', 'gateContentLength'],
+            required: ['enabled', 'gateContentLength', 'interaction', 'toolRegistered', 'engineSchemaVersion'],
             additionalProperties: false,
           },
         },
@@ -118,6 +182,9 @@ function inspectProvider(config: Config): HostCordisInspectProviderRegistration 
         return {
           enabled: config.enabled,
           gateContentLength: config.gateContent.length,
+          interaction: config.interaction,
+          toolRegistered: isToolRegistered(),
+          engineSchemaVersion: ENGINE_SCHEMA_VERSION,
         }
       }
       return null
@@ -126,24 +193,59 @@ function inspectProvider(config: Config): HostCordisInspectProviderRegistration 
 }
 
 export function apply(ctx: Context, config: Config): void {
-  // Catalog visibility is optional: register only when the inspect registry
-  // service is mounted, so headless assemblies without it keep the gate
-  // injection working. The registry may be provided AFTER this row applies
-  // (base-bundle rows can mount later), so registration is retried on the
-  // first agent/session-start — by then the app is fully booted.
+  // Optional services are registered opportunistically; base-bundle rows can
+  // mount after this row applies, so registration is retried on the first
+  // agent/pre-step — by then the app is fully booted.
   let providerRegistered = false
+  let toolRegistered = false
+  let modeContextRegistered = false
   const registerProvider = (): void => {
     if (providerRegistered) return
     const inspect = ctx.get('cordisInspect')
     if (inspect === undefined) return
     try {
-      ctx.effect(() => inspect.register(inspectProvider(config)), 'logicprobe: inspect provider')
+      ctx.effect(() => inspect.register(inspectProvider(config, () => toolRegistered)), 'logicprobe: inspect provider')
       providerRegistered = true
     } catch (err) {
       console.warn('[logicprobe] inspect provider registration failed', err)
     }
   }
-  registerProvider()
+  const registerTool = (): void => {
+    if (toolRegistered) return
+    const tools = ctx.get('tools') as ToolRegistryLike | undefined
+    if (tools === undefined) return
+    try {
+      ctx.effect(() => tools.register(logicProbeVerifyTool), 'logicprobe: verify tool')
+      toolRegistered = true
+    } catch (err) {
+      console.warn('[logicprobe] logicprobe_verify tool registration failed', err)
+    }
+  }
+  const registerModeContext = (): void => {
+    if (modeContextRegistered) return
+    const systemPrompt = ctx.get('systemPrompt') as SystemPromptLike | undefined
+    if (systemPrompt === undefined) return
+    try {
+      ctx.effect(() => systemPrompt.context({
+        name: 'logicprobe:mode',
+        order: 118,
+        text: (context: AssembleContext) => {
+          const agent = (context as AssembleContext & { agent?: { session: Session } }).agent
+          if (agent === undefined) return ''
+          return modeContextText(config, agent.session)
+        },
+      }), 'logicprobe: system prompt context')
+      modeContextRegistered = true
+    } catch (err) {
+      console.warn('[logicprobe] system prompt context registration failed', err)
+    }
+  }
+  const registerIntegrations = (): void => {
+    registerProvider()
+    registerTool()
+    registerModeContext()
+  }
+  registerIntegrations()
   // Ship the bundled skill through the registry: reuse the standard
   // filesystem provider over this package's own `skills/` directory, so
   // catalog discovery, frontmatter parsing, and SKILL.md loading behave
@@ -173,7 +275,7 @@ export function apply(ctx: Context, config: Config): void {
   ctx.on('agent/pre-step', async ({ agent }, next) => {
     const decision = await next()
     if (decision.kind === 'reject') return decision
-    registerProvider()
+    registerIntegrations()
     if (gateInHistory(agent.session)) return decision
     return {
       kind: 'enter',
