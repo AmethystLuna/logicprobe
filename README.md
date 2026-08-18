@@ -1,32 +1,29 @@
-[中文](README.zh-CN.md)
+# 逻辑探针 (Logic Probe)
 
----
+<p align="center"><a href="README.en-US.md">English</a> · <strong>中文</strong></p>
 
-# Logic Probe
 
-[![HOL Guard Scanner](https://img.shields.io/badge/HOL%20Guard-passing-00a67e)](https://github.com/hashgraph-online/hol-guard)
+文档不是事实——代码才是。一个声称核查技能：逐条核验设计文档、架构规格、重构计划中每一个可验证的声称与代码库实际是否一致；遇到行为类声称时升级为可执行模型验证。v0.3.0。
 
-Design documents are not truth — code is. A claim-verification skill that checks every verifiable claim in design docs, architecture specs, and refactoring plans against the actual codebase — and escalates to executable-model verification for behavioral claims. v0.3.0.
+**跨平台** — 支持 Claude Code、Codex CLI、Cursor、Kimi CLI、OpenCode、ZCode。基于 [Agent Skills](https://agentskills.io) 开放标准构建。
 
-**Cross-platform** — works with Claude Code, Codex CLI, Cursor, Kimi CLI, OpenCode, and ZCode. Built on the [Agent Skills](https://agentskills.io) open standard.
+## 功能
 
-## What It Does
+| 阶段 | 内容 |
+|------|------|
+| Phase 1-2 | 枚举每个可验证声称（API 名、文件路径、枚举值、数量、机制可行性）→ 逐条对照代码库给出证据 |
+| Phase 2a | 对提取的状态机模型执行 **7 项结构检查**：可达性、死锁、活性、确定性、事件/守卫完备性、不变量有效性 |
+| Phase 2b | **7 种对抗探针**：意外事件、竞态交错、顺序置换、配对对称（lock/unlock）、边界轰炸、资源注入、最小反例 |
+| 重构模式 | 前后模型对比——行为保持、不变量连续性、死锁回归、复杂度声称 |
+| 输出 | 结构化发现：精确 file:line 证据、严重性分级、修正方向——绝不在核查中直接改代码 |
 
-| Phase | What |
-|-------|------|
-| Phase 1-2 | Enumerate every verifiable claim (API names, file paths, enum values, counts, mechanism feasibility) → verify each against the codebase with evidence |
-| Phase 2a | **7 structural checks** on extracted state-machine models: reachability, deadlock, liveness, determinism, event/guard completeness, invariant validity |
-| Phase 2b | **7 adversarial probes**: unexpected events, race interleaving, order permutation, pair symmetry (lock/unlock), boundary blast, resource injection, minimal counter-example |
-| Refactoring | Before/after model comparison — behavioral preservation, invariant continuity, deadlock regression, complexity claims |
-| Output | Structured findings with exact file:line evidence, severity classification, correction direction — never inline fixes |
+模型永远先以转换表形式展示并**经用户确认后才运行**——模型提取错误是验证的头号失败模式。
 
-The model is always shown as a transition table and **confirmed with the user before running** — extraction errors are the dominant failure mode.
+## 安装
 
-## Installation
+### Marketplace 安装（推荐）
 
-### Marketplace install (recommended)
-
-Add the marketplace to `~/.claude/settings.json`:
+在 `~/.claude/settings.json` 中添加 marketplace：
 
 ```json
 {
@@ -38,19 +35,19 @@ Add the marketplace to `~/.claude/settings.json`:
 }
 ```
 
-Then install from CLI:
+然后通过 CLI 安装：
 
 ```bash
 claude plugin install logicprobe@logicprobe
 ```
 
-### Manual install
+### 手动安装
 
 ```bash
 git clone https://github.com/AmethystLuna/logicprobe.git ~/.claude/plugins/dev/logicprobe
 ```
 
-Then enable in `~/.claude/settings.json`:
+然后在 `~/.claude/settings.json` 中启用：
 
 ```json
 {
@@ -62,82 +59,82 @@ Then enable in `~/.claude/settings.json`:
 
 ## DeepSeek Harness (dsh)
 
-Native dsh support ships as a cordis plugin bundle at the repository root (the root `package.json` declares `dsh.bundle`):
+原生 dsh 支持以 cordis 插件 bundle 的形式提供，位于**仓库根**（根 `package.json` 声明了 `dsh.bundle`）：
 
-- The skill is discovered as-is by dsh's `skill-filesystem` provider (Agent Skills open standard) — zero code.
-- The bundle injects the claim-verification gate (1% Rule / Red Flags / proactive suggestion) into the first model step of every agent session — the dsh-native counterpart of the Claude `SessionStart` hook. It also registers a model-visible catalog entry (`cordis_inspect`), a native `logicprobe_verify` tool (`ctx.tools`), and a policy-aware `logicprobe:mode` context (`ctx.systemPrompt`).
-- Together with the embedded-workbench bundle's Plan Verification Gate, this closes the claim-verification loop in dsh.
+- 技能遵循 Agent Skills 开放标准，被 dsh 的 `skill-filesystem` provider 原样发现——零代码。
+- bundle 将 claim 验证门禁（1% Rule / Red Flags / 主动建议）注入每个 agent 会话的第一个模型步骤——是 Claude `SessionStart` hook 在 dsh 的原生对应物，并注册模型可见目录条目（`cordis_inspect`）、原生工具 `logicprobe_verify`（`ctx.tools`）以及策略感知上下文 `logicprobe:mode`（`ctx.systemPrompt`）。
+- 与 embedded-workbench bundle 的 Plan Verification Gate 配合，在 dsh 中闭环了 claim 验证链路。
 
-Install: see [`.dsh/INSTALL.md`](.dsh/INSTALL.md) (four options, from plain skill copy to `dsh plugin add`).
+安装：参见 [`.dsh/INSTALL.md`](.dsh/INSTALL.md)（四种方式，从纯技能拷贝到 `dsh plugin add`）。
 
-> DSH install note: the package name is scoped as `@amethystluna/logicprobe`. In the web profile's `package.json`, both the dependency key and the `dsh.profile.bundles` entry must use the scoped name; the old unscoped name causes the dsh loader to fail with `ERR_MODULE_NOT_FOUND`.
+> DSH 安装注意：包名已使用 scoped 形式 `@amethystluna/logicprobe`。在 web profile 的 `package.json` 中，依赖键与 `dsh.profile.bundles` 必须写 `@amethystluna/logicprobe`；否则 dsh 加载器会因找不到 `node_modules/@amethystluna/logicprobe` 而启动失败。
 
-## Usage
+## 使用
 
-The plugin auto-injects a capability notification into the first model step. The skill activates when its `Use when` description matches your task:
+插件在会话首个模型步骤自动注入能力通知。技能在任务匹配其 `Use when` 描述时激活：
 
-- **Design doc / plan review** — "Review this design document" → claim enumeration and codebase verification
-- **Behavioral questions** — "could this state machine deadlock", "is this retry limit safe", "check this timing for bugs" → the skill is proactively suggested (not auto-loaded) as an optional verification pass
-- **Refactoring plans** — the pipeline compares before/after models to flag undocumented behavioral changes
+- **设计文档 / 计划审查** — "Review this design document" → 声称枚举与代码库核查
+- **行为类问题** — "could this state machine deadlock"、"is this retry limit safe"、"check this timing for bugs" → 主动建议（不自动加载）作为可选验证
+- **重构计划** — 管线对比前后模型，标记计划未声明的行为变化
 
-The skill auto-classifies depth (LIGHTWEIGHT / STANDARD / ESCALATED) from plan features in Phase 0, and appends a `## Plan Verification` summary block as the audit trail.
+技能在 Phase 0 依据计划特征自动分级（LIGHTWEIGHT / STANDARD / ESCALATED），并在计划文件追加 `## Plan Verification` 摘要块作为审计痕迹。
 
-In DSH, prefer the native `logicprobe_verify` tool (see `skills/logicprobe/references/dsh-model-schema.md`). Python remains optional for non-DSH hosts: when available, the reusable harness at `references/verification-harness.py` runs the checks; when not (air-gapped machines), the guide at `references/logic-verification-guide.md` provides a manual verification mode.
+Python 可选：可用时使用 `references/verification-harness.py` 自动执行检查；不可用（如离线开发机）时，`references/logic-verification-guide.md` 提供手动验证模式。
 
 ## Codex CLI
 
-This plugin also supports OpenAI Codex CLI. Skills follow the Agent Skills standard and work identically across both platforms.
+本插件同样支持 OpenAI Codex CLI。技能遵循 Agent Skills 标准，两个平台行为一致。
 
-### Codex install
+### Codex 安装
 
 ```bash
-# Add as a marketplace
+# 添加 marketplace
 codex plugin marketplace add AmethystLuna/logicprobe
 
-# Install
+# 安装
 codex plugin install logicprobe
 ```
 
-Or manually:
+或手动：
 
 ```bash
 git clone https://github.com/AmethystLuna/logicprobe.git ~/.codex/plugins/logicprobe
 ```
 
-Skills are invoked with `$logicprobe` or auto-selected by Codex based on task context.
+技能通过 `$logicprobe` 调用，或由 Codex 根据任务上下文自动选择。
 
 ## Cursor
 
-Cursor 2.5+ has built-in plugin support.
+Cursor 2.5+ 内置插件支持。
 
-### Cursor install
+### Cursor 安装
 
 ```bash
-# Clone to Cursor plugins directory
+# 克隆到 Cursor 插件目录
 git clone https://github.com/AmethystLuna/logicprobe.git ~/.cursor/plugins/logicprobe
 ```
 
-Or install from the Cursor plugin marketplace UI: `/add-plugin AmethystLuna/logicprobe`
+或通过 Cursor 插件市场 UI 安装：`/add-plugin AmethystLuna/logicprobe`
 
 ## Kimi CLI
 
-Kimi CLI discovers skills from `.claude/skills/` paths automatically. The `.kimi-plugin/plugin.json` manifest registers the plugin for Kimi's plugin manager.
+Kimi CLI 自动从 `.claude/skills/` 路径发现技能。`.kimi-plugin/plugin.json` 清单向 Kimi 插件管理器注册本插件。
 
-### Kimi install
+### Kimi 安装
 
 ```bash
-# Via Kimi plugin manager
+# 通过 Kimi 插件管理器
 /plugins install https://github.com/AmethystLuna/logicprobe.git
 
-# Or clone manually
+# 或手动克隆
 git clone https://github.com/AmethystLuna/logicprobe.git ~/.kimi/plugins/logicprobe
 ```
 
-Skills are invoked with `/skill:logicprobe`.
+技能通过 `/skill:logicprobe` 调用。
 
 ## OpenCode
 
-Skills are auto-discovered from `.claude/skills/` and `.codex/skills/` paths. Add to your `opencode.json`:
+技能自动从 `.claude/skills/` 和 `.codex/skills/` 路径发现。在 `opencode.json` 中添加：
 
 ```json
 {
@@ -145,36 +142,36 @@ Skills are auto-discovered from `.claude/skills/` and `.codex/skills/` paths. Ad
 }
 ```
 
-Or install via `skop` which consumes the Claude marketplace manifest. See `.opencode/INSTALL.md` for detailed instructions.
+或通过 `skop` 安装（消费 Claude marketplace 清单）。详见 `.opencode/INSTALL.md`。
 
 ## ZCode (Z.AI)
 
-ZCode 3.0+ follows the Agent Skills standard. No plugin marketplace — manually copy skills to `.zcode/skills/`:
+ZCode 3.0+ 遵循 Agent Skills 标准。无插件市场——手动复制技能到 `.zcode/skills/`：
 
 ```bash
 git clone https://github.com/AmethystLuna/logicprobe.git
 cp -r logicprobe/skills/* .zcode/skills/
 ```
 
-Skills are invoked with `$logicprobe`. See `.zcode/INSTALL.md` for details.
+技能通过 `$logicprobe` 调用。详见 `.zcode/INSTALL.md`。
 
-## Requirements
+## 环境要求
 
-- Claude Code v2.1+ / Codex CLI latest / Cursor 2.5+ / Kimi CLI latest / OpenCode latest / ZCode 3.0+
-- DeepSeek Harness (dsh): dev preview — verified on mainline 2026-08-14 (gate bundle loaded and injected in-session)
-- Python 3.6+ optional (only for the automated harness; manual fallback mode requires none)
+- Claude Code v2.1+ / Codex CLI 最新 / Cursor 2.5+ / Kimi CLI 最新 / OpenCode 最新 / ZCode 3.0+
+- DeepSeek Harness (dsh): dev preview — 已实测 mainline 2026-08-14（gate bundle 加载并注入会话成功）
+- Python 3.6+ 可选（仅自动验证工具需要；手动兜底模式无需任何依赖）
 
-## Configuration
+## 配置
 
-In DeepSeek Harness, the bundle registers the `logicprobe_verify` tool (through `ctx.tools`) and a policy-aware `logicprobe:mode` context (through `ctx.systemPrompt`). The bundle accepts a small configuration object:
+在 DeepSeek Harness 中，bundle 支持以下配置：
 
-| Key | Type | Default | Description |
+| 键 | 类型 | 默认值 | 说明 |
 |---|---|---|---|
-| `enabled` | boolean | `true` | Set to `false` to disable the session-start gate injection. |
-| `gateContent` | string | built-in gate text | Override the text injected into the first model step. |
-| `interaction` | `ask` \| `auto` \| `follow-approval` | `follow-approval` | Model-confirmation policy. `follow-approval` resolves to `auto` when the session approval policy is `never`. |
+| `enabled` | boolean | `true` | 设为 `false` 可关闭首步 Gate 注入。 |
+| `gateContent` | string | 内置 gate 文本 | 覆盖注入到首轮模型上下文中的文本。 |
+| `interaction` | `ask` \| `auto` \| `follow-approval` | `follow-approval` | 模型确认策略；`follow-approval` 在会话 approval policy 为 `never` 时解析为 `auto`。 |
 
-To change it, override the row by id in your profile's `cordis.patch.yml`:
+在 profile 的 `cordis.patch.yml` 中按 row id 覆盖：
 
 ```yaml
 - insert:
@@ -187,28 +184,27 @@ To change it, override the row by id in your profile's `cordis.patch.yml`:
           ...
 ```
 
-## Uninstall
+## 卸载
 
-- If you installed through the DSH plugin manager, remove the `logicprobe` plugin from the target profile using the same manager you used to install it.
-- If you copied `skills/*` manually, delete the copied skill directories from `~/.agents/skills/` or the project `.dsh/skills/`.
-- If you added the bundle as a `cordis.patch.yml` row, remove the row with `id: logicprobe` from the profile patch and restart DSH.
+- 如果通过 DSH 插件管理器安装，请使用同一管理器从目标 profile 中移除 `logicprobe`。
+- 如果手动复制过 `skills/*`，请删除复制到 `~/.agents/skills/` 或项目 `.dsh/skills/` 下的对应目录。
+- 如果通过 `cordis.patch.yml` 添加，请删除 profile patch 中 `id: logicprobe` 对应的行，并重启 DSH。
 
-## Permissions & Data
+## 权限与数据
 
-- The plugin runtime reads only the `skills/` directory shipped inside the package, in order to register skills through DSH's standard filesystem skill provider.
-- It injects the configured gate text into the first model step of a session.
-- It does not read credentials, open network connections, or access user data outside the DSH session context.
-- When the skill is actually used, the model may read project files as directed by the user, just like any other coding skill.
+- 插件运行时只读取包内自带的 `skills/` 目录，用于通过 DSH 标准 filesystem skill provider 注册技能。
+- 它会在会话首轮向模型上下文注入配置好的 gate 文本。
+- 它不读取凭据、不发起网络连接，也不会访问 DSH 会话上下文之外的用户数据。
+- 实际使用技能时，模型会像使用其他编码技能一样，按用户指示读取项目文件。
 
-## Troubleshooting
+## 故障排查
 
-- Skill not visible in DSH: confirm you are on a DSH version that supports `ctx.skills`/Agent Skills discovery, and restart the profile after install.
-- Gate not injected: check that `enabled` is not `false` and that the row id `logicprobe` is present in the active profile patch.
-- `logicprobe_verify` not visible: check `cordis_inspect_query` status for `toolRegistered: true`, and confirm the DSH profile resolved the `@deepseek-ai/dsh-tools` peer dependency.
-- Plugin manager rejects installation: make sure `@deepseek-ai/*` packages are declared as `peerDependencies`, not regular `dependencies`.
-- After manual copy, DSH still doesn't see the skill: use the native bundle install (`dsh plugin add "github:AmethystLuna/logicprobe"`) instead of copying.
+- 技能在 DSH 中不可见：确认 DSH 版本支持 `ctx.skills` / Agent Skills 发现，并在安装后重启 profile。
+- Gate 未注入：检查 `enabled` 是否为 `false`，以及 profile patch 中是否存在 `id: logicprobe` 的行。
+- 插件管理器拒绝安装：确认 `@deepseek-ai/*` 包声明在 `peerDependencies` 中，而不是 `dependencies`。
+- 手动复制后 DSH 仍看不到技能：改用原生 bundle 安装（`dsh plugin add "github:AmethystLuna/logicprobe"`）。
 
-## Development
+## 开发
 
 ```bash
 npm install
@@ -216,24 +212,24 @@ npm run typecheck
 npm run build
 ```
 
-Trigger tests are under `tests/skill-triggering/`; run them with:
+触发测试位于 `tests/skill-triggering/`：
 
 ```bash
 bash tests/skill-triggering/run-all.sh
 ```
 
-## License & Security
+## 许可证与安全
 
-Licensed under MIT. See [LICENSE](LICENSE).
+本项目使用 MIT 许可证，见 [LICENSE](LICENSE)。
 
-To report a security vulnerability, do **not** open a public issue. Use the private Security Advisory path or the contact method in [SECURITY.md](SECURITY.md).
+如发现安全漏洞，请**不要**公开创建 issue，应使用 GitHub Security Advisory 或 [SECURITY.md](SECURITY.md) 中的联系方式私下报告。
 
-## Related Plugins
+## 关联插件
 
-| Plugin | Description |
-|--------|-------------|
-| [embedded-workbench](https://github.com/AmethystLuna/embedded-workbench) | Embedded C/C++ toolbox whose Plan Verification Gate uses this skill. This plugin was split out of embedded-workbench v0.6.0. |
+| 插件 | 说明 |
+|------|------|
+| [embedded-workbench](https://github.com/AmethystLuna/embedded-workbench) | 嵌入式 C/C++ 工具箱，其 Plan Verification Gate 依赖本技能。本插件自 embedded-workbench v0.6.0 拆分而来。 |
 
-## Acknowledgments
+## 致谢
 
-The claim-verification methodology (logic primitives, adversarial probing, refactoring before/after comparison) and the trigger test framework (`tests/skill-triggering/`) follow the conventions of [Superpowers](https://github.com/obra/superpowers) by Jesse Vincent (MIT License), as adapted in the [embedded-workbench](https://github.com/AmethystLuna/embedded-workbench) plugin.
+声称核查方法论（逻辑原语、对抗探测、重构前后对比）与触发测试框架（`tests/skill-triggering/`）遵循 [Superpowers](https://github.com/obra/superpowers)（Jesse Vincent，MIT License）的约定，经 [embedded-workbench](https://github.com/AmethystLuna/embedded-workbench) 插件改编而来。

@@ -15,7 +15,7 @@ on:
       - 'package-lock.json'
       - 'tsconfig.json'
       - 'README.md'
-      - 'README.zh-CN.md'
+      - 'README.en-US.md'
       - '.github/workflows/dsh-bundle.yml'
   pull_request:
     paths:
@@ -31,7 +31,7 @@ on:
       - 'package-lock.json'
       - 'tsconfig.json'
       - 'README.md'
-      - 'README.zh-CN.md'
+      - 'README.en-US.md'
 
 jobs:
   build:
