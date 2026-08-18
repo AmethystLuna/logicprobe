@@ -20,6 +20,8 @@
         "cordis.patch.yml"
     ],
     "dsh": {
+        "category": "extension",
+        "displayName": "逻辑探针",
         "bundle": {
             "patch": "./cordis.patch.yml"
         }
