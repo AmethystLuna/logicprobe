@@ -2,7 +2,7 @@
 
 <p align="center"><a href="README.en-US.md">English</a> · <strong>中文</strong></p>
 
-文档不是事实——代码才是。一个声称核查技能：逐条核验设计文档、架构规格、重构计划中每一个可验证的声称与代码库实际是否一致；遇到行为类声称时升级为可执行模型验证。v0.3.0。
+文档不是事实——代码才是。一个声称核查技能：逐条核验设计文档、架构规格、重构计划中每一个可验证的声称与代码库实际是否一致；遇到行为类声称时升级为可执行模型验证。
 
 **跨平台** — 支持 Claude Code、Codex CLI、Cursor、Kimi CLI、OpenCode、ZCode。基于 [Agent Skills](https://agentskills.io) 开放标准构建。
 
@@ -227,7 +227,7 @@ bash tests/skill-triggering/run-all.sh
 
 | 插件 | 说明 |
 |------|------|
-| [embedded-workbench](https://github.com/AmethystLuna/embedded-workbench) | 嵌入式 C/C++ 工具箱，其 Plan Verification Gate 依赖本技能。本插件自 embedded-workbench v0.6.0 拆分而来。 |
+| [embedded-workbench](https://github.com/AmethystLuna/embedded-workbench) | 嵌入式 C/C++ 工具箱，其 Plan Verification Gate 依赖本技能。本插件已从 embedded-workbench 拆分而来。 |
 
 ## 致谢
 
