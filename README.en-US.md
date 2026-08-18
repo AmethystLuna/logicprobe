@@ -2,7 +2,6 @@
 
 <p align="center"><strong>English</strong> · <a href="README.md">中文</a></p>
 
-
 [![HOL Guard Scanner](https://img.shields.io/badge/HOL%20Guard-passing-00a67e)](https://github.com/hashgraph-online/hol-guard)
 
 Design documents are not truth — code is. A claim-verification skill that checks every verifiable claim in design docs, architecture specs, and refactoring plans against the actual codebase — and escalates to executable-model verification for behavioral claims. v0.3.0.

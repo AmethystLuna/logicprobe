@@ -2,7 +2,6 @@
 
 <p align="center"><a href="README.en-US.md">English</a> · <strong>中文</strong></p>
 
-
 文档不是事实——代码才是。一个声称核查技能：逐条核验设计文档、架构规格、重构计划中每一个可验证的声称与代码库实际是否一致；遇到行为类声称时升级为可执行模型验证。v0.3.0。
 
 **跨平台** — 支持 Claude Code、Codex CLI、Cursor、Kimi CLI、OpenCode、ZCode。基于 [Agent Skills](https://agentskills.io) 开放标准构建。
