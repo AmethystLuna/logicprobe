@@ -1,0 +1,56 @@
+{
+  "schemaVersion": 1,
+  "init": "INIT",
+  "states": [
+    {
+      "id": "INIT"
+    },
+    {
+      "id": "RETRY",
+      "terminal": true
+    },
+    {
+      "id": "FATAL",
+      "terminal": true
+    }
+  ],
+  "transitions": [
+    {
+      "from": "INIT",
+      "event": "timeout",
+      "to": "RETRY",
+      "guard": {
+        "variable": "retry",
+        "op": "<",
+        "value": 3
+      },
+      "updates": [
+        {
+          "variable": "retry",
+          "op": "inc",
+          "value": 1
+        }
+      ]
+    }
+  ],
+  "variables": [
+    {
+      "name": "retry",
+      "kind": "integer",
+      "init": 0,
+      "min": 0,
+      "max": 3
+    }
+  ],
+  "boundaryChecks": [
+    {
+      "variable": "retry",
+      "values": [
+        0,
+        1,
+        2,
+        3
+      ]
+    }
+  ]
+}

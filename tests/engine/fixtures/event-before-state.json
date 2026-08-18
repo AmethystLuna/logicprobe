@@ -1,0 +1,43 @@
+{
+  "schemaVersion": 1,
+  "init": "INIT",
+  "states": [
+    {
+      "id": "INIT"
+    },
+    {
+      "id": "POWERED",
+      "terminal": true
+    },
+    {
+      "id": "ACTIVE",
+      "terminal": true
+    }
+  ],
+  "transitions": [
+    {
+      "from": "INIT",
+      "event": "power_ready",
+      "to": "POWERED"
+    },
+    {
+      "from": "INIT",
+      "event": "go",
+      "to": "ACTIVE"
+    },
+    {
+      "from": "POWERED",
+      "event": "go",
+      "to": "ACTIVE"
+    }
+  ],
+  "invariants": [
+    {
+      "id": "power-first",
+      "description": "ACTIVE requires power_ready",
+      "kind": "event-before-state",
+      "event": "power_ready",
+      "state": "ACTIVE"
+    }
+  ]
+}

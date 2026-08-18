@@ -6,7 +6,7 @@
 
 [![HOL Guard Scanner](https://img.shields.io/badge/HOL%20Guard-passing-00a67e)](https://github.com/hashgraph-online/hol-guard)
 
-Design documents are not truth — code is. A claim-verification skill that checks every verifiable claim in design docs, architecture specs, and refactoring plans against the actual codebase — and escalates to executable-model verification for behavioral claims. v0.1.0.
+Design documents are not truth — code is. A claim-verification skill that checks every verifiable claim in design docs, architecture specs, and refactoring plans against the actual codebase — and escalates to executable-model verification for behavioral claims. v0.3.0.
 
 **Cross-platform** — works with Claude Code, Codex CLI, Cursor, Kimi CLI, OpenCode, and ZCode. Built on the [Agent Skills](https://agentskills.io) open standard.
 
@@ -65,14 +65,16 @@ Then enable in `~/.claude/settings.json`:
 Native dsh support ships as a cordis plugin bundle at the repository root (the root `package.json` declares `dsh.bundle`):
 
 - The skill is discovered as-is by dsh's `skill-filesystem` provider (Agent Skills open standard) — zero code.
-- The bundle injects the claim-verification gate (1% Rule / Red Flags / proactive suggestion) into the first model step of every agent session — the dsh-native counterpart of the Claude `SessionStart` hook. It also registers a model-visible catalog entry (`cordis_inspect`).
+- The bundle injects the claim-verification gate (1% Rule / Red Flags / proactive suggestion) into the first model step of every agent session — the dsh-native counterpart of the Claude `SessionStart` hook. It also registers a model-visible catalog entry (`cordis_inspect`), a native `logicprobe_verify` tool (`ctx.tools`), and a policy-aware `logicprobe:mode` context (`ctx.systemPrompt`).
 - Together with the embedded-workbench bundle's Plan Verification Gate, this closes the claim-verification loop in dsh.
 
 Install: see [`.dsh/INSTALL.md`](.dsh/INSTALL.md) (four options, from plain skill copy to `dsh plugin add`).
 
+> DSH install note: the package name is scoped as `@amethystluna/logicprobe`. In the web profile's `package.json`, both the dependency key and the `dsh.profile.bundles` entry must use the scoped name; the old unscoped name causes the dsh loader to fail with `ERR_MODULE_NOT_FOUND`.
+
 ## Usage
 
-The plugin auto-injects a capability notification at session start. The skill activates when its `Use when` description matches your task:
+The plugin auto-injects a capability notification into the first model step. The skill activates when its `Use when` description matches your task:
 
 - **Design doc / plan review** — "Review this design document" → claim enumeration and codebase verification
 - **Behavioral questions** — "could this state machine deadlock", "is this retry limit safe", "check this timing for bugs" → the skill is proactively suggested (not auto-loaded) as an optional verification pass
@@ -80,7 +82,7 @@ The plugin auto-injects a capability notification at session start. The skill ac
 
 The skill auto-classifies depth (LIGHTWEIGHT / STANDARD / ESCALATED) from plan features in Phase 0, and appends a `## Plan Verification` summary block as the audit trail.
 
-Python is optional: when available, the reusable harness at `references/verification-harness.py` runs the checks; when not (air-gapped machines), the guide at `references/logic-verification-guide.md` provides a manual verification mode.
+In DSH, prefer the native `logicprobe_verify` tool (see `skills/logicprobe/references/dsh-model-schema.md`). Python remains optional for non-DSH hosts: when available, the reusable harness at `references/verification-harness.py` runs the checks; when not (air-gapped machines), the guide at `references/logic-verification-guide.md` provides a manual verification mode.
 
 ## Codex CLI
 
@@ -164,12 +166,13 @@ Skills are invoked with `$logicprobe`. See `.zcode/INSTALL.md` for details.
 
 ## Configuration
 
-In DeepSeek Harness, the bundle accepts a small configuration object:
+In DeepSeek Harness, the bundle registers the `logicprobe_verify` tool (through `ctx.tools`) and a policy-aware `logicprobe:mode` context (through `ctx.systemPrompt`). The bundle accepts a small configuration object:
 
 | Key | Type | Default | Description |
 |---|---|---|---|
 | `enabled` | boolean | `true` | Set to `false` to disable the session-start gate injection. |
 | `gateContent` | string | built-in gate text | Override the text injected into the first model step. |
+| `interaction` | `ask` \| `auto` \| `follow-approval` | `follow-approval` | Model-confirmation policy. `follow-approval` resolves to `auto` when the session approval policy is `never`. |
 
 To change it, override the row by id in your profile's `cordis.patch.yml`:
 
@@ -179,6 +182,7 @@ To change it, override the row by id in your profile's `cordis.patch.yml`:
       name: '@amethystluna/logicprobe'
       config:
         enabled: true
+        interaction: follow-approval
         gateContent: |
           ...
 ```
@@ -200,6 +204,7 @@ To change it, override the row by id in your profile's `cordis.patch.yml`:
 
 - Skill not visible in DSH: confirm you are on a DSH version that supports `ctx.skills`/Agent Skills discovery, and restart the profile after install.
 - Gate not injected: check that `enabled` is not `false` and that the row id `logicprobe` is present in the active profile patch.
+- `logicprobe_verify` not visible: check `cordis_inspect_query` status for `toolRegistered: true`, and confirm the DSH profile resolved the `@deepseek-ai/dsh-tools` peer dependency.
 - Plugin manager rejects installation: make sure `@deepseek-ai/*` packages are declared as `peerDependencies`, not regular `dependencies`.
 - After manual copy, DSH still doesn't see the skill: use the native bundle install (`dsh plugin add "github:AmethystLuna/logicprobe"`) instead of copying.
 

@@ -129,7 +129,8 @@ When Phase 2 triggers escalation, do NOT proceed to Phase 3 until the verificati
 ### Pipeline Overview
 
 ```text
-Document claims → Extract model → Check: python3 --version or python --version?
+Document claims → Extract model → Runtime check:
+  ├── DSH + `logicprobe_verify` tool available → build Model schema v1 (references/dsh-model-schema.md) → call the tool → structured report
   ├── Python available → fill in references/verification-harness.py → run → report
   └── No Python → Manual Verification Mode (see references/logic-verification-guide.md#manual-verification-mode)
 
@@ -168,7 +169,7 @@ When the document under review is a refactoring plan (modifying existing state m
 
 Do NOT attempt to install Python — the user's embedded development machine may be air-gapped or locked down.
 
-For the reusable Python harness (fill in states, run, get results), load `references/verification-harness.py`. For detailed probe patterns, model extraction methodology, and manual verification procedures, load `references/logic-verification-guide.md`.
+In DSH, prefer the native `logicprobe_verify` tool (model JSON, structured guard DSL, path-aware invariants) — see `references/dsh-model-schema.md`. For non-DSH hosts, the reusable Python harness is `references/verification-harness.py`. For detailed probe patterns, model extraction methodology, and manual verification procedures, load `references/logic-verification-guide.md`.
 
 ### Phase 2a: Structural Primitives (7 Checks)
 
@@ -227,6 +228,8 @@ RECOVERING  | reinit_complete            | IDLE          | -
 
 **CRITICAL**: Show this table to the user and ask for confirmation before generating the harness. The #1 failure mode of verification is extracting the wrong model. If the plan is ambiguous, flag it as a finding first — don't guess.
 
+**Exception**: If the runtime reports `logicprobe interaction=auto`, do NOT call `ask_user_question`. Instead: (a) cite evidence for every extracted state/transition/guard, (b) round-trip the filled model back into a transition table and compare it with the extraction table, and (c) mark the report `UNCONFIRMED`.
+
 ### Code-Level Behavioral Suggestion
 
 When the task is NOT document/plan review but involves code-level behavioral questions — e.g., the user is editing source files and asks:
@@ -259,5 +262,5 @@ Skip logic-primitive verification when:
 3. Cite evidence with specific file:line references.
 4. Don't fix during review — point the way, let implementation happen after approval.
 5. **For behavioral claims: verify with code, not reasoning.** If a plan says "always", "never", or "guaranteed", generate and run a model. One counter-example is enough to refute a universal claim.
-6. **Confirm the model before running it.** Extraction errors are the dominant failure mode of formal verification. Show the transition table, get confirmation, then run.
+6. **Confirm the model before running it** — unless the runtime reports `logicprobe interaction=auto`. Extraction errors are the dominant failure mode of formal verification. In auto mode, substitute evidence-cited extraction + round-trip validation and mark the report `UNCONFIRMED`.
 7. **Don't verify what the code already checks.** If the existing codebase has compile-time assertions, static analysis, or runtime checks for a property, cite those — don't re-verify in a Python model.

@@ -1,0 +1,45 @@
+{
+  "schemaVersion": 1,
+  "init": "INIT",
+  "states": [
+    {
+      "id": "INIT"
+    },
+    {
+      "id": "A"
+    },
+    {
+      "id": "B"
+    },
+    {
+      "id": "C"
+    }
+  ],
+  "transitions": [
+    {
+      "from": "INIT",
+      "event": "go",
+      "to": "A"
+    },
+    {
+      "from": "A",
+      "event": "to_b",
+      "to": "B"
+    },
+    {
+      "from": "A",
+      "event": "to_c",
+      "to": "C"
+    },
+    {
+      "from": "B",
+      "event": "back",
+      "to": "A"
+    },
+    {
+      "from": "C",
+      "event": "back",
+      "to": "A"
+    }
+  ]
+}

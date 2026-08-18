@@ -4,7 +4,7 @@
 
 # 逻辑探针 (Logic Probe)
 
-文档不是事实——代码才是。一个声称核查技能：逐条核验设计文档、架构规格、重构计划中每一个可验证的声称与代码库实际是否一致；遇到行为类声称时升级为可执行模型验证。v0.1.0。
+文档不是事实——代码才是。一个声称核查技能：逐条核验设计文档、架构规格、重构计划中每一个可验证的声称与代码库实际是否一致；遇到行为类声称时升级为可执行模型验证。v0.3.0。
 
 **跨平台** — 支持 Claude Code、Codex CLI、Cursor、Kimi CLI、OpenCode、ZCode。基于 [Agent Skills](https://agentskills.io) 开放标准构建。
 
@@ -63,14 +63,16 @@ git clone https://github.com/AmethystLuna/logicprobe.git ~/.claude/plugins/dev/l
 原生 dsh 支持以 cordis 插件 bundle 的形式提供，位于**仓库根**（根 `package.json` 声明了 `dsh.bundle`）：
 
 - 技能遵循 Agent Skills 开放标准，被 dsh 的 `skill-filesystem` provider 原样发现——零代码。
-- bundle 将 claim 验证门禁（1% Rule / Red Flags / 主动建议）注入每个 agent 会话的第一个模型步骤——是 Claude `SessionStart` hook 在 dsh 的原生对应物，并注册了模型可见的目录条目（`cordis_inspect`）。
+- bundle 将 claim 验证门禁（1% Rule / Red Flags / 主动建议）注入每个 agent 会话的第一个模型步骤——是 Claude `SessionStart` hook 在 dsh 的原生对应物，并注册模型可见目录条目（`cordis_inspect`）、原生工具 `logicprobe_verify`（`ctx.tools`）以及策略感知上下文 `logicprobe:mode`（`ctx.systemPrompt`）。
 - 与 embedded-workbench bundle 的 Plan Verification Gate 配合，在 dsh 中闭环了 claim 验证链路。
 
 安装：参见 [`.dsh/INSTALL.md`](.dsh/INSTALL.md)（四种方式，从纯技能拷贝到 `dsh plugin add`）。
 
+> DSH 安装注意：包名已使用 scoped 形式 `@amethystluna/logicprobe`。在 web profile 的 `package.json` 中，依赖键与 `dsh.profile.bundles` 必须写 `@amethystluna/logicprobe`；否则 dsh 加载器会因找不到 `node_modules/@amethystluna/logicprobe` 而启动失败。
+
 ## 使用
 
-插件在会话启动时自动注入能力通知。技能在任务匹配其 `Use when` 描述时激活：
+插件在会话首个模型步骤自动注入能力通知。技能在任务匹配其 `Use when` 描述时激活：
 
 - **设计文档 / 计划审查** — "Review this design document" → 声称枚举与代码库核查
 - **行为类问题** — "could this state machine deadlock"、"is this retry limit safe"、"check this timing for bugs" → 主动建议（不自动加载）作为可选验证
@@ -166,8 +168,9 @@ cp -r logicprobe/skills/* .zcode/skills/
 
 | 键 | 类型 | 默认值 | 说明 |
 |---|---|---|---|
-| `enabled` | boolean | `true` | 设为 `false` 可关闭会话开始时的 gate 注入。 |
+| `enabled` | boolean | `true` | 设为 `false` 可关闭首步 Gate 注入。 |
 | `gateContent` | string | 内置 gate 文本 | 覆盖注入到首轮模型上下文中的文本。 |
+| `interaction` | `ask` \| `auto` \| `follow-approval` | `follow-approval` | 模型确认策略；`follow-approval` 在会话 approval policy 为 `never` 时解析为 `auto`。 |
 
 在 profile 的 `cordis.patch.yml` 中按 row id 覆盖：
 
@@ -177,6 +180,7 @@ cp -r logicprobe/skills/* .zcode/skills/
       name: '@amethystluna/logicprobe'
       config:
         enabled: true
+        interaction: follow-approval
         gateContent: |
           ...
 ```

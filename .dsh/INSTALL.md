@@ -35,9 +35,13 @@ Install the bundle from the repository root (the root `package.json` declares `d
 npx -p @deepseek-ai/dsh dsh plugin --profile web add "github:AmethystLuna/logicprobe"
 ```
 
-Restart the target profile. This mounts a native cordis plugin that folds the session-start gate text (claim-verification doctrine / 1% Rule / Red Flags / proactive suggestion) into the first model step — the dsh-native counterpart of the Claude Code `SessionStart` hook.
+This installs under the scoped package name `@amethystluna/logicprobe`. If you manage the profile's `package.json` manually, use `@amethystluna/logicprobe` for both the dependency key and the `dsh.profile.bundles` entry.
 
-To change the gate text or disable injection, override the row by id in your profile's `cordis.patch.yml` (the row's `config` is replaced wholesale, not deep-merged):
+Restart the target profile. This mounts a native cordis plugin that folds the gate text (claim-verification doctrine / 1% Rule / Red Flags / proactive suggestion) into the first model step — the dsh-native counterpart of the Claude Code `SessionStart` hook.
+
+The bundle also registers the `logicprobe_verify` tool (via `ctx.tools`) and a `logicprobe:mode` dynamic context (via `ctx.systemPrompt`). The context resolves `interaction` per session: `follow-approval` becomes `auto` when the last `approval/policy` event is `never`.
+
+To change the gate text, interaction mode, or disable injection, override the row by id in your profile's `cordis.patch.yml` (the row's `config` is replaced wholesale, not deep-merged):
 
 ```yaml
 - insert:
@@ -55,7 +59,8 @@ To change the gate text or disable injection, override the row by id in your pro
 
 - `dsh --profile <scratch> --dump-config` shows the `logicprobe` row with `enabled: true` (create a scratch profile with `dsh plugin --profile <scratch> add ...` first).
 - Start a session and check the gate text appears in the model context of the first step.
-- `cordis_inspect_list` shows the `logicprobe` provider; `cordis_inspect_query` with method `status` returns `enabled: true`.
+- `cordis_inspect_list` shows the `logicprobe` provider; `cordis_inspect_query` with method `status` returns `enabled: true`, `interaction: follow-approval`, `toolRegistered: true`, and `engineSchemaVersion: 1`.
+- The model-visible `logicprobe_verify` tool accepts Model schema v1 (see `skills/logicprobe/references/dsh-model-schema.md`) and returns the S1-S7 + A1-A7 report.
 - Ask in a `dsh` session: "你有设计文档 / 计划 claim 核查相关的 skill 吗?"
 
 ## Notes
@@ -63,9 +68,10 @@ To change the gate text or disable injection, override the row by id in your pro
 - Skill frontmatter already matches the DSH expectations: `name` is kebab-case and matches the directory name; `description` is present. The policy keys `disable-model-invocation` / `user-invocable` are omitted, which defaults to model- AND user-invocable — the intended behavior.
 - DSH is in v0.1 developer preview; breaking changes are expected. Pin your `dsh` version.
 - DSH has no plugin marketplace for this repo — manual install only.
-- The session-start gate injection is provided natively by the root bundle (Option D). This plugin is the verification half of the embedded-workbench ecosystem: the embedded-workbench bundle's Plan Verification Gate routes plan approval through this skill.
+- The first-model-step gate injection is provided natively by the root bundle (Option D). This plugin is the verification half of the embedded-workbench ecosystem: the embedded-workbench bundle's Plan Verification Gate routes plan approval through this skill.
 - No custom agents — this plugin is skill-only; nothing else to port.
-- **Gate injection semantics**: the gate is injected exactly once per session lifecycle via the official `agent/session-start` event — on `startup`, `clear`, and `compact` (matching the Claude SessionStart matcher); `resume` keeps the gate already in durable history. The gate text is the dsh-native adaptation of `hooks/session-start-content.md` — behavior rules synced, presentation adapted to the dsh skill catalog (the trigger list lives in the skill description); review it per deployment and override via `gateContent`.
+- **Permission presets**: under `workspace-write` evidence stays inside the workspace and model confirmation defaults to ask. Under `danger-full-access` + `approval=never`, the bundle resolves interaction to auto (no `ask_user_question` for model confirmation) and never requests sandbox escalation.
+- **Gate injection semantics**: the gate is appended to the first model step that runs via `agent/pre-step`, once per session, guarded by the session's durable history. This is resilient to blank-session preset switches that clear the agent inbox before the first step; anchored/bootstrap presets may strip first-step Gate messages and the plugin re-injects after promotion. The gate text is the dsh-native adaptation of `hooks/session-start-content.md` — behavior rules synced, presentation adapted to the dsh skill catalog (the trigger list lives in the skill description); review it per deployment and override via `gateContent`.
 
 ## Tool Mapping
 
