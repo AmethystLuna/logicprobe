@@ -1,6 +1,6 @@
 {
   "name": "logicprobe",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Design document & plan claim verification — logic primitives + adversarial probing for behavioral claims. State machines, protocol logic, and refactoring plans get executable-model verification (7 structural + 7 adversarial checks) with regression detection.",
   "author": {
     "name": "Amethyst Luna",
