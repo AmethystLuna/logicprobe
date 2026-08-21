@@ -3,6 +3,25 @@ import { runVerification } from '../../lib/engine.js'
 
 const root = new URL('./fixtures/', import.meta.url)
 
+// DSH tool results must be lossless JSON: a property whose value is
+// `undefined` is rejected at the host boundary even though JSON.stringify
+// would silently drop it. This guards against regressions like
+// `truncated: exploration.truncated || undefined`.
+function assertNoUndefinedValues(value, path = 'root') {
+  if (value === undefined) {
+    throw new Error(`lossless JSON violation: undefined at ${path}`)
+  }
+  if (Array.isArray(value)) {
+    value.forEach((entry, index) => assertNoUndefinedValues(entry, `${path}[${index}]`))
+    return
+  }
+  if (value !== null && typeof value === 'object') {
+    for (const [key, entry] of Object.entries(value)) {
+      assertNoUndefinedValues(entry, `${path}.${key}`)
+    }
+  }
+}
+
 const cases = [
   {
     name: 'absorbing-scc.json',
@@ -77,6 +96,7 @@ for (const testCase of cases) {
       }
     }
     if (testCase.assert !== undefined) testCase.assert(report)
+    assertNoUndefinedValues(report)
     console.log('PASS', testCase.name)
   } catch (error) {
     failures += 1

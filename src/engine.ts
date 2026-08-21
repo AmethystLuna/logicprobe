@@ -1157,7 +1157,7 @@ export function runVerification(input: unknown, options: VerificationOptions = {
       errors,
       warnings,
       checksRun: checks.length,
-      truncated: exploration.truncated || undefined,
+      truncated: exploration.truncated,
     },
     checks,
   }
