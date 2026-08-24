@@ -35,7 +35,7 @@ Install the bundle from the repository root (the root `package.json` declares `d
 npx -p @deepseek-ai/dsh dsh plugin --profile web add "github:AmethystLuna/logicprobe"
 ```
 
-This installs under the scoped package name `@amethystluna/logicprobe`. If you manage the profile's `package.json` manually, use `@amethystluna/logicprobe` for both the dependency key and the `dsh.profile.bundles` entry.
+This installs under the package name `dsh-logicprobe`. If you manage the profile's `package.json` manually, use `dsh-logicprobe` for both the dependency key and the `dsh.profile.bundles` entry.
 
 Restart the target profile. This mounts a native cordis plugin that folds the gate text (claim-verification doctrine / 1% Rule / Red Flags / proactive suggestion) into the first model step — the dsh-native counterpart of the Claude Code `SessionStart` hook.
 
@@ -46,7 +46,7 @@ To change the gate text, interaction mode, or disable injection, override the ro
 ```yaml
 - insert:
     - id: logicprobe
-      name: '@amethystluna/logicprobe'
+      name: 'dsh-logicprobe'
       config:
         enabled: true
         gateContent: |

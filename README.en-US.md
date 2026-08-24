@@ -68,7 +68,7 @@ Native dsh support ships as a cordis plugin bundle at the repository root (the r
 
 Install: see [`.dsh/INSTALL.md`](.dsh/INSTALL.md) (four options, from plain skill copy to `dsh plugin add`).
 
-> DSH install note: the package name is scoped as `@amethystluna/logicprobe`. In the web profile's `package.json`, both the dependency key and the `dsh.profile.bundles` entry must use the scoped name; the old unscoped name causes the dsh loader to fail with `ERR_MODULE_NOT_FOUND`.
+> DSH install note: the package name is `dsh-logicprobe`. In the web profile's `package.json`, both the dependency key and the `dsh.profile.bundles` entry must use the same name; a mismatch causes the dsh loader to fail with `ERR_MODULE_NOT_FOUND`.
 
 ## Usage
 
@@ -177,7 +177,7 @@ To change it, override the row by id in your profile's `cordis.patch.yml`:
 ```yaml
 - insert:
     - id: logicprobe
-      name: '@amethystluna/logicprobe'
+      name: 'dsh-logicprobe'
       config:
         enabled: true
         interaction: follow-approval

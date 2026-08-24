@@ -6,7 +6,7 @@
 
 - insert:
     - id: logicprobe
-      name: '@amethystluna/logicprobe'
+      name: 'dsh-logicprobe'
       config:
         enabled: true
         interaction: follow-approval
