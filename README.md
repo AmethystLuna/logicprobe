@@ -66,7 +66,7 @@ git clone https://github.com/AmethystLuna/logicprobe.git ~/.claude/plugins/dev/l
 
 安装：参见 [`.dsh/INSTALL.md`](.dsh/INSTALL.md)（四种方式，从纯技能拷贝到 `dsh plugin add`）。
 
-> DSH 安装注意：包名已使用 scoped 形式 `dsh-logicprobe`。在 web profile 的 `package.json` 中，依赖键与 `dsh.profile.bundles` 必须写 `dsh-logicprobe`；否则 dsh 加载器会因找不到 `node_modules/dsh-logicprobe` 而启动失败。
+> DSH 安装注意：npm 包名为 `dsh-logicprobe`（无 scope）。在 web profile 的 `package.json` 中，依赖键与 `dsh.profile.bundles` 必须写 `dsh-logicprobe`；否则 dsh 加载器会因找不到 `node_modules/dsh-logicprobe` 而启动失败。
 
 ## 使用
 

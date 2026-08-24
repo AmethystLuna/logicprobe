@@ -32,7 +32,10 @@ If your `dsh` configuration supports `customSkillDirs` (rank 300), point it at t
 Install the bundle from the repository root (the root `package.json` declares `dsh.bundle`):
 
 ```bash
+# from GitHub (source of truth)
 npx -p @deepseek-ai/dsh dsh plugin --profile web add "github:AmethystLuna/logicprobe"
+# or from npm (published as dsh-logicprobe)
+npx -p @deepseek-ai/dsh dsh plugin --profile web add dsh-logicprobe
 ```
 
 This installs under the package name `dsh-logicprobe`. If you manage the profile's `package.json` manually, use `dsh-logicprobe` for both the dependency key and the `dsh.profile.bundles` entry.
@@ -67,7 +70,7 @@ To change the gate text, interaction mode, or disable injection, override the ro
 
 - Skill frontmatter already matches the DSH expectations: `name` is kebab-case and matches the directory name; `description` is present. The policy keys `disable-model-invocation` / `user-invocable` are omitted, which defaults to model- AND user-invocable — the intended behavior.
 - DSH is in v0.1 developer preview; breaking changes are expected. Pin your `dsh` version.
-- DSH has no plugin marketplace for this repo — manual install only.
+- DSH has no plugin marketplace for this repo — install via npm (`dsh-logicprobe`) or manually.
 - The first-model-step gate injection is provided natively by the root bundle (Option D). This plugin is the verification half of the embedded-workbench ecosystem: the embedded-workbench bundle's Plan Verification Gate routes plan approval through this skill.
 - No custom agents — this plugin is skill-only; nothing else to port.
 - **Permission presets**: under `workspace-write` evidence stays inside the workspace and model confirmation defaults to ask. Under `danger-full-access` + `approval=never`, the bundle resolves interaction to auto (no `ask_user_question` for model confirmation) and never requests sandbox escalation.
