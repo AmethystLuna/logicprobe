@@ -39,6 +39,7 @@ export interface VariableSpec {
     init: number | boolean;
     min?: number;
     max?: number;
+    monotonic?: 'inc' | 'dec';
 }
 export type InvariantSpec = {
     id: string;
@@ -58,6 +59,24 @@ export type InvariantSpec = {
     kind: 'event-before-state';
     event: string;
     state: string;
+} | {
+    id: string;
+    description: string;
+    kind: 'leads-to';
+    from: string;
+    to: string;
+} | {
+    id: string;
+    description: string;
+    kind: 'sequence';
+    events: string[];
+} | {
+    id: string;
+    description: string;
+    kind: 'atomicity';
+    events: string[];
+    commit: string;
+    rollback?: string;
 };
 export interface ResourcePairSpec {
     resource: string;

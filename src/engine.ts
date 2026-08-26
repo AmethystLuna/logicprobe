@@ -52,12 +52,16 @@ export interface VariableSpec {
   init: number | boolean
   min?: number
   max?: number
+  monotonic?: 'inc' | 'dec'
 }
 
 export type InvariantSpec =
   | { id: string; description: string; kind: 'never-states'; states: string[] }
   | { id: string; description: string; kind: 'var-in-range'; variable: string; min?: number; max?: number }
   | { id: string; description: string; kind: 'event-before-state'; event: string; state: string }
+  | { id: string; description: string; kind: 'leads-to'; from: string; to: string }
+  | { id: string; description: string; kind: 'sequence'; events: string[] }
+  | { id: string; description: string; kind: 'atomicity'; events: string[]; commit: string; rollback?: string }
 
 export interface ResourcePairSpec {
   resource: string
@@ -246,6 +250,7 @@ export function validateModel(input: unknown): { ok: true; model: LogicModelV1 }
       if (variable.min !== undefined && typeof variable.min !== 'number') bad(path + '.min', 'must be a number')
       if (variable.max !== undefined && typeof variable.max !== 'number') bad(path + '.max', 'must be a number')
       if (typeof variable.min === 'number' && typeof variable.max === 'number' && variable.min > variable.max) bad(path + '.max', 'must be >= min')
+      if (variable.monotonic !== undefined && variable.monotonic !== 'inc' && variable.monotonic !== 'dec') bad(path + '.monotonic', "must be 'inc' or 'dec'")
       if (variable.kind === 'integer' && typeof variable.init === 'number') {
         if (typeof variable.min === 'number' && variable.init < variable.min) bad(path + '.init', 'must be >= min')
         if (typeof variable.max === 'number' && variable.init > variable.max) bad(path + '.init', 'must be <= max')
@@ -279,6 +284,21 @@ export function validateModel(input: unknown): { ok: true; model: LogicModelV1 }
       } else if (invariant.kind === 'event-before-state') {
         if (typeof invariant.event !== 'string' || invariant.event.length === 0) bad(path + '.event', 'must be a non-empty string')
         if (typeof invariant.state !== 'string' || invariant.state.length === 0) bad(path + '.state', 'must be a non-empty string')
+      } else if (invariant.kind === 'leads-to') {
+        if (typeof invariant.from !== 'string' || invariant.from.length === 0) bad(path + '.from', 'must be a non-empty string')
+        if (typeof invariant.to !== 'string' || invariant.to.length === 0) bad(path + '.to', 'must be a non-empty string')
+      } else if (invariant.kind === 'sequence') {
+        if (!Array.isArray(invariant.events) || invariant.events.length === 0) bad(path + '.events', 'must be a non-empty array')
+        else invariant.events.forEach((event, eventIndex) => {
+          if (typeof event !== 'string' || event.length === 0) bad(path + '.events[' + eventIndex + ']', 'must be a non-empty string')
+        })
+      } else if (invariant.kind === 'atomicity') {
+        if (!Array.isArray(invariant.events) || invariant.events.length === 0) bad(path + '.events', 'must be a non-empty array')
+        else invariant.events.forEach((event, eventIndex) => {
+          if (typeof event !== 'string' || event.length === 0) bad(path + '.events[' + eventIndex + ']', 'must be a non-empty string')
+        })
+        if (typeof invariant.commit !== 'string' || invariant.commit.length === 0) bad(path + '.commit', 'must be a non-empty string')
+        if (invariant.rollback !== undefined && typeof invariant.rollback !== 'string') bad(path + '.rollback', 'must be a string')
       } else {
         bad(path + '.kind', 'unknown invariant kind')
       }
@@ -1405,6 +1425,172 @@ function A8_idempotentReplay(model: LogicModelV1, exploration: Exploration): Che
   }
   return checkResult('A8', 'Idempotent Replay', findings, findings.length === 0 ? 'Idempotent events are replay-safe' : 'Idempotent replay findings: ' + findings.length)
 }
+function S8_monotonicVariables(model: LogicModelV1): CheckResult {
+  const findings: Finding[] = []
+  for (const variable of model.variables ?? []) {
+    if (variable.monotonic === undefined) continue
+    for (const transition of model.transitions) {
+      for (const update of transition.updates ?? []) {
+        if (update.variable !== variable.name) continue
+        if (variable.monotonic === 'inc' && update.op === 'dec') {
+          findings.push({ code: 'S8_MONOTONIC_DECREASE', severity: 'error', message: 'Monotonic (inc) variable ' + variable.name + ' is decreased by ' + transition.event + '.', evidence: { variable: variable.name, transition } })
+        } else if (variable.monotonic === 'dec' && update.op === 'inc') {
+          findings.push({ code: 'S8_MONOTONIC_INCREASE', severity: 'error', message: 'Monotonic (dec) variable ' + variable.name + ' is increased by ' + transition.event + '.', evidence: { variable: variable.name, transition } })
+        } else if (update.op === 'set') {
+          findings.push({ code: 'S8_MONOTONIC_SET_REVIEW', severity: 'warning', message: 'Monotonic variable ' + variable.name + ' uses set in ' + transition.event + '; verify it cannot move backwards.', evidence: { variable: variable.name, transition } })
+        }
+      }
+    }
+  }
+  return checkResult('S8', 'Monotonic Variables', findings, findings.length === 0 ? 'Monotonic variables are respected' : 'Monotonic findings: ' + findings.length)
+}
+
+function findLeadsToBadPath(model: LogicModelV1, start: RuntimeState, target: string): { path: PathStep[]; reason: string } | undefined {
+  if (start.state === target) return undefined
+  const visited = new Set<string>()
+  const queue: Array<{ runtime: RuntimeState; path: PathStep[] }> = [{ runtime: start, path: [] }]
+  while (queue.length > 0) {
+    const entry = queue.shift()!
+    const key = runtimeKey(entry.runtime)
+    if (entry.runtime.state === target) continue
+    if (visited.has(key)) return { path: entry.path, reason: 'Cycle avoids target ' + target }
+    visited.add(key)
+    const nexts: Array<{ next: RuntimeState; event: string }> = []
+    for (const event of allEvents(model)) {
+      for (const next of stepRuntime(model, entry.runtime, event)) nexts.push({ next, event })
+    }
+    if (nexts.length === 0) return { path: entry.path, reason: 'Dead end before target ' + target }
+    for (const { next, event } of nexts) {
+      queue.push({ runtime: next, path: [...entry.path, { from: entry.runtime.state, event, to: next.state }] })
+    }
+  }
+  return { path: [], reason: 'No path reaches target ' + target }
+}
+
+function A9_leadsTo(model: LogicModelV1, exploration: Exploration): CheckResult {
+  const findings: Finding[] = []
+  for (const invariant of model.invariants ?? []) {
+    if (invariant.kind !== 'leads-to') continue
+    for (const runtime of exploration.reachable) {
+      if (runtime.state !== invariant.from) continue
+      const bad = findLeadsToBadPath(model, runtime, invariant.to)
+      if (bad !== undefined) {
+        findings.push({
+          code: 'A9_LEADS_TO_VIOLATION',
+          severity: 'error',
+          message: 'Leads-to invariant "' + invariant.id + '" violated from ' + invariant.from + ': ' + bad.reason,
+          path: bad.path,
+          evidence: { invariant },
+        })
+        break
+      }
+    }
+  }
+  return checkResult('A9', 'Leads-To', findings, findings.length === 0 ? 'All leads-to invariants hold' : 'Leads-to findings: ' + findings.length)
+}
+
+function findSequenceViolation(model: LogicModelV1, options: NormalizedOptions, invariant: Extract<InvariantSpec, { kind: 'sequence' }>): InvariantViolation | undefined {
+  const events = invariant.events
+  const init = initialState(model)
+  const key = (runtime: RuntimeState, progress: number): string => runtimeKey(runtime) + '|' + progress
+  const visited = new Set<string>([key(init, 0)])
+  const queue: Array<{ runtime: RuntimeState; progress: number; path: PathStep[] }> = [{ runtime: init, progress: 0, path: [] }]
+  let steps = 0
+  while (queue.length > 0) {
+    const entry = queue.shift()!
+    if (++steps > options.maxStates) break
+    for (const event of allEvents(model)) {
+      for (const next of stepRuntime(model, entry.runtime, event)) {
+        let progress = entry.progress
+        let violation = false
+        if (progress < events.length && event === events[progress]) {
+          progress += 1
+        } else {
+          const index = events.indexOf(event)
+          if (index > progress) violation = true
+        }
+        const path = [...entry.path, { from: entry.runtime.state, event, to: next.state }]
+        if (violation) {
+          return { invariant, path, reason: 'Event ' + event + ' occurred before ' + events[progress] }
+        }
+        const nextKey = key(next, progress)
+        if (!visited.has(nextKey)) {
+          visited.add(nextKey)
+          queue.push({ runtime: next, progress, path })
+        }
+      }
+    }
+  }
+  return undefined
+}
+
+function A10_sequenceOrder(model: LogicModelV1, options: NormalizedOptions): CheckResult {
+  const findings: Finding[] = []
+  for (const invariant of model.invariants ?? []) {
+    if (invariant.kind !== 'sequence') continue
+    const violation = findSequenceViolation(model, options, invariant)
+    if (violation !== undefined) {
+      findings.push({
+        code: 'A10_SEQUENCE_VIOLATION',
+        severity: 'error',
+        message: 'Sequence invariant "' + invariant.id + '" violated: ' + violation.reason,
+        path: violation.path,
+        evidence: { invariant },
+      })
+    }
+  }
+  return checkResult('A10', 'Sequence Order', findings, findings.length === 0 ? 'All sequence invariants hold' : 'Sequence findings: ' + findings.length)
+}
+
+function findAtomicityViolation(model: LogicModelV1, options: NormalizedOptions, invariant: Extract<InvariantSpec, { kind: 'atomicity' }>): InvariantViolation | undefined {
+  const atomic = new Set(invariant.events)
+  const init = initialState(model)
+  const key = (runtime: RuntimeState, started: boolean, closed: boolean): string => runtimeKey(runtime) + '|' + (started ? '1' : '0') + '|' + (closed ? '1' : '0')
+  const visited = new Set<string>([key(init, false, false)])
+  const queue: Array<{ runtime: RuntimeState; started: boolean; closed: boolean; path: PathStep[] }> = [{ runtime: init, started: false, closed: false, path: [] }]
+  let steps = 0
+  while (queue.length > 0) {
+    const entry = queue.shift()!
+    if (++steps > options.maxStates) break
+    for (const event of allEvents(model)) {
+      for (const next of stepRuntime(model, entry.runtime, event)) {
+        const started = entry.started || atomic.has(event)
+        const closed = entry.closed || event === invariant.commit || (invariant.rollback !== undefined && event === invariant.rollback)
+        const path = [...entry.path, { from: entry.runtime.state, event, to: next.state }]
+        if (entry.started && !entry.closed && !atomic.has(event) && event !== invariant.commit && event !== invariant.rollback) {
+          return { invariant, path, reason: 'Left atomic scope via ' + event + ' without commit/rollback' }
+        }
+        if (started && !closed && isTerminal(model, next.state)) {
+          return { invariant, path, reason: 'Terminal state reached with incomplete atomic group' }
+        }
+        const nextKey = key(next, started, closed)
+        if (!visited.has(nextKey)) {
+          visited.add(nextKey)
+          queue.push({ runtime: next, started, closed, path })
+        }
+      }
+    }
+  }
+  return undefined
+}
+
+function A11_atomicity(model: LogicModelV1, options: NormalizedOptions): CheckResult {
+  const findings: Finding[] = []
+  for (const invariant of model.invariants ?? []) {
+    if (invariant.kind !== 'atomicity') continue
+    const violation = findAtomicityViolation(model, options, invariant)
+    if (violation !== undefined) {
+      findings.push({
+        code: 'A11_ATOMICITY_VIOLATION',
+        severity: 'error',
+        message: 'Atomicity invariant "' + invariant.id + '" violated: ' + violation.reason,
+        path: violation.path,
+        evidence: { invariant },
+      })
+    }
+  }
+  return checkResult('A11', 'Atomicity', findings, findings.length === 0 ? 'All atomicity invariants hold' : 'Atomicity findings: ' + findings.length)
+}
 // ---------------------------------------------------------------------------
 // main entry
 // ---------------------------------------------------------------------------
@@ -1440,6 +1626,7 @@ export function runVerification(input: unknown, options: VerificationOptions = {
     S5_eventCompleteness(model),
     S6_guardCompleteness(model),
     S7_invariants(model, normalized),
+    S8_monotonicVariables(model),
     A1_unexpectedEvents(model),
     A2_raceInterleaving(model, exploration),
     A3_orderPermutation(model, normalized),
@@ -1448,6 +1635,9 @@ export function runVerification(input: unknown, options: VerificationOptions = {
     A6_resourceInjection(model),
     A7_shortestViolations(model, normalized),
     A8_idempotentReplay(model, exploration),
+    A9_leadsTo(model, exploration),
+    A10_sequenceOrder(model, normalized),
+    A11_atomicity(model, normalized),
   ]
   let comparison: ComparisonSummary | undefined
   if (options.beforeModel !== undefined) {

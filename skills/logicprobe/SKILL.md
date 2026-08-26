@@ -186,6 +186,7 @@ Run these FIRST. They establish basic well-formedness before adversarial probing
 | S5 | **Event completeness** | For each state, are there plausible events with no defined transition? | Warning — implicit ignore |
 | S6 | **Guard completeness** | For each transition with a guard condition, are ALL branch outcomes defined? `if (cnt<3) RETRY else FATAL` → both paths must exist in model | Error — undefined behavior path |
 | S7 | **Invariant validity** | Does every reachable state satisfy the plan's stated "always/never/guaranteed" assertions? | Error — plan claim is false |
+| S8 | **Monotonic variables** | If a variable is declared `monotonic: inc/dec`, do all updates respect that direction? | Error — counter can move backwards |
 
 ### Phase 2b: Adversarial Probes (7 Attacks)
 
@@ -201,6 +202,9 @@ Run these SECOND. Each probe actively tries to BREAK the model. If any probe suc
 | A6 | **Resource injection** | Simulate `malloc→NULL`, `queue→full`, `semaphore→timeout` at each state that calls them. Flag if any state has no recovery path. | "Graceful degradation under resource pressure" |
 | A7 | **Minimal counter-example** | For any invariant that fails, find the SHORTEST event sequence that violates it (BFS from init to violating state). Output the exact path. | "This invariant holds" → refuted by shortest path |
 | A8 | **Idempotent replay** | For each event declared in `idempotentEvents`, apply it twice from every reachable state. Flag if the second application changes state or is not replayable. | "This event is safe to retry/replay" |
+| A9 | **Leads-to** | From a declared source state, every path must eventually reach the target state. | "This state always progresses to completion" |
+| A10 | **Sequence order** | Events declared in a sequence must occur in the specified order. | "backup before modify before commit" |
+| A11 | **Atomicity** | Once an atomic event starts, the machine must commit or roll back before leaving the scope or terminating. | "all-or-nothing transaction" |
 
 ### Integration Back to Phase 3
 

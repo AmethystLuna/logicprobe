@@ -225,6 +225,83 @@ async function runIdempotencyTests() {
   console.log('PASS idempotent-replay')
 }
 
+// Advanced domain constraints (S8, A9-A11)
+async function runAdvancedConstraintTests() {
+  const monotonic = {
+    schemaVersion: 1,
+    init: 'A',
+    states: [{ id: 'A' }, { id: 'B', terminal: true }],
+    transitions: [
+      { from: 'A', event: 'bump', to: 'A', updates: [{ variable: 'count', op: 'inc' }] },
+      { from: 'A', event: 'lower', to: 'B', updates: [{ variable: 'count', op: 'dec' }] },
+    ],
+    variables: [{ name: 'count', kind: 'integer', init: 0, monotonic: 'inc' }],
+  }
+  const monoReport = runVerification(monotonic)
+  const s8 = monoReport.checks.find((check) => check.id === 'S8')
+  if (s8 === undefined || !s8.findings.some((finding) => finding.code === 'S8_MONOTONIC_DECREASE')) throw new Error('missing S8_MONOTONIC_DECREASE')
+  assertNoUndefinedValues(monoReport)
+
+  const leadsBad = {
+    schemaVersion: 1,
+    init: 'A',
+    states: [{ id: 'A' }, { id: 'B', terminal: true }, { id: 'C' }],
+    transitions: [
+      { from: 'A', event: 'go', to: 'B' },
+      { from: 'A', event: 'loop', to: 'C' },
+      { from: 'C', event: 'loop', to: 'C' },
+    ],
+    invariants: [{ id: 'l1', description: 'A leads to B', kind: 'leads-to', from: 'A', to: 'B' }],
+  }
+  const leadsReport = runVerification(leadsBad)
+  const a9 = leadsReport.checks.find((check) => check.id === 'A9')
+  if (a9 === undefined || !a9.findings.some((finding) => finding.code === 'A9_LEADS_TO_VIOLATION')) throw new Error('missing A9_LEADS_TO_VIOLATION')
+  assertNoUndefinedValues(leadsReport)
+
+  const seqBad = {
+    schemaVersion: 1,
+    init: 'A',
+    states: [{ id: 'A' }, { id: 'B', terminal: true }],
+    transitions: [{ from: 'A', event: 'b', to: 'B' }],
+    invariants: [{ id: 's1', description: 'a then b', kind: 'sequence', events: ['a', 'b'] }],
+  }
+  const seqReport = runVerification(seqBad)
+  const a10 = seqReport.checks.find((check) => check.id === 'A10')
+  if (a10 === undefined || !a10.findings.some((finding) => finding.code === 'A10_SEQUENCE_VIOLATION')) throw new Error('missing A10_SEQUENCE_VIOLATION')
+  assertNoUndefinedValues(seqReport)
+
+  const atomicBad = {
+    schemaVersion: 1,
+    init: 'A',
+    states: [{ id: 'A' }, { id: 'B', terminal: true }],
+    transitions: [{ from: 'A', event: 'write', to: 'B' }],
+    invariants: [{ id: 'at1', description: 'write must commit or rollback', kind: 'atomicity', events: ['write'], commit: 'commit', rollback: 'rollback' }],
+  }
+  const atomicReport = runVerification(atomicBad)
+  const a11 = atomicReport.checks.find((check) => check.id === 'A11')
+  if (a11 === undefined || !a11.findings.some((finding) => finding.code === 'A11_ATOMICITY_VIOLATION')) throw new Error('missing A11_ATOMICITY_VIOLATION')
+  assertNoUndefinedValues(atomicReport)
+
+  const atomicOk = {
+    schemaVersion: 1,
+    init: 'A',
+    states: [{ id: 'A' }, { id: 'B' }, { id: 'C', terminal: true }],
+    transitions: [
+      { from: 'A', event: 'write', to: 'B' },
+      { from: 'B', event: 'commit', to: 'C' },
+    ],
+    invariants: [{ id: 'at2', description: 'write must commit or rollback', kind: 'atomicity', events: ['write'], commit: 'commit', rollback: 'rollback' }],
+  }
+  const atomicOkReport = runVerification(atomicOk)
+  const okA11 = atomicOkReport.checks.find((check) => check.id === 'A11')
+  if (okA11 === undefined || okA11.findings.length !== 0) throw new Error('A11 should pass for commit path')
+  assertNoUndefinedValues(atomicOkReport)
+
+  console.log('PASS advanced-constraints')
+}
+
+await runAdvancedConstraintTests()
+
 await runIdempotencyTests()
 
 await runDiffTests()

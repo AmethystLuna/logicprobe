@@ -14,7 +14,7 @@ export const LOGICPROBE_VERIFY_TOOL_NAME = 'logicprobe_verify'
 export const logicProbeVerifyTool = defineTool({
   name: LOGICPROBE_VERIFY_TOOL_NAME,
   description:
-    'Run executable state-machine verification (logicprobe). Takes a LogicModelV1 object with schemaVersion=1, init, states ({id, terminal?}), transitions ({from, event, to, guard?, updates?}), variables?, invariants?, concurrentPairs?, boundaryChecks?, resourcePairs?, idempotentEvents?. Guards are structured ({variable, op, value} | {all} | {any} | {not}); invariants support never-states, var-in-range, and event-before-state. Returns a report with S1-S7 structural checks and A1-A7 adversarial probes including shortest counterexample paths. If beforeModel is provided, also runs D1-D4 before/after regression checks. See skills/logicprobe/references/dsh-model-schema.md.',
+    'Run executable state-machine verification (logicprobe). Takes a LogicModelV1 object with schemaVersion=1, init, states ({id, terminal?}), transitions ({from, event, to, guard?, updates?}), variables?, invariants?, concurrentPairs?, boundaryChecks?, resourcePairs?, idempotentEvents?. Guards are structured ({variable, op, value} | {all} | {any} | {not}); invariants support never-states, var-in-range, event-before-state, leads-to, sequence, and atomicity; variables support monotonic inc/dec. Returns a report with S1-S7 structural checks and A1-A7 adversarial probes including shortest counterexample paths. If beforeModel is provided, also runs D1-D4 before/after regression checks. See skills/logicprobe/references/dsh-model-schema.md.',
   parameters: {
     model: {
       type: 'json',

@@ -1,6 +1,6 @@
 # DSH Model Schema v1 — logicprobe_verify
 
-The dsh-native `logicprobe_verify` tool accepts a structured JSON model. The engine runs 14 checks (S1-S7 structural, A1-A7 adversarial) and returns a JSON report. When `beforeModel` is supplied, it also runs D1-D4 before/after regression checks. Guards and updates are structured data — no code strings, no arbitrary execution.
+The dsh-native `logicprobe_verify` tool accepts a structured JSON model. The engine runs 19 checks (S1-S8 structural, A1-A11 adversarial) and returns a JSON report. When `beforeModel` is supplied, it also runs D1-D4 before/after regression checks. Guards and updates are structured data — no code strings, no arbitrary execution.
 
 ## Top-level model
 
@@ -27,7 +27,7 @@ The dsh-native `logicprobe_verify` tool accepts a structured JSON model. The eng
 | `init` | yes | Initial state id |
 | `states` | yes | `{ id, terminal? }`; `terminal` exempts S2/S3/S5/A1 |
 | `transitions` | yes | `{ from, event, to, guard?, updates? }` |
-| `variables` | no | `{ name, kind: integer\|boolean, init, min?, max? }` |
+| `variables` | no | `{ name, kind: integer\|boolean, init, min?, max?, monotonic? }` |
 | `invariants` | no | See invariant kinds below |
 | `concurrentPairs` | no | `["eventA", "eventB"]` pairs for A2 |
 | `boundaryChecks` | no | `{ variable, values: number[] }` for A5 |
@@ -66,6 +66,9 @@ A guard is exactly one of:
 | `never-states` | `{ states: ["ERROR"] }` | No reachable runtime state may be in the forbidden set |
 | `var-in-range` | `{ variable, min?, max? }` | Every reachable runtime state keeps the variable in range |
 | `event-before-state` | `{ event: "power_ready", state: "ACTIVE" }` | Every path entering `state` must have passed through `event` first |
+| `leads-to` | `{ from: "MIGRATING", to: "DONE" }` | Every path from `from` must eventually reach `to` |
+| `sequence` | `{ events: ["backup", "modify", "commit"] }` | Events must occur in the given order |
+| `atomicity` | `{ events: ["write"], commit: "commit", rollback?: "rollback" }` | Atomic group must end with commit/rollback before leaving scope |
 
 A7 reports the shortest violating path for each failed invariant. An empty path means the initial state already violates it.
 
@@ -101,7 +104,7 @@ In `interaction=auto`, do NOT call `ask_user_question` for model confirmation. R
 
 ## Before/after comparison (D1-D4)
 
-When `beforeModel` is passed to `logicprobe_verify`, the engine treats `model` as AFTER and runs four extra checks after S1-A7:
+When `beforeModel` is passed to `logicprobe_verify`, the engine treats `model` as AFTER and runs four extra checks after S1-A11:
 
 | Check | Purpose |
 |---|---|
@@ -127,6 +130,13 @@ The report's `comparison` object includes both model hashes, state/transition co
 ## Idempotent replay (A8)
 
 List events that must be idempotent in `idempotentEvents`. For every reachable state, applying the event twice must produce the same state as applying it once. This is useful for retries, webhook redelivery, and migration replay.
+
+## Advanced constraints (S8, A9-A11)
+
+- **S8 Monotonic Variables**: declare `monotonic: "inc"|"dec"` on a variable; updates must not move in the opposite direction.
+- **A9 Leads-To**: `{ kind: "leads-to", from, to }` — every path from `from` must eventually reach `to`.
+- **A10 Sequence**: `{ kind: "sequence", events }` — events must appear in order.
+- **A11 Atomicity**: `{ kind: "atomicity", events, commit, rollback? }` — once an atomic event starts, the machine must reach commit/rollback before leaving the atomic scope or terminating.
 
 ## Limits
 
