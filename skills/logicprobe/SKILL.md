@@ -260,6 +260,15 @@ Skip logic-primitive verification when:
 - The state machine has ≤2 states, no guards, and trivial transitions (IDLE↔ACTIVE)
 - The claim is purely structural (file paths, type names, numeric constants) — Phase 2 grep verification is sufficient
 
+## Concurrency Risk Mining
+
+logicprobe does **not** prove concurrency safety. It mines documents and plans for concurrency-related claims and flags them for dedicated verification.
+
+- Absolute claims ("thread-safe", "lock-free", "no data race") → error / `UNVERIFIED` unless dedicated evidence is provided.
+- Risk keywords ("race condition", "shared variable", "mutex", "atomic", "shared memory") → warning; review whether the plan addresses them.
+
+In DSH, use the `logicprobe_concurrency_scan` tool. For manual review, follow `references/concurrency-risk-guide.md`.
+
 ---
 
 ## Rules

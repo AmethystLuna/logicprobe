@@ -65,6 +65,7 @@ git clone https://github.com/AmethystLuna/logicprobe.git ~/.claude/plugins/dev/l
 - bundle 将 claim 验证门禁（1% Rule / Red Flags / 主动建议）注入每个 agent 会话的第一个模型步骤——是 Claude `SessionStart` hook 在 dsh 的原生对应物，并注册模型可见目录条目（`cordis_inspect`）、原生工具 `logicprobe_verify`（`ctx.tools`）以及策略感知上下文 `logicprobe:mode`（`ctx.systemPrompt`）。
 - `logicprobe_verify` 支持 `beforeModel` + `stateMapping` 的 BEFORE/AFTER 对比（D1-D4），可直接验证重构/迁移的行为保持、不变量连续性、回归增量和死锁/活性回归。
 - `logicprobe_datamodel_verify` 新增数据模型验证：DataModelV1、迁移覆盖、copy 一致性、DD1-DD4 before/after 数据回归。
+- `logicprobe_concurrency_scan` 扫描文档/计划中的并发风险声称（thread-safe、lock-free、race condition、mutex 等），标记需要专用并发验证。
 - 与 embedded-workbench bundle 的 Plan Verification Gate 配合，在 dsh 中闭环了 claim 验证链路。
 
 安装：参见 [`.dsh/INSTALL.md`](.dsh/INSTALL.md)（四种方式，从纯技能拷贝到 `dsh plugin add`）。

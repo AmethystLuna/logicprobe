@@ -66,6 +66,7 @@ Native dsh support ships as a cordis plugin bundle at the repository root (the r
 - The skill is discovered as-is by dsh's `skill-filesystem` provider (Agent Skills open standard) — zero code.
 - The bundle injects the claim-verification gate (1% Rule / Red Flags / proactive suggestion) into the first model step of every agent session — the dsh-native counterpart of the Claude `SessionStart` hook. It also registers a model-visible catalog entry (`cordis_inspect`), a native `logicprobe_verify` tool (`ctx.tools`), and a policy-aware `logicprobe:mode` context (`ctx.systemPrompt`).
 - `logicprobe_datamodel_verify` adds data-model verification: DataModelV1, migration coverage, copy consistency, and DD1-DD4 before/after data regression.
+- `logicprobe_concurrency_scan` mines documents/plans for concurrency risk claims (thread-safe, lock-free, race condition, mutex, etc.) and flags them for dedicated verification.
 - Together with the embedded-workbench bundle's Plan Verification Gate, this closes the claim-verification loop in dsh.
 
 Install: see [`.dsh/INSTALL.md`](.dsh/INSTALL.md) (four options, from plain skill copy to `dsh plugin add`).

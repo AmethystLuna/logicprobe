@@ -62,9 +62,10 @@ To change the gate text, interaction mode, or disable injection, override the ro
 
 - `dsh --profile <scratch> --dump-config` shows the `logicprobe` row with `enabled: true` (create a scratch profile with `dsh plugin --profile <scratch> add ...` first).
 - Start a session and check the gate text appears in the model context of the first step.
-- `cordis_inspect_list` shows the `logicprobe` provider; `cordis_inspect_query` with method `status` returns `enabled: true`, `interaction: follow-approval`, `toolRegistered: true`, `dataToolRegistered: true`, `engineSchemaVersion: 1`, and `dataEngineSchemaVersion: 1`.
+- `cordis_inspect_list` shows the `logicprobe` provider; `cordis_inspect_query` with method `status` returns `enabled: true`, `interaction: follow-approval`, `toolRegistered: true`, `dataToolRegistered: true`, `concurrencyToolRegistered: true`, `engineSchemaVersion: 1`, and `dataEngineSchemaVersion: 1`.
 - The model-visible `logicprobe_verify` tool accepts Model schema v1 (see `skills/logicprobe/references/dsh-model-schema.md`) and returns the S1-S7 + A1-A7 report; passing `beforeModel` (and optional `stateMapping`) adds D1-D4 before/after regression checks.
 - The model-visible `logicprobe_datamodel_verify` tool accepts DataModelV1 (see `skills/logicprobe-datamodel/references/data-model-schema.md`) and returns DS/DA/DD checks; passing `beforeModel`/`fieldMapping`/`copyPairs`/`migrationMappings` adds migration coverage, copy consistency, rollback symmetry, and DD1-DD4 before/after data regression.
+- The model-visible `logicprobe_concurrency_scan` tool scans document/plan text for concurrency risk claims and flags absolute guarantees for dedicated verification.
 - Ask in a `dsh` session: "你有设计文档 / 计划 claim 核查相关的 skill 吗?"
 
 ## Notes
