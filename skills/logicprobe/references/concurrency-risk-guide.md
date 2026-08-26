@@ -4,6 +4,8 @@ logicprobe does **not** prove concurrency safety. It mines design documents and 
 
 ## When to use
 
+**Prerequisite: confirm the verification target actually has concurrency requirements or behavior** — multiple threads, async tasks, interrupts, shared state, or parallel execution. Do not run concurrency mining on purely sequential designs just because a generic word like "parallel" or "atomic" appears.
+
 Use when a document contains:
 
 - "thread-safe", "lock-free", "wait-free", "no data race", "race-free"

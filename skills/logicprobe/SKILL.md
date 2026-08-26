@@ -262,6 +262,8 @@ Skip logic-primitive verification when:
 
 ## Concurrency Risk Mining
 
+**Only use this after confirming the verification target actually has concurrency requirements or behavior** — e.g., multiple threads, async tasks, interrupts, shared state, or parallel execution. If the target is purely sequential, do not invoke concurrency mining.
+
 logicprobe does **not** prove concurrency safety. It mines documents and plans for concurrency-related claims and flags them for dedicated verification.
 
 - Absolute claims ("thread-safe", "lock-free", "no data race") → error / `UNVERIFIED` unless dedicated evidence is provided.
