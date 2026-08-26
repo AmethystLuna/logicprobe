@@ -275,6 +275,85 @@ def da8_idempotent_constraints(model, options):
                 findings.append({'code': 'DA8_NON_IDEMPOTENT_TRANSFORM', 'severity': 'warning', 'message': f"Migration mapping {invariant.get('from')} -> {invariant.get('to')} uses non-idempotent transform {mapping.get('transform')}", 'evidence': {'invariant': invariant, 'mapping': mapping}})
     return check_result('DA8', findings, 'Idempotent constraints')
 
+def data_step_registry(options):
+    registry = {}
+    for pair in options.get('copyPairs', []):
+        registry[pair.get('id')] = {'kind': 'copy', 'copyPair': pair}
+    for mapping in options.get('migrationMappings', []):
+        step_id = mapping.get('id') or (mapping.get('from') + '->' + mapping.get('to'))
+        registry[step_id] = {'kind': 'migration', 'transform': mapping.get('transform')}
+    return registry
+
+MONOTONIC_DATA_TYPES = {'integer', 'number', 'date', 'datetime', 'timestamp'}
+
+def da9_data_monotonic(model, options):
+    findings = []
+    for invariant in model.get('invariants', []):
+        if invariant.get('kind') != 'monotonic':
+            continue
+        field = field_by_path(model, invariant.get('entity'), invariant.get('field'))
+        if field is None:
+            findings.append({'code': 'DA9_MONOTONIC_FIELD_MISSING', 'severity': 'error', 'message': f"Monotonic invariant {invariant.get('id')} references missing field", 'evidence': {'invariant': invariant}})
+            continue
+        if field.get('type') not in MONOTONIC_DATA_TYPES:
+            findings.append({'code': 'DA9_MONOTONIC_TYPE_UNSUPPORTED', 'severity': 'warning', 'message': f"Monotonic field {invariant.get('entity')}.{invariant.get('field')} has unsupported type {field.get('type')}", 'evidence': {'invariant': invariant}})
+        if field.get('monotonic') is not None and field.get('monotonic') != invariant.get('direction'):
+            findings.append({'code': 'DA9_MONOTONIC_DIRECTION_MISMATCH', 'severity': 'error', 'message': f"Monotonic direction mismatch for {invariant.get('entity')}.{invariant.get('field')}", 'evidence': {'invariant': invariant}})
+        for pair in options.get('copyPairs', []):
+            for source_field, target_field in pair.get('mapping', {}).items():
+                if pair.get('targetEntity') + '.' + target_field == invariant.get('entity') + '.' + invariant.get('field'):
+                    source = field_by_path(model, pair.get('sourceEntity'), source_field)
+                    if source is not None and source.get('monotonic') is not None and source.get('monotonic') != invariant.get('direction'):
+                        findings.append({'code': 'DA9_MONOTONIC_COPY_OPPOSITE', 'severity': 'warning', 'message': f"Copy {pair.get('id')} maps opposite-monotonic source into monotonic target", 'evidence': {'invariant': invariant, 'pair': pair}})
+    return check_result('DA9', findings, 'Data monotonic')
+
+def da10_data_sequence(model, options):
+    findings = []
+    registry = data_step_registry(options)
+    for invariant in model.get('invariants', []):
+        if invariant.get('kind') != 'sequence':
+            continue
+        for step in invariant.get('steps', []):
+            if step not in registry:
+                findings.append({'code': 'DA10_SEQUENCE_STEP_MISSING', 'severity': 'error', 'message': f"Sequence invariant {invariant.get('id')} references missing step {step}", 'evidence': {'invariant': invariant, 'step': step}})
+    return check_result('DA10', findings, 'Data sequence')
+
+def da11_data_leads_to(model, options):
+    findings = []
+    for invariant in model.get('invariants', []):
+        if invariant.get('kind') != 'leads-to':
+            continue
+        field = field_by_path(model, invariant.get('entity'), invariant.get('field'))
+        if field is None:
+            findings.append({'code': 'DA11_LEADS_TO_FIELD_MISSING', 'severity': 'error', 'message': f"Leads-to invariant {invariant.get('id')} references missing field", 'evidence': {'invariant': invariant}})
+            continue
+        if field.get('enum'):
+            if invariant.get('from') not in field['enum']:
+                findings.append({'code': 'DA11_FROM_NOT_IN_ENUM', 'severity': 'warning', 'message': f"Leads-to from value {invariant.get('from')} not in enum", 'evidence': {'invariant': invariant}})
+            if invariant.get('to') not in field['enum']:
+                findings.append({'code': 'DA11_TO_NOT_IN_ENUM', 'severity': 'warning', 'message': f"Leads-to to value {invariant.get('to')} not in enum", 'evidence': {'invariant': invariant}})
+    return check_result('DA11', findings, 'Data leads-to')
+
+def da12_data_atomicity(model, options):
+    findings = []
+    registry = data_step_registry(options)
+    for invariant in model.get('invariants', []):
+        if invariant.get('kind') != 'atomicity':
+            continue
+        for step in invariant.get('steps', []):
+            entry = registry.get(step)
+            if entry is None:
+                findings.append({'code': 'DA12_ATOMIC_STEP_MISSING', 'severity': 'error', 'message': f"Atomicity invariant {invariant.get('id')} references missing step {step}", 'evidence': {'invariant': invariant, 'step': step}})
+                continue
+            if entry.get('kind') == 'migration' and entry.get('transform') in ('drop', 'split', 'merge'):
+                findings.append({'code': 'DA12_NON_ATOMIC_TRANSFORM', 'severity': 'warning', 'message': f"Atomic step {step} uses non-atomic transform {entry.get('transform')}", 'evidence': {'invariant': invariant, 'step': step}})
+            if entry.get('kind') == 'copy' and entry.get('copyPair') is not None:
+                pair = entry['copyPair']
+                has_backup = any(bp.get('sourceEntity') == pair.get('sourceEntity') and bp.get('targetEntity') == pair.get('targetEntity') for bp in options.get('backupPairs', []))
+                if not has_backup:
+                    findings.append({'code': 'DA12_ATOMIC_COPY_NO_BACKUP', 'severity': 'warning', 'message': f"Atomic copy step {step} has no backup/restore pair", 'evidence': {'invariant': invariant, 'step': step}})
+    return check_result('DA12', findings, 'Data atomicity')
+
 def dd1_data_behavior_preservation(before, after, options):
     findings = []
     after_fields = {path: True for path in all_field_paths(after)}
@@ -389,6 +468,10 @@ def run_checks(model, options):
         da6_copy_consistency(model, options),
         da7_rollback_backup_symmetry(model, options),
         da8_idempotent_constraints(model, options),
+        da9_data_monotonic(model, options),
+        da10_data_sequence(model, options),
+        da11_data_leads_to(model, options),
+        da12_data_atomicity(model, options),
     ]
     if options.get('beforeModel') is not None:
         checks.extend([

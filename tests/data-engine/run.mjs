@@ -179,6 +179,75 @@ test('idempotent-migration with split transform warns', () => {
   assertNoUndefinedValues(report)
 })
 
+test('data monotonic flags opposite copy direction', () => {
+  const model = {
+    schemaVersion: 1,
+    entities: [
+      { name: 'Source', fields: [{ name: 'v', type: 'integer', monotonic: 'dec' }] },
+      { name: 'Target', fields: [{ name: 'version', type: 'integer', monotonic: 'inc' }] },
+    ],
+    invariants: [
+      { id: 'mono1', description: 'version increases', kind: 'monotonic', entity: 'Target', field: 'version', direction: 'inc' },
+    ],
+  }
+  const report = runDataVerification(model, {
+    copyPairs: [{ id: 'c1', sourceEntity: 'Source', targetEntity: 'Target', mapping: { v: 'version' } }],
+  })
+  expectFinding(report, 'DA9', 'DA9_MONOTONIC_COPY_OPPOSITE')
+  assertNoUndefinedValues(report)
+})
+
+test('data sequence checks step ids exist', () => {
+  const model = {
+    schemaVersion: 1,
+    entities: [{ name: 'A', fields: [{ name: 'x', type: 'string' }] }],
+    invariants: [
+      { id: 'seq1', description: 'copy then migrate', kind: 'sequence', steps: ['c1', 'm1'] },
+    ],
+  }
+  const report = runDataVerification(model, {
+    copyPairs: [{ id: 'c1', sourceEntity: 'A', targetEntity: 'A', mapping: { x: 'x' } }],
+    migrationMappings: [],
+  })
+  expectFinding(report, 'DA10', 'DA10_SEQUENCE_STEP_MISSING')
+  assertNoUndefinedValues(report)
+})
+
+test('data leads-to validates enum values', () => {
+  const model = {
+    schemaVersion: 1,
+    entities: [{ name: 'Job', fields: [{ name: 'status', type: 'enum', enum: ['pending', 'done'] }] }],
+    invariants: [
+      { id: 'lead1', description: 'pending leads to done', kind: 'leads-to', entity: 'Job', field: 'status', from: 'pending', to: 'done' },
+      { id: 'lead2', description: 'bad value', kind: 'leads-to', entity: 'Job', field: 'status', from: 'nope', to: 'done' },
+    ],
+  }
+  const report = runDataVerification(model)
+  expectFinding(report, 'DA11', 'DA11_FROM_NOT_IN_ENUM')
+  assertNoUndefinedValues(report)
+})
+
+test('data atomicity flags missing backup and non-atomic transform', () => {
+  const model = {
+    schemaVersion: 1,
+    entities: [
+      { name: 'Source', fields: [{ name: 'a', type: 'string' }] },
+      { name: 'Target', fields: [{ name: 'x', type: 'string', required: true }] },
+    ],
+    invariants: [
+      { id: 'atom1', description: 'copy atomically', kind: 'atomicity', steps: ['c1', 'm1'] },
+    ],
+  }
+  const report = runDataVerification(model, {
+    copyPairs: [{ id: 'c1', sourceEntity: 'Source', targetEntity: 'Target', mapping: { a: 'x' } }],
+    migrationMappings: [{ id: 'm1', from: 'Source.a', to: 'Target.x', transform: 'split' }],
+    backupPairs: [],
+  })
+  expectFinding(report, 'DA12', 'DA12_ATOMIC_COPY_NO_BACKUP')
+  expectFinding(report, 'DA12', 'DA12_NON_ATOMIC_TRANSFORM')
+  assertNoUndefinedValues(report)
+})
+
 if (failures > 0) {
   console.log('data engine tests failed:', failures)
   process.exit(1)

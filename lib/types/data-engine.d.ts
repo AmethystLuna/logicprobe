@@ -17,6 +17,7 @@ export interface FieldSpec {
     enum?: DataValue[];
     ref?: string;
     items?: FieldSpec;
+    monotonic?: 'inc' | 'dec';
 }
 export interface EntitySpec {
     name: string;
@@ -94,6 +95,31 @@ export type DataInvariantSpec = {
     kind: 'idempotent-migration';
     from: string;
     to: string;
+} | {
+    id: string;
+    description: string;
+    kind: 'monotonic';
+    entity: string;
+    field: string;
+    direction: 'inc' | 'dec';
+} | {
+    id: string;
+    description: string;
+    kind: 'sequence';
+    steps: string[];
+} | {
+    id: string;
+    description: string;
+    kind: 'leads-to';
+    entity: string;
+    field: string;
+    from: DataValue;
+    to: DataValue;
+} | {
+    id: string;
+    description: string;
+    kind: 'atomicity';
+    steps: string[];
 };
 export interface DataModelV1 {
     schemaVersion: 1;
@@ -119,6 +145,7 @@ export interface BackupPairSpec {
     mapping: Record<string, string>;
 }
 export interface MigrationMappingSpec {
+    id?: string;
     from: string;
     to: string;
     transform?: 'copy' | 'rename' | 'split' | 'merge' | 'drop' | 'manual';

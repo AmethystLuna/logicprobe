@@ -77,6 +77,10 @@ Refactoring variant:
 | DA6 | Copy consistency | Error |
 | DA7 | Rollback/backup symmetry | Warning |
 | DA8 | Idempotent constraints | Error/Warning |
+| DA9 | Data monotonic | Error/Warning |
+| DA10 | Data sequence | Error |
+| DA11 | Data leads-to | Error/Warning |
+| DA12 | Data atomicity | Error/Warning |
 
 ### DD — Before/after data regression
 

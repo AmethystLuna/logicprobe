@@ -36,6 +36,10 @@ Order    | userId     | uuid    | yes      | no     | no       | FK -> User.id
 - [ ] Every copy pair has a matching backup/restore pair.
 - [ ] Every `idempotent-copy` invariant has a matching copy pair.
 - [ ] Every `idempotent-migration` invariant has a matching migration mapping; split/merge/drop are reviewed as non-idempotent.
+- [ ] Monotonic fields only move in the declared direction.
+- [ ] Sequence steps reference existing copy/migration ids.
+- [ ] Leads-to from/to values exist in enum/status fields.
+- [ ] Atomic steps exist, avoid non-atomic transforms, and have backup/restore coverage where applicable.
 
 ## 4. Before/after checklist (DD1-DD4)
 

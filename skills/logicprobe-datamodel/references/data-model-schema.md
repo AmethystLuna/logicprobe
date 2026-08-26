@@ -50,7 +50,8 @@ The `logicprobe_datamodel_verify` tool accepts a structured JSON data model. The
   "pattern": null,
   "enum": null,
   "ref": null,
-  "items": null
+  "items": null,
+  "monotonic": null
 }
 ```
 
@@ -69,6 +70,10 @@ Supported `type` values: `string`, `integer`, `number`, `boolean`, `uuid`, `date
 | `no-orphan` | `{ entity, field, refEntity }` | No dangling references |
 | `idempotent-copy` | `{ sourceEntity, targetEntity }` | A matching copy pair must exist; the copy is intended to be replay-safe |
 | `idempotent-migration` | `{ from, to }` | A matching migration mapping must exist; split/merge/drop are flagged as non-idempotent |
+| `monotonic` | `{ entity, field, direction: "inc"\|"dec" }` | Field must move only in the declared direction |
+| `sequence` | `{ steps: ["c1", "m1"] }` | Referenced copy/migration step ids must exist |
+| `leads-to` | `{ entity, field, from, to }` | For enum/status fields, both values must exist |
+| `atomicity` | `{ steps: ["c1", "m1"] }` | Steps must exist; non-atomic transforms and missing backups are flagged |
 
 ## Tool arguments
 
@@ -81,7 +86,7 @@ Supported `type` values: `string`, `integer`, `number`, `boolean`, `uuid`, `date
     { "id": "c1", "sourceEntity": "Source", "targetEntity": "Target", "mapping": { "a": "x" } }
   ],
   "migrationMappings": [
-    { "from": "User.name", "to": "User.fullName", "transform": "rename" }
+    { "id": "m1", "from": "User.name", "to": "User.fullName", "transform": "rename" }
   ],
   "backupPairs": [
     { "id": "b1", "sourceEntity": "Source", "targetEntity": "Target", "mapping": { "x": "a" } }
@@ -92,7 +97,7 @@ Supported `type` values: `string`, `integer`, `number`, `boolean`, `uuid`, `date
 ## Checks
 
 - **DS1-DS4**: schema well-formedness, required-field completeness, relationship integrity, type/nullability consistency
-- **DA1-DA8**: null/empty injection, boundary blast, uniqueness, referential integrity, migration coverage, copy consistency, rollback/backup symmetry, idempotent constraints
+- **DA1-DA12**: null/empty injection, boundary blast, uniqueness, referential integrity, migration coverage, copy consistency, rollback/backup symmetry, idempotent constraints, data monotonic, data sequence, data leads-to, data atomicity
 - **DD1-DD4**: data behavior preservation, data invariant continuity, delta summary, breaking-change regression
 
 ## Minimal example

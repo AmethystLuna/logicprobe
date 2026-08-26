@@ -35,6 +35,7 @@ export interface FieldSpec {
   enum?: DataValue[]
   ref?: string
   items?: FieldSpec
+  monotonic?: 'inc' | 'dec'
 }
 
 export interface EntitySpec {
@@ -64,6 +65,10 @@ export type DataInvariantSpec =
   | { id: string; description: string; kind: 'no-orphan'; entity: string; field: string; refEntity: string }
   | { id: string; description: string; kind: 'idempotent-copy'; sourceEntity: string; targetEntity: string }
   | { id: string; description: string; kind: 'idempotent-migration'; from: string; to: string }
+  | { id: string; description: string; kind: 'monotonic'; entity: string; field: string; direction: 'inc' | 'dec' }
+  | { id: string; description: string; kind: 'sequence'; steps: string[] }
+  | { id: string; description: string; kind: 'leads-to'; entity: string; field: string; from: DataValue; to: DataValue }
+  | { id: string; description: string; kind: 'atomicity'; steps: string[] }
 
 export interface DataModelV1 {
   schemaVersion: 1
@@ -92,6 +97,7 @@ export interface BackupPairSpec {
 }
 
 export interface MigrationMappingSpec {
+  id?: string
   from: string
   to: string
   transform?: 'copy' | 'rename' | 'split' | 'merge' | 'drop' | 'manual'
@@ -184,6 +190,7 @@ function validateField(input: unknown, path: string, errors: string[], fieldName
   if (input.max !== undefined && typeof input.max !== 'number') bad(errors, path + '.max', 'must be a number')
   if (input.minLength !== undefined && typeof input.minLength !== 'number') bad(errors, path + '.minLength', 'must be a number')
   if (input.maxLength !== undefined && typeof input.maxLength !== 'number') bad(errors, path + '.maxLength', 'must be a number')
+  if (input.monotonic !== undefined && input.monotonic !== 'inc' && input.monotonic !== 'dec') bad(errors, path + '.monotonic', "must be 'inc' or 'dec'")
   if (input.pattern !== undefined && typeof input.pattern !== 'string') bad(errors, path + '.pattern', 'must be a string')
   if (input.ref !== undefined && typeof input.ref !== 'string') bad(errors, path + '.ref', 'must be a string')
   if (input.enum !== undefined && !Array.isArray(input.enum)) bad(errors, path + '.enum', 'must be an array')
@@ -289,6 +296,23 @@ export function validateDataModel(input: unknown): { ok: true; model: DataModelV
       } else if (kind === 'idempotent-migration') {
         if (typeof entry.from !== 'string') bad(errors, path + '.from', 'must be a string')
         if (typeof entry.to !== 'string') bad(errors, path + '.to', 'must be a string')
+      } else if (kind === 'monotonic') {
+        if (typeof entry.entity !== 'string') bad(errors, path + '.entity', 'must be a string')
+        if (typeof entry.field !== 'string') bad(errors, path + '.field', 'must be a string')
+        if (entry.direction !== 'inc' && entry.direction !== 'dec') bad(errors, path + '.direction', "must be 'inc' or 'dec'")
+      } else if (kind === 'sequence') {
+        if (!Array.isArray(entry.steps) || entry.steps.length === 0) bad(errors, path + '.steps', 'must be a non-empty array')
+        else entry.steps.forEach((step, stepIndex) => {
+          if (typeof step !== 'string' || step.length === 0) bad(errors, path + '.steps[' + stepIndex + ']', 'must be a non-empty string')
+        })
+      } else if (kind === 'leads-to') {
+        if (typeof entry.entity !== 'string') bad(errors, path + '.entity', 'must be a string')
+        if (typeof entry.field !== 'string') bad(errors, path + '.field', 'must be a string')
+      } else if (kind === 'atomicity') {
+        if (!Array.isArray(entry.steps) || entry.steps.length === 0) bad(errors, path + '.steps', 'must be a non-empty array')
+        else entry.steps.forEach((step, stepIndex) => {
+          if (typeof step !== 'string' || step.length === 0) bad(errors, path + '.steps[' + stepIndex + ']', 'must be a non-empty string')
+        })
       } else {
         bad(errors, path + '.kind', 'unknown invariant kind')
       }
@@ -634,6 +658,101 @@ function DA8_idempotentConstraints(model: DataModelV1, options: DataVerification
   return checkResult('DA8', 'Idempotent Constraints', findings, findings.length === 0 ? 'Idempotency constraints are satisfied' : 'Idempotency findings: ' + findings.length)
 }
 
+function dataStepRegistry(options: DataVerificationOptions): Map<string, { kind: 'copy' | 'migration'; transform?: string; copyPair?: CopyPairSpec }> {
+  const map = new Map<string, { kind: 'copy' | 'migration'; transform?: string; copyPair?: CopyPairSpec }>()
+  for (const pair of options.copyPairs ?? []) map.set(pair.id, { kind: 'copy', copyPair: pair })
+  for (const mapping of options.migrationMappings ?? []) {
+    const id = mapping.id ?? mapping.from + '->' + mapping.to
+    map.set(id, { kind: 'migration', transform: mapping.transform })
+  }
+  return map
+}
+
+const MONOTONIC_DATA_TYPES = new Set<string>(['integer', 'number', 'date', 'datetime', 'timestamp'])
+
+function DA9_dataMonotonic(model: DataModelV1, options: DataVerificationOptions): CheckResult {
+  const findings: Finding[] = []
+  for (const invariant of model.invariants ?? []) {
+    if (invariant.kind !== 'monotonic') continue
+    const field = fieldByPath(model, invariant.entity, invariant.field)
+    if (field === undefined) {
+      findings.push({ code: 'DA9_MONOTONIC_FIELD_MISSING', severity: 'error', message: 'Monotonic invariant "' + invariant.id + '" references missing field ' + invariant.entity + '.' + invariant.field, evidence: { invariant } })
+      continue
+    }
+    if (!MONOTONIC_DATA_TYPES.has(field.type)) {
+      findings.push({ code: 'DA9_MONOTONIC_TYPE_UNSUPPORTED', severity: 'warning', message: 'Monotonic field ' + invariant.entity + '.' + invariant.field + ' has type ' + field.type + ', which may not support monotonic ordering', evidence: { invariant } })
+    }
+    if (field.monotonic !== undefined && field.monotonic !== invariant.direction) {
+      findings.push({ code: 'DA9_MONOTONIC_DIRECTION_MISMATCH', severity: 'error', message: 'Monotonic invariant direction ' + invariant.direction + ' conflicts with field monotonic ' + field.monotonic + ' for ' + invariant.entity + '.' + invariant.field, evidence: { invariant } })
+    }
+    for (const pair of options.copyPairs ?? []) {
+      for (const [sourceField, targetField] of Object.entries(pair.mapping)) {
+        if (pair.targetEntity + '.' + targetField === invariant.entity + '.' + invariant.field) {
+          const source = fieldByPath(model, pair.sourceEntity, sourceField)
+          if (source?.monotonic !== undefined && source.monotonic !== invariant.direction) {
+            findings.push({ code: 'DA9_MONOTONIC_COPY_OPPOSITE', severity: 'warning', message: 'Copy ' + pair.id + ' maps opposite-monotonic source ' + pair.sourceEntity + '.' + sourceField + ' into monotonic target ' + invariant.entity + '.' + invariant.field, evidence: { invariant, pair } })
+          }
+        }
+      }
+    }
+  }
+  return checkResult('DA9', 'Data Monotonic', findings, findings.length === 0 ? 'Monotonic data constraints are satisfied' : 'Data monotonic findings: ' + findings.length)
+}
+
+function DA10_dataSequence(model: DataModelV1, options: DataVerificationOptions): CheckResult {
+  const findings: Finding[] = []
+  const registry = dataStepRegistry(options)
+  for (const invariant of model.invariants ?? []) {
+    if (invariant.kind !== 'sequence') continue
+    for (const step of invariant.steps) {
+      if (!registry.has(step)) {
+        findings.push({ code: 'DA10_SEQUENCE_STEP_MISSING', severity: 'error', message: 'Sequence invariant "' + invariant.id + '" references missing step ' + step, evidence: { invariant, step } })
+      }
+    }
+  }
+  return checkResult('DA10', 'Data Sequence', findings, findings.length === 0 ? 'Data sequence steps exist' : 'Data sequence findings: ' + findings.length)
+}
+
+function DA11_dataLeadsTo(model: DataModelV1, options: DataVerificationOptions): CheckResult {
+  const findings: Finding[] = []
+  for (const invariant of model.invariants ?? []) {
+    if (invariant.kind !== 'leads-to') continue
+    const field = fieldByPath(model, invariant.entity, invariant.field)
+    if (field === undefined) {
+      findings.push({ code: 'DA11_LEADS_TO_FIELD_MISSING', severity: 'error', message: 'Leads-to invariant "' + invariant.id + '" references missing field ' + invariant.entity + '.' + invariant.field, evidence: { invariant } })
+      continue
+    }
+    if (field.enum !== undefined && field.enum.length > 0) {
+      if (!field.enum.includes(invariant.from)) findings.push({ code: 'DA11_FROM_NOT_IN_ENUM', severity: 'warning', message: 'Leads-to from value ' + String(invariant.from) + ' is not in enum for ' + invariant.entity + '.' + invariant.field, evidence: { invariant } })
+      if (!field.enum.includes(invariant.to)) findings.push({ code: 'DA11_TO_NOT_IN_ENUM', severity: 'warning', message: 'Leads-to to value ' + String(invariant.to) + ' is not in enum for ' + invariant.entity + '.' + invariant.field, evidence: { invariant } })
+    }
+  }
+  return checkResult('DA11', 'Data Leads-To', findings, findings.length === 0 ? 'Data leads-to constraints are structurally valid' : 'Data leads-to findings: ' + findings.length)
+}
+
+function DA12_dataAtomicity(model: DataModelV1, options: DataVerificationOptions): CheckResult {
+  const findings: Finding[] = []
+  const registry = dataStepRegistry(options)
+  for (const invariant of model.invariants ?? []) {
+    if (invariant.kind !== 'atomicity') continue
+    for (const step of invariant.steps) {
+      const entry = registry.get(step)
+      if (entry === undefined) {
+        findings.push({ code: 'DA12_ATOMIC_STEP_MISSING', severity: 'error', message: 'Atomicity invariant "' + invariant.id + '" references missing step ' + step, evidence: { invariant, step } })
+        continue
+      }
+      if (entry.kind === 'migration' && (entry.transform === 'drop' || entry.transform === 'split' || entry.transform === 'merge')) {
+        findings.push({ code: 'DA12_NON_ATOMIC_TRANSFORM', severity: 'warning', message: 'Atomic step ' + step + ' uses non-atomic transform ' + entry.transform, evidence: { invariant, step } })
+      }
+      if (entry.kind === 'copy' && entry.copyPair !== undefined) {
+        const hasBackup = (options.backupPairs ?? []).some((pair) => pair.sourceEntity === entry.copyPair!.sourceEntity && pair.targetEntity === entry.copyPair!.targetEntity)
+        if (!hasBackup) findings.push({ code: 'DA12_ATOMIC_COPY_NO_BACKUP', severity: 'warning', message: 'Atomic copy step ' + step + ' has no backup/restore pair', evidence: { invariant, step } })
+      }
+    }
+  }
+  return checkResult('DA12', 'Data Atomicity', findings, findings.length === 0 ? 'Data atomicity constraints are satisfied' : 'Data atomicity findings: ' + findings.length)
+}
+
 function DD1_dataBehaviorPreservation(before: DataModelV1, after: DataModelV1, options: DataVerificationOptions): CheckResult {
   const findings: Finding[] = []
   const afterFields = entityFieldMap(after)
@@ -822,6 +941,10 @@ export function runDataVerification(input: unknown, options: DataVerificationOpt
     DA6_copyConsistency(model, options),
     DA7_rollbackBackupSymmetry(model, options),
     DA8_idempotentConstraints(model, options),
+    DA9_dataMonotonic(model, options),
+    DA10_dataSequence(model, options),
+    DA11_dataLeadsTo(model, options),
+    DA12_dataAtomicity(model, options),
   ]
   let comparison: DataComparisonSummary | undefined
   if (options.beforeModel !== undefined) {
