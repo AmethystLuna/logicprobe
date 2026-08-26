@@ -45,6 +45,28 @@ PAIRS: list[tuple[str, str]] = [
     # ("start", "stop"),
 ]
 
+# Monotonic variables (for S8)
+# Format: {"name": "counter", "direction": "inc|dec", "increase_events": [...], "decrease_events": [...]}
+MONOTONIC_VARS: list[dict] = []
+
+# Events that must be idempotent (for A8)
+IDEMPOTENT_EVENTS: set[str] = set()
+
+# Leads-to requirements (for A9): list of (from_state, to_state)
+LEADS_TO: list[tuple[str, str]] = []
+
+# Sequence requirements (for A10): list of event lists that must occur in order
+SEQUENCES: list[list[str]] = []
+
+# Atomic groups (for A11): {"events": [...], "commit": "...", "rollback": "..."}
+ATOMIC_GROUPS: list[dict] = []
+
+# Before model for D1-D4 comparison (optional)
+BEFORE_STATES: dict[str, dict[str, str]] = {}
+BEFORE_INIT: str = "INIT"
+BEFORE_TERMINALS: set[str] = set()
+STATE_MAPPING: dict[str, str] = {}
+
 # =============================================================================
 # PHASE 2a: STRUCTURAL PRIMITIVES
 # =============================================================================
@@ -501,6 +523,183 @@ def A7_shortest_violation(invariant_results):
     }
 
 # =============================================================================
+# S8 / A8-A11 / D1-D4
+# =============================================================================
+
+def S8_monotonic_variables():
+    findings = []
+    for var in MONOTONIC_VARS:
+        direction = var.get('direction')
+        name = var.get('name', '?')
+        if direction == 'inc':
+            for event in var.get('decrease_events', []):
+                findings.append({'code': 'S8_MONOTONIC_DECREASE', 'severity': 'error', 'message': f'Monotonic inc variable {name} decreased by {event}', 'evidence': {'variable': name, 'event': event}})
+        elif direction == 'dec':
+            for event in var.get('increase_events', []):
+                findings.append({'code': 'S8_MONOTONIC_INCREASE', 'severity': 'error', 'message': f'Monotonic dec variable {name} increased by {event}', 'evidence': {'variable': name, 'event': event}})
+    return {'pass': len(findings) == 0, 'findings': findings, 'detail': 'Monotonic variables respected' if not findings else f'{len(findings)} monotonic violations'}
+
+
+def A8_idempotent_replay():
+    findings = []
+    for event in IDEMPOTENT_EVENTS:
+        for state in sorted(all_states()):
+            if event not in STATES.get(state, {}):
+                continue
+            once = STATES[state][event]
+            twice = STATES.get(once, {}).get(event)
+            if twice is None:
+                findings.append({'code': 'A8_NOT_REPLAYABLE', 'severity': 'warning', 'message': f'Idempotent event {event} not replayable from {state}', 'evidence': {'state': state, 'event': event}})
+            elif twice != once:
+                findings.append({'code': 'A8_NOT_IDEMPOTENT', 'severity': 'error', 'message': f'Idempotent event {event} changes state from {state}', 'evidence': {'state': state, 'event': event, 'once': once, 'twice': twice}})
+    return {'pass': len(findings) == 0, 'findings': findings, 'detail': 'Idempotent events replay-safe' if not findings else f'{len(findings)} idempotent findings'}
+
+
+def A9_leads_to():
+    findings = []
+    for from_state, to_state in LEADS_TO:
+        visited = set()
+        queue = deque([from_state])
+        bad = False
+        while queue:
+            state = queue.popleft()
+            if state == to_state:
+                continue
+            if state in visited:
+                bad = True
+                break
+            visited.add(state)
+            nexts = list(STATES.get(state, {}).values())
+            if not nexts:
+                bad = True
+                break
+            for nxt in nexts:
+                queue.append(nxt)
+        if bad:
+            findings.append({'code': 'A9_LEADS_TO_VIOLATION', 'severity': 'error', 'message': f'State {from_state} does not always lead to {to_state}', 'evidence': {'from': from_state, 'to': to_state}})
+    return {'pass': len(findings) == 0, 'findings': findings, 'detail': 'Leads-to invariants hold' if not findings else f'{len(findings)} leads-to violations'}
+
+
+def A10_sequence_order():
+    findings = []
+    for seq in SEQUENCES:
+        visited = set()
+        queue = deque([(INIT, 0, [])])
+        violation = None
+        while queue:
+            state, progress, path = queue.popleft()
+            key = (state, progress)
+            if key in visited:
+                continue
+            visited.add(key)
+            for event, nxt in STATES.get(state, {}).items():
+                p = progress
+                bad = False
+                if p < len(seq) and event == seq[p]:
+                    p += 1
+                else:
+                    idx = seq.index(event) if event in seq else -1
+                    if idx > p:
+                        bad = True
+                new_path = path + [event]
+                if bad:
+                    violation = new_path
+                    break
+                queue.append((nxt, p, new_path))
+            if violation:
+                break
+        if violation:
+            findings.append({'code': 'A10_SEQUENCE_VIOLATION', 'severity': 'error', 'message': f'Sequence {seq} violated by path {violation}', 'evidence': {'sequence': seq, 'path': violation}})
+    return {'pass': len(findings) == 0, 'findings': findings, 'detail': 'Sequence orders hold' if not findings else f'{len(findings)} sequence violations'}
+
+
+def A11_atomicity():
+    findings = []
+    for group in ATOMIC_GROUPS:
+        atomic = set(group.get('events', []))
+        commit = group.get('commit')
+        rollback = group.get('rollback')
+        visited = set()
+        queue = deque([(INIT, False, False, [])])
+        violation = None
+        while queue:
+            state, started, closed, path = queue.popleft()
+            key = (state, started, closed)
+            if key in visited:
+                continue
+            visited.add(key)
+            for event, nxt in STATES.get(state, {}).items():
+                ns = started or event in atomic
+                nc = closed or event == commit or (rollback is not None and event == rollback)
+                new_path = path + [event]
+                if started and not closed and event not in atomic and event != commit and event != rollback:
+                    violation = (new_path, 'left atomic scope')
+                    break
+                if ns and not nc and nxt in TERMINALS:
+                    violation = (new_path, 'terminal with incomplete atomic group')
+                    break
+                queue.append((nxt, ns, nc, new_path))
+            if violation:
+                break
+        if violation:
+            findings.append({'code': 'A11_ATOMICITY_VIOLATION', 'severity': 'error', 'message': f'Atomicity violated: {violation[1]}', 'evidence': {'group': group, 'path': violation[0]}})
+    return {'pass': len(findings) == 0, 'findings': findings, 'detail': 'Atomicity invariants hold' if not findings else f'{len(findings)} atomicity violations'}
+
+
+def D1_behavioral_preservation():
+    findings = []
+    if not BEFORE_STATES:
+        return {'pass': True, 'findings': [], 'detail': 'No before model — skipped'}
+    for state, trans in BEFORE_STATES.items():
+        mapped = STATE_MAPPING.get(state, state)
+        for event in trans:
+            if event not in STATES.get(mapped, {}):
+                findings.append({'code': 'D1_EVENT_DISABLED', 'severity': 'error', 'message': f'BEFORE event {event} disabled in AFTER state {mapped}', 'evidence': {'beforeState': state, 'mappedState': mapped, 'event': event}})
+    return {'pass': len(findings) == 0, 'findings': findings, 'detail': 'Behavior preserved' if not findings else f'{len(findings)} behavior regressions'}
+
+
+def D2_invariant_continuity():
+    if not BEFORE_STATES:
+        return {'pass': True, 'findings': [], 'detail': 'No before model — skipped'}
+    return {'pass': True, 'findings': [], 'detail': 'Invariant continuity requires structured invariants; use DSH or data-model harness for full check'}
+
+
+def D3_delta_summary():
+    findings = []
+    if not BEFORE_STATES:
+        return {'pass': True, 'findings': [], 'detail': 'No before model — skipped'}
+    before_events = {e for t in BEFORE_STATES.values() for e in t}
+    after_events = all_events()
+    before_states = set(BEFORE_STATES)
+    after_states = all_states()
+    removed_states = sorted(before_states - after_states)
+    added_states = sorted(after_states - before_states)
+    removed_events = sorted(before_events - after_events)
+    added_events = sorted(after_events - before_events)
+    for state in removed_states:
+        findings.append({'code': 'D3_REMOVED_STATE', 'severity': 'warning', 'message': f'BEFORE state {state} removed', 'evidence': {'state': state}})
+    for event in removed_events:
+        findings.append({'code': 'D3_REMOVED_EVENT', 'severity': 'warning', 'message': f'BEFORE event {event} removed', 'evidence': {'event': event}})
+    detail = f'Delta: +{len(added_states)} states, -{len(removed_states)} states, +{len(added_events)} events, -{len(removed_events)} events'
+    return {'pass': True, 'findings': findings, 'detail': detail}
+
+
+def D4_deadlock_liveness_regression():
+    findings = []
+    if not BEFORE_STATES:
+        return {'pass': True, 'findings': [], 'detail': 'No before model — skipped'}
+    def deadlock_set(states, terminals):
+        return {s for s in states if s not in terminals and len(states.get(s, {})) == 0}
+    before_dead = deadlock_set(BEFORE_STATES, BEFORE_TERMINALS)
+    after_dead = deadlock_set(STATES, TERMINALS)
+    mapped_before_dead = {STATE_MAPPING.get(s, s) for s in before_dead}
+    for state in sorted(after_dead):
+        if state not in mapped_before_dead:
+            findings.append({'code': 'D4_DEADLOCK_REGRESSION', 'severity': 'error', 'message': f'AFTER introduces deadlock in {state}', 'evidence': {'state': state}})
+    return {'pass': len(findings) == 0, 'findings': findings, 'detail': 'No deadlock regressions' if not findings else f'{len(findings)} deadlock regressions'}
+
+
+# =============================================================================
 # MAIN
 # =============================================================================
 
@@ -521,6 +720,7 @@ def run_all():
         ("S5 Event Completeness", S5_event_completeness),
         ("S6 Guard Completeness", S6_guard_completeness),
         ("S7 Invariants", S7_invariants),
+        ("S8 Monotonic Variables", S8_monotonic_variables),
     ]
 
     for name, check_fn in checks_2a:
@@ -548,6 +748,10 @@ def run_all():
         ("A5 Boundary Blast", A5_boundary_blast),
         ("A6 Resource Injection", A6_resource_injection),
         ("A7 Shortest Violation", lambda: A7_shortest_violation(results.get("S7 Invariants", {}))),
+        ("A8 Idempotent Replay", A8_idempotent_replay),
+        ("A9 Leads-To", A9_leads_to),
+        ("A10 Sequence Order", A10_sequence_order),
+        ("A11 Atomicity", A11_atomicity),
     ]
 
     for name, probe_fn in probes_2b:
@@ -558,6 +762,26 @@ def run_all():
         print(f"{prefix}[{status}] {name}: {result['detail']}")
         if not result["pass"]:
             warnings += 1  # Probe failures are warnings by default (may be false positives)
+
+    if BEFORE_STATES:
+        print()
+        print("=" * 60)
+        print("PHASE 2c: BEFORE/AFTER REGRESSION")
+        print("=" * 60)
+        diff_checks = [
+            ("D1 Behavioral Preservation", D1_behavioral_preservation),
+            ("D2 Invariant Continuity", D2_invariant_continuity),
+            ("D3 Delta Summary", D3_delta_summary),
+            ("D4 Deadlock/Liveness Regression", D4_deadlock_liveness_regression),
+        ]
+        for name, check_fn in diff_checks:
+            result = check_fn()
+            results[name] = result
+            status = "PASS" if result["pass"] else "FAIL"
+            prefix = "  " if result["pass"] else "  [!] "
+            print(f"{prefix}[{status}] {name}: {result['detail']}")
+            if not result["pass"]:
+                errors += 1
 
     print()
     print("=" * 60)

@@ -239,6 +239,54 @@ def shortest_violating_path(states, init, invariant_check):
     return None  # Invariant holds for all reachable states
 ```
 
+### S8: Monotonic Variables
+
+For counters or progress variables that must only move in one direction, list the events that increase/decrease them. Any event that moves against the declared direction is a finding.
+
+```python
+MONOTONIC_VARS = [
+    {"name": "retry_count", "direction": "inc", "increase_events": ["retry"], "decrease_events": []},
+]
+```
+
+### A8: Idempotent Replay
+
+For events that must be safe to retry/replay, apply the event twice from every reachable state. If the second application changes state or is not possible, flag it.
+
+```python
+IDEMPOTENT_EVENTS = {"retry", "sync", "webhook_delivery"}
+```
+
+### A9: Leads-To
+
+For progress claims ("from MIGRATING, eventually DONE"), check every path from the source state. If a path dead-ends or loops before reaching the target, flag it.
+
+```python
+LEADS_TO = [
+    ("MIGRATING", "DONE"),
+]
+```
+
+### A10: Sequence Order
+
+For ordered event sequences ("backup before modify before commit"), search for any path where a later event occurs before an earlier one.
+
+```python
+SEQUENCES = [
+    ["backup", "modify", "commit"],
+]
+```
+
+### A11: Atomicity
+
+For all-or-nothing groups, track whether an atomic event has started and whether commit/rollback has occurred. Leaving the atomic scope or reaching a terminal state before commit/rollback is a violation.
+
+```python
+ATOMIC_GROUPS = [
+    {"events": ["write"], "commit": "commit", "rollback": "rollback"},
+]
+```
+
 ## Counter-Example Interpretation
 
 When a probe finds a counter-example, classify it:
@@ -318,6 +366,8 @@ The BEFORE model comes from **code, not the plan**. The plan may describe the cu
 If the plan claims "simplification" but the numbers don't decrease, flag as UNSUBSTANTIATED CLAIM.
 
 **Deadlock regression**: A refactoring that splits one state into two should not introduce a deadlock path that didn't exist before. Run S2 on AFTER and compare to BEFORE's deadlock report.
+
+In the Python harness, set `BEFORE_STATES`, `BEFORE_INIT`, `BEFORE_TERMINALS`, and `STATE_MAPPING` to run D1-D4 automatically after the standard checks.
 
 ### Common Refactoring Bugs Caught by This Method
 
