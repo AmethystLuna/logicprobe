@@ -1,7 +1,7 @@
 {
   "name": "logicprobe",
   "version": "0.5.0",
-  "description": "Design document & plan claim verification — logic primitives + adversarial probing for behavioral claims. State machines, protocol logic, and refactoring plans get executable-model verification (7 structural + 7 adversarial checks) with regression detection.",
+  "description": "Design document & plan claim verification — logic primitives + adversarial probing for behavioral claims. State machines, data models, protocol logic, and refactoring plans get executable-model verification (state machine S1-S8/A1-A11, data model DS/DA/DD) with before/after regression detection.",
   "author": {
     "name": "Amethyst Luna",
     "url": "https://github.com/AmethystLuna"
@@ -22,7 +22,7 @@
   "interface": {
     "displayName": "Logic Probe",
     "shortDescription": "Claim verification for design docs & plans — logic primitives + adversarial probing",
-    "longDescription": "Documents are not truth — code is. Verifies every verifiable claim in design documents, architecture specs, and refactoring plans against the actual codebase, then escalates to executable-model verification for behavioral claims: 7 structural checks and 7 adversarial probes. Refactoring plans get before/after model comparison for regression detection. Python harness included, with manual fallback for air-gapped machines.",
+    "longDescription": "Documents are not truth — code is. Verifies every verifiable claim in design documents, architecture specs, and refactoring plans against the actual codebase, then escalates to executable-model verification for behavioral claims: 8 structural checks and 11 adversarial probes. Data-model verification adds DS/DA/DD checks for schemas, migrations, copy consistency, and data invariants. Before/after model comparison catches regressions. Python harnesses included, with manual fallback for air-gapped machines.",
     "developerName": "Amethyst Luna",
     "websiteURL": "https://github.com/AmethystLuna/logicprobe"
   }

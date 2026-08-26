@@ -1,0 +1,185 @@
+{
+  "schemaVersion": 1,
+  "entities": [
+    {
+      "name": "Customer",
+      "fields": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "required": true
+        },
+        {
+          "name": "email",
+          "type": "string",
+          "required": true,
+          "unique": true
+        },
+        {
+          "name": "name",
+          "type": "string",
+          "required": true
+        }
+      ],
+      "primaryKey": [
+        "id"
+      ]
+    },
+    {
+      "name": "Product",
+      "fields": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "required": true
+        },
+        {
+          "name": "sku",
+          "type": "string",
+          "required": true,
+          "unique": true
+        },
+        {
+          "name": "price",
+          "type": "number",
+          "required": true,
+          "min": 0
+        }
+      ],
+      "primaryKey": [
+        "id"
+      ]
+    },
+    {
+      "name": "Order",
+      "fields": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "required": true
+        },
+        {
+          "name": "customerId",
+          "type": "uuid",
+          "required": true,
+          "ref": "Customer.id"
+        },
+        {
+          "name": "status",
+          "type": "enum",
+          "required": true,
+          "enum": [
+            "new",
+            "paid",
+            "shipped",
+            "cancelled"
+          ]
+        }
+      ],
+      "primaryKey": [
+        "id"
+      ]
+    },
+    {
+      "name": "OrderItem",
+      "fields": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "required": true
+        },
+        {
+          "name": "orderId",
+          "type": "uuid",
+          "required": true,
+          "ref": "Order.id"
+        },
+        {
+          "name": "productId",
+          "type": "uuid",
+          "required": true,
+          "ref": "Product.id"
+        },
+        {
+          "name": "quantity",
+          "type": "integer",
+          "required": true,
+          "min": 1
+        }
+      ],
+      "primaryKey": [
+        "id"
+      ]
+    }
+  ],
+  "relationships": [
+    {
+      "fromEntity": "Order",
+      "fromField": "customerId",
+      "toEntity": "Customer",
+      "toField": "id",
+      "onDelete": "restrict"
+    },
+    {
+      "fromEntity": "OrderItem",
+      "fromField": "orderId",
+      "toEntity": "Order",
+      "toField": "id",
+      "onDelete": "cascade"
+    },
+    {
+      "fromEntity": "OrderItem",
+      "fromField": "productId",
+      "toEntity": "Product",
+      "toField": "id",
+      "onDelete": "restrict"
+    }
+  ],
+  "invariants": [
+    {
+      "id": "customer-email-unique",
+      "description": "customer email unique",
+      "kind": "unique",
+      "entity": "Customer",
+      "fields": [
+        "email"
+      ]
+    },
+    {
+      "id": "order-customer-ref",
+      "description": "order customer reference",
+      "kind": "referential-integrity",
+      "entity": "Order",
+      "field": "customerId",
+      "refEntity": "Customer"
+    },
+    {
+      "id": "quantity-positive",
+      "description": "quantity positive",
+      "kind": "range",
+      "entity": "OrderItem",
+      "field": "quantity",
+      "min": 1
+    }
+  ],
+  "boundaryChecks": [
+    {
+      "entity": "Product",
+      "field": "price",
+      "values": [
+        -1,
+        0,
+        999.99
+      ]
+    },
+    {
+      "entity": "OrderItem",
+      "field": "quantity",
+      "values": [
+        0,
+        1,
+        100
+      ]
+    }
+  ]
+}

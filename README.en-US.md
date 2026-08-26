@@ -85,6 +85,8 @@ The skill auto-classifies depth (LIGHTWEIGHT / STANDARD / ESCALATED) from plan f
 
 In DSH, prefer the native `logicprobe_verify` tool for state machines and `logicprobe_datamodel_verify` for data models (see the schema references under each skill). Python remains optional for non-DSH hosts: state-machine checks use `skills/logicprobe/references/verification-harness.py`; data-model checks use `skills/logicprobe-datamodel/references/data-model-harness.py`. When Python is unavailable, the corresponding guide provides a manual verification mode.
 
+Sample models are available under [`examples/`](examples/README.md): order state-machine before/after, e-commerce data model, and User field migration.
+
 ## Codex CLI
 
 This plugin also supports OpenAI Codex CLI. Skills follow the Agent Skills standard and work identically across both platforms.

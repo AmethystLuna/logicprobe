@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "entities": [
+    {
+      "name": "User",
+      "fields": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "required": true
+        },
+        {
+          "name": "name",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "email",
+          "type": "string",
+          "required": true,
+          "unique": true
+        }
+      ],
+      "primaryKey": [
+        "id"
+      ]
+    }
+  ]
+}

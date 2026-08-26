@@ -84,6 +84,8 @@ git clone https://github.com/AmethystLuna/logicprobe.git ~/.claude/plugins/dev/l
 
 Python 可选：状态机验证使用 `skills/logicprobe/references/verification-harness.py`，数据模型验证使用 `skills/logicprobe-datamodel/references/data-model-harness.py`；不可用（如离线开发机）时，对应 guide 提供手动验证模式。
 
+示例模型见 [`examples/`](examples/README.md)：订单状态机 before/after、电商数据模型、User 字段迁移。
+
 ## Codex CLI
 
 本插件同样支持 OpenAI Codex CLI。技能遵循 Agent Skills 标准，两个平台行为一致。

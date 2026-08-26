@@ -1,0 +1,59 @@
+{
+  "schemaVersion": 1,
+  "init": "NEW",
+  "states": [
+    {
+      "id": "NEW"
+    },
+    {
+      "id": "PAID"
+    },
+    {
+      "id": "SHIPPED"
+    },
+    {
+      "id": "DONE",
+      "terminal": true
+    },
+    {
+      "id": "CANCELLED",
+      "terminal": true
+    }
+  ],
+  "transitions": [
+    {
+      "from": "NEW",
+      "event": "pay",
+      "to": "PAID"
+    },
+    {
+      "from": "PAID",
+      "event": "ship",
+      "to": "SHIPPED"
+    },
+    {
+      "from": "SHIPPED",
+      "event": "deliver",
+      "to": "DONE"
+    },
+    {
+      "from": "NEW",
+      "event": "cancel",
+      "to": "CANCELLED"
+    },
+    {
+      "from": "PAID",
+      "event": "cancel",
+      "to": "CANCELLED"
+    }
+  ],
+  "invariants": [
+    {
+      "id": "pay-before-shipped",
+      "description": "pay must precede SHIPPED",
+      "kind": "event-before-state",
+      "event": "pay",
+      "state": "SHIPPED"
+    }
+  ]
+}

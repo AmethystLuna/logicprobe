@@ -1,7 +1,7 @@
 {
     "name":  "logicprobe",
     "displayName":  "Logic Probe",
-    "description":  "Design document & plan claim verification — logic primitives + adversarial probing for behavioral claims. State machines, protocol logic, and refactoring plans get executable-model verification (7 structural + 7 adversarial checks) with regression detection.",
+    "description":  "Design document & plan claim verification — logic primitives + adversarial probing for behavioral claims. State machines, data models, protocol logic, and refactoring plans get executable-model verification (state machine S1-S8/A1-A11, data model DS/DA/DD) with before/after regression detection.",
     "version": "0.5.0",
     "author":  {
                    "name":  "Amethyst Luna",
