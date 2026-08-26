@@ -29,7 +29,8 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test:engine": "npm run build && node tests/engine/run.mjs && node tests/data-engine/run.mjs && node tests/concurrency/run.mjs && node tests/apply-smoke.mjs"
+    "test:engine": "npm run build && node tests/engine/run.mjs && node tests/data-engine/run.mjs && node tests/concurrency/run.mjs && node tests/apply-smoke.mjs",
+    "test:full": "npm run build && node tests/full-suite.mjs"
   },
   "dependencies": {},
   "peerDependencies": {
