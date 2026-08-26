@@ -16,7 +16,8 @@ The dsh-native `logicprobe_verify` tool accepts a structured JSON model. The eng
   "invariants": [],
   "concurrentPairs": [],
   "boundaryChecks": [],
-  "resourcePairs": []
+  "resourcePairs": [],
+  "idempotentEvents": []
 }
 ```
 
@@ -31,6 +32,7 @@ The dsh-native `logicprobe_verify` tool accepts a structured JSON model. The eng
 | `concurrentPairs` | no | `["eventA", "eventB"]` pairs for A2 |
 | `boundaryChecks` | no | `{ variable, values: number[] }` for A5 |
 | `resourcePairs` | no | `{ resource, acquireEvent, releaseEvent, failEvent? }` for A4/A6 |
+| `idempotentEvents` | no | Events that must be replay-safe; verified by A8 |
 
 ## Guards
 
@@ -121,6 +123,10 @@ Example tool call shape:
 ```
 
 The report's `comparison` object includes both model hashes, state/transition counts, and delta arrays.
+
+## Idempotent replay (A8)
+
+List events that must be idempotent in `idempotentEvents`. For every reachable state, applying the event twice must produce the same state as applying it once. This is useful for retries, webhook redelivery, and migration replay.
 
 ## Limits
 

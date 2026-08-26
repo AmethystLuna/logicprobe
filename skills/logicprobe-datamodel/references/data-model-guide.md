@@ -34,6 +34,8 @@ Order    | userId     | uuid    | yes      | no     | no       | FK -> User.id
 - [ ] Every removed/renamed field has a migration mapping.
 - [ ] Every required target field in a copy pair is mapped.
 - [ ] Every copy pair has a matching backup/restore pair.
+- [ ] Every `idempotent-copy` invariant has a matching copy pair.
+- [ ] Every `idempotent-migration` invariant has a matching migration mapping; split/merge/drop are reviewed as non-idempotent.
 
 ## 4. Before/after checklist (DD1-DD4)
 

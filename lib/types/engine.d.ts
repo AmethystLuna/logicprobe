@@ -79,6 +79,7 @@ export interface LogicModelV1 {
     concurrentPairs?: [string, string][];
     boundaryChecks?: BoundaryCheckSpec[];
     resourcePairs?: ResourcePairSpec[];
+    idempotentEvents?: string[];
 }
 export interface VerificationOptions {
     maxStates?: number;

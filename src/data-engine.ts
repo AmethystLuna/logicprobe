@@ -62,6 +62,8 @@ export type DataInvariantSpec =
   | { id: string; description: string; kind: 'count-equal'; sourceEntity: string; targetEntity: string }
   | { id: string; description: string; kind: 'field-equal'; sourceEntity: string; sourceField: string; targetEntity: string; targetField: string }
   | { id: string; description: string; kind: 'no-orphan'; entity: string; field: string; refEntity: string }
+  | { id: string; description: string; kind: 'idempotent-copy'; sourceEntity: string; targetEntity: string }
+  | { id: string; description: string; kind: 'idempotent-migration'; from: string; to: string }
 
 export interface DataModelV1 {
   schemaVersion: 1
@@ -281,6 +283,12 @@ export function validateDataModel(input: unknown): { ok: true; model: DataModelV
         if (typeof entry.sourceField !== 'string') bad(errors, path + '.sourceField', 'must be a string')
         if (typeof entry.targetEntity !== 'string') bad(errors, path + '.targetEntity', 'must be a string')
         if (typeof entry.targetField !== 'string') bad(errors, path + '.targetField', 'must be a string')
+      } else if (kind === 'idempotent-copy') {
+        if (typeof entry.sourceEntity !== 'string') bad(errors, path + '.sourceEntity', 'must be a string')
+        if (typeof entry.targetEntity !== 'string') bad(errors, path + '.targetEntity', 'must be a string')
+      } else if (kind === 'idempotent-migration') {
+        if (typeof entry.from !== 'string') bad(errors, path + '.from', 'must be a string')
+        if (typeof entry.to !== 'string') bad(errors, path + '.to', 'must be a string')
       } else {
         bad(errors, path + '.kind', 'unknown invariant kind')
       }
@@ -589,6 +597,43 @@ function DA7_rollbackBackupSymmetry(model: DataModelV1, options: DataVerificatio
   return checkResult('DA7', 'Rollback/Backup Symmetry', findings, findings.length === 0 ? 'Copy/backup pairs are balanced' : 'Rollback/backup findings: ' + findings.length)
 }
 
+function DA8_idempotentConstraints(model: DataModelV1, options: DataVerificationOptions): CheckResult {
+  const findings: Finding[] = []
+  const copyPairs = options.copyPairs ?? []
+  const migrationMappings = options.migrationMappings ?? []
+  for (const invariant of model.invariants ?? []) {
+    if (invariant.kind === 'idempotent-copy') {
+      const pair = copyPairs.find((entry) => entry.sourceEntity === invariant.sourceEntity && entry.targetEntity === invariant.targetEntity)
+      if (pair === undefined) {
+        findings.push({
+          code: 'DA8_COPY_PAIR_MISSING',
+          severity: 'error',
+          message: 'Idempotent-copy invariant "' + invariant.id + '" has no matching copy pair for ' + invariant.sourceEntity + ' -> ' + invariant.targetEntity,
+          evidence: { invariant },
+        })
+      }
+    } else if (invariant.kind === 'idempotent-migration') {
+      const mapping = migrationMappings.find((entry) => entry.from === invariant.from && entry.to === invariant.to)
+      if (mapping === undefined) {
+        findings.push({
+          code: 'DA8_MIGRATION_MAPPING_MISSING',
+          severity: 'error',
+          message: 'Idempotent-migration invariant "' + invariant.id + '" has no matching migration mapping ' + invariant.from + ' -> ' + invariant.to,
+          evidence: { invariant },
+        })
+      } else if (mapping.transform === 'split' || mapping.transform === 'merge' || mapping.transform === 'drop') {
+        findings.push({
+          code: 'DA8_NON_IDEMPOTENT_TRANSFORM',
+          severity: 'warning',
+          message: 'Migration mapping ' + invariant.from + ' -> ' + invariant.to + ' uses non-idempotent transform ' + (mapping.transform ?? 'unknown'),
+          evidence: { invariant, mapping },
+        })
+      }
+    }
+  }
+  return checkResult('DA8', 'Idempotent Constraints', findings, findings.length === 0 ? 'Idempotency constraints are satisfied' : 'Idempotency findings: ' + findings.length)
+}
+
 function DD1_dataBehaviorPreservation(before: DataModelV1, after: DataModelV1, options: DataVerificationOptions): CheckResult {
   const findings: Finding[] = []
   const afterFields = entityFieldMap(after)
@@ -776,6 +821,7 @@ export function runDataVerification(input: unknown, options: DataVerificationOpt
     DA5_migrationCoverage(model, options),
     DA6_copyConsistency(model, options),
     DA7_rollbackBackupSymmetry(model, options),
+    DA8_idempotentConstraints(model, options),
   ]
   let comparison: DataComparisonSummary | undefined
   if (options.beforeModel !== undefined) {

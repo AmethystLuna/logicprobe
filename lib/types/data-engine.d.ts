@@ -82,6 +82,18 @@ export type DataInvariantSpec = {
     entity: string;
     field: string;
     refEntity: string;
+} | {
+    id: string;
+    description: string;
+    kind: 'idempotent-copy';
+    sourceEntity: string;
+    targetEntity: string;
+} | {
+    id: string;
+    description: string;
+    kind: 'idempotent-migration';
+    from: string;
+    to: string;
 };
 export interface DataModelV1 {
     schemaVersion: 1;

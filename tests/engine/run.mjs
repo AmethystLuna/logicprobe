@@ -179,6 +179,54 @@ async function runDiffTests() {
   console.log('PASS before-after-rename-mapping')
 }
 
+// Idempotent replay (A8)
+async function runIdempotencyTests() {
+  const nonIdempotent = {
+    schemaVersion: 1,
+    init: 'A',
+    states: [
+      { id: 'A' },
+      { id: 'B' },
+      { id: 'C', terminal: true },
+    ],
+    transitions: [
+      { from: 'A', event: 'tick', to: 'B' },
+      { from: 'B', event: 'tick', to: 'C' },
+    ],
+    idempotentEvents: ['tick'],
+  }
+  const report = runVerification(nonIdempotent)
+  const a8 = report.checks.find((check) => check.id === 'A8')
+  if (a8 === undefined || !a8.findings.some((finding) => finding.code === 'A8_NOT_IDEMPOTENT')) {
+    throw new Error('missing A8_NOT_IDEMPOTENT')
+  }
+  assertNoUndefinedValues(report)
+
+  const idempotent = {
+    schemaVersion: 1,
+    init: 'A',
+    states: [
+      { id: 'A' },
+      { id: 'B' },
+    ],
+    transitions: [
+      { from: 'A', event: 'go', to: 'B' },
+      { from: 'A', event: 'noop', to: 'A' },
+      { from: 'B', event: 'noop', to: 'B' },
+    ],
+    idempotentEvents: ['noop'],
+  }
+  const okReport = runVerification(idempotent)
+  const okA8 = okReport.checks.find((check) => check.id === 'A8')
+  if (okA8 === undefined || okA8.findings.length !== 0) {
+    throw new Error('A8 should pass for noop self-loops: ' + JSON.stringify(okA8?.findings ?? []))
+  }
+  assertNoUndefinedValues(okReport)
+  console.log('PASS idempotent-replay')
+}
+
+await runIdempotencyTests()
+
 await runDiffTests()
 if (failures > 0) {
   console.log('engine fixtures failed:', failures)

@@ -200,6 +200,7 @@ Run these SECOND. Each probe actively tries to BREAK the model. If any probe suc
 | A5 | **Boundary blast** | Probe counters at 0, 1, max-1, max, max+1. Probe timestamps at 0, tick_wraparound. Flag overflow, underflow, or undefined behavior. | "Handles all counter/timer values" |
 | A6 | **Resource injection** | Simulate `malloc→NULL`, `queue→full`, `semaphore→timeout` at each state that calls them. Flag if any state has no recovery path. | "Graceful degradation under resource pressure" |
 | A7 | **Minimal counter-example** | For any invariant that fails, find the SHORTEST event sequence that violates it (BFS from init to violating state). Output the exact path. | "This invariant holds" → refuted by shortest path |
+| A8 | **Idempotent replay** | For each event declared in `idempotentEvents`, apply it twice from every reachable state. Flag if the second application changes state or is not replayable. | "This event is safe to retry/replay" |
 
 ### Integration Back to Phase 3
 

@@ -67,6 +67,8 @@ Supported `type` values: `string`, `integer`, `number`, `boolean`, `uuid`, `date
 | `count-equal` | `{ sourceEntity, targetEntity }` | Source/target counts must match |
 | `field-equal` | `{ sourceEntity, sourceField, targetEntity, targetField }` | Two fields must be equal |
 | `no-orphan` | `{ entity, field, refEntity }` | No dangling references |
+| `idempotent-copy` | `{ sourceEntity, targetEntity }` | A matching copy pair must exist; the copy is intended to be replay-safe |
+| `idempotent-migration` | `{ from, to }` | A matching migration mapping must exist; split/merge/drop are flagged as non-idempotent |
 
 ## Tool arguments
 
@@ -90,7 +92,7 @@ Supported `type` values: `string`, `integer`, `number`, `boolean`, `uuid`, `date
 ## Checks
 
 - **DS1-DS4**: schema well-formedness, required-field completeness, relationship integrity, type/nullability consistency
-- **DA1-DA7**: null/empty injection, boundary blast, uniqueness, referential integrity, migration coverage, copy consistency, rollback/backup symmetry
+- **DA1-DA8**: null/empty injection, boundary blast, uniqueness, referential integrity, migration coverage, copy consistency, rollback/backup symmetry, idempotent constraints
 - **DD1-DD4**: data behavior preservation, data invariant continuity, delta summary, breaking-change regression
 
 ## Minimal example

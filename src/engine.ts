@@ -81,6 +81,7 @@ export interface LogicModelV1 {
   concurrentPairs?: [string, string][]
   boundaryChecks?: BoundaryCheckSpec[]
   resourcePairs?: ResourcePairSpec[]
+  idempotentEvents?: string[]
 }
 
 export interface VerificationOptions {
@@ -303,6 +304,12 @@ export function validateModel(input: unknown): { ok: true; model: LogicModelV1 }
       const check = entry as Record<string, unknown>
       validateVariableRef(check.variable, path + '.variable')
       if (!Array.isArray(check.values) || check.values.some((value) => typeof value !== 'number')) bad(path + '.values', 'must be an array of numbers')
+    })
+  }
+  if (root.idempotentEvents !== undefined) {
+    if (!Array.isArray(root.idempotentEvents)) bad('idempotentEvents', 'must be an array')
+    else root.idempotentEvents.forEach((entry, index) => {
+      if (typeof entry !== 'string' || entry.length === 0) bad('idempotentEvents[' + index + ']', 'must be a non-empty string')
     })
   }
   if (root.resourcePairs !== undefined) {
@@ -1362,6 +1369,42 @@ function buildComparisonSummary(before: LogicModelV1, after: LogicModelV1, mappi
     removedTransitions,
   }
 }
+function A8_idempotentReplay(model: LogicModelV1, exploration: Exploration): CheckResult {
+  const events = model.idempotentEvents ?? []
+  const findings: Finding[] = []
+  for (const event of events) {
+    for (const runtime of exploration.reachable) {
+      const onceOptions = stepRuntime(model, runtime, event)
+      if (onceOptions.length === 0) continue
+      for (const once of onceOptions) {
+        const twiceOptions = stepRuntime(model, once, event)
+        if (twiceOptions.length === 0) {
+          findings.push({
+            code: 'A8_NOT_REPLAYABLE',
+            severity: 'warning',
+            message: 'Idempotent event ' + event + ' is not replayable after first application from ' + runtime.state + '.',
+            path: [{ from: runtime.state, event, to: once.state }],
+            evidence: { state: runtime.state, event },
+          })
+          continue
+        }
+        for (const twice of twiceOptions) {
+          if (runtimeKey(twice) !== runtimeKey(once)) {
+            findings.push({
+              code: 'A8_NOT_IDEMPOTENT',
+              severity: 'error',
+              message: 'Idempotent event ' + event + ' changes state when applied twice from ' + runtime.state + '.',
+              path: [{ from: runtime.state, event, to: once.state }, { from: once.state, event, to: twice.state }],
+              evidence: { state: runtime.state, event, afterOnce: once, afterTwice: twice },
+            })
+            break
+          }
+        }
+      }
+    }
+  }
+  return checkResult('A8', 'Idempotent Replay', findings, findings.length === 0 ? 'Idempotent events are replay-safe' : 'Idempotent replay findings: ' + findings.length)
+}
 // ---------------------------------------------------------------------------
 // main entry
 // ---------------------------------------------------------------------------
@@ -1404,6 +1447,7 @@ export function runVerification(input: unknown, options: VerificationOptions = {
     A5_boundaryBlast(model),
     A6_resourceInjection(model),
     A7_shortestViolations(model, normalized),
+    A8_idempotentReplay(model, exploration),
   ]
   let comparison: ComparisonSummary | undefined
   if (options.beforeModel !== undefined) {

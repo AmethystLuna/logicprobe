@@ -76,6 +76,7 @@ Refactoring variant:
 | DA5 | Migration coverage | Error |
 | DA6 | Copy consistency | Error |
 | DA7 | Rollback/backup symmetry | Warning |
+| DA8 | Idempotent constraints | Error/Warning |
 
 ### DD — Before/after data regression
 

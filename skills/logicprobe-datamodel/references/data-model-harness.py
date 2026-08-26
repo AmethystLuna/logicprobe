@@ -257,6 +257,24 @@ def da7_rollback_backup_symmetry(model, options):
     return check_result('DA7', findings, 'Rollback/backup symmetry')
 
 
+def da8_idempotent_constraints(model, options):
+    findings = []
+    copy_pairs = options.get('copyPairs', [])
+    migration_mappings = options.get('migrationMappings', [])
+    for invariant in model.get('invariants', []):
+        kind = invariant.get('kind')
+        if kind == 'idempotent-copy':
+            pair = next((p for p in copy_pairs if p.get('sourceEntity') == invariant.get('sourceEntity') and p.get('targetEntity') == invariant.get('targetEntity')), None)
+            if pair is None:
+                findings.append({'code': 'DA8_COPY_PAIR_MISSING', 'severity': 'error', 'message': f"Idempotent-copy invariant {invariant.get('id')} has no matching copy pair", 'evidence': {'invariant': invariant}})
+        elif kind == 'idempotent-migration':
+            mapping = next((m for m in migration_mappings if m.get('from') == invariant.get('from') and m.get('to') == invariant.get('to')), None)
+            if mapping is None:
+                findings.append({'code': 'DA8_MIGRATION_MAPPING_MISSING', 'severity': 'error', 'message': f"Idempotent-migration invariant {invariant.get('id')} has no matching migration mapping", 'evidence': {'invariant': invariant}})
+            elif mapping.get('transform') in ('split', 'merge', 'drop'):
+                findings.append({'code': 'DA8_NON_IDEMPOTENT_TRANSFORM', 'severity': 'warning', 'message': f"Migration mapping {invariant.get('from')} -> {invariant.get('to')} uses non-idempotent transform {mapping.get('transform')}", 'evidence': {'invariant': invariant, 'mapping': mapping}})
+    return check_result('DA8', findings, 'Idempotent constraints')
+
 def dd1_data_behavior_preservation(before, after, options):
     findings = []
     after_fields = {path: True for path in all_field_paths(after)}
@@ -370,6 +388,7 @@ def run_checks(model, options):
         da5_migration_coverage(model, options),
         da6_copy_consistency(model, options),
         da7_rollback_backup_symmetry(model, options),
+        da8_idempotent_constraints(model, options),
     ]
     if options.get('beforeModel') is not None:
         checks.extend([

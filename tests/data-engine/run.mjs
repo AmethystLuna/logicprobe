@@ -145,6 +145,40 @@ test('rollback symmetry flags missing backup pair', () => {
   assertNoUndefinedValues(report)
 })
 
+test('idempotent-copy requires copy pair', () => {
+  const model = {
+    schemaVersion: 1,
+    entities: [
+      { name: 'Source', fields: [{ name: 'a', type: 'string' }] },
+      { name: 'Target', fields: [{ name: 'x', type: 'string', required: true }] },
+    ],
+    invariants: [
+      { id: 'ic1', description: 'copy must be idempotent', kind: 'idempotent-copy', sourceEntity: 'Source', targetEntity: 'Target' },
+    ],
+  }
+  const report = runDataVerification(model, { copyPairs: [] })
+  expectFinding(report, 'DA8', 'DA8_COPY_PAIR_MISSING')
+  assertNoUndefinedValues(report)
+})
+
+test('idempotent-migration with split transform warns', () => {
+  const model = {
+    schemaVersion: 1,
+    entities: [
+      { name: 'A', fields: [{ name: 'x', type: 'string' }] },
+      { name: 'B', fields: [{ name: 'y', type: 'string' }] },
+    ],
+    invariants: [
+      { id: 'im1', description: 'migration must be idempotent', kind: 'idempotent-migration', from: 'A.x', to: 'B.y' },
+    ],
+  }
+  const report = runDataVerification(model, {
+    migrationMappings: [{ from: 'A.x', to: 'B.y', transform: 'split' }],
+  })
+  expectFinding(report, 'DA8', 'DA8_NON_IDEMPOTENT_TRANSFORM')
+  assertNoUndefinedValues(report)
+})
+
 if (failures > 0) {
   console.log('data engine tests failed:', failures)
   process.exit(1)
