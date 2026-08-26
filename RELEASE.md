@@ -7,10 +7,10 @@ Shipping checklist for this plugin across the DeepSeek Harness (dsh) ecosystem a
 - [ ] Working tree clean; current branch is `main`
 - [ ] Version bumped in **every** manifest listed in `.version-bump.json` and kept identical (`.claude-plugin/plugin.json`, marketplace, `.codex-plugin`, `.cursor-plugin`, `.kimi-plugin`, root `package.json`)
 - [ ] `npx markdownlint-cli --ignore "**/node_modules/**" .` passes with the repo's `.markdownlint.json`
-- [ ] Bundle checks (rc-era dsh packages have peer conflicts — `--legacy-peer-deps` is required):
+- [ ] Bundle checks:
 
   ```bash
-  npm ci --legacy-peer-deps
+  npm ci
   npm run typecheck
   npm run build
   git diff --exit-code -- lib   # lib/ must be committed and current

@@ -1,6 +1,6 @@
 {
   "name": "dsh-logicprobe",
-  "version": "0.5.1",
+  "version": "0.5.2",
   "description": "Design document & plan claim verification — enumerate claims, verify against codebase facts, then escalate to state-machine verification (S1-S8/A1-A11) and data-model verification (DS/DA/DD) for behavioral claims. Supports before/after regression, idempotency/monotonic/sequence/leads-to/atomicity constraints, and concurrency risk mining. Ships a native DeepSeek Harness (dsh) bundle that injects the claim-verification gate into the first model step.",
   "type": "module",
   "main": "lib/index.js",
@@ -20,6 +20,9 @@
     "cordis.patch.yml"
   ],
   "dsh": {
+    "engines": {
+      "dsh": ">=0.1.1-rc.1"
+    },
     "category": "skill",
     "displayName": "逻辑探针",
     "bundle": {
@@ -36,8 +39,8 @@
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.1",
     "@deepseek-ai/dsh-agent": "^0.1.0-rc.6",
-    "@deepseek-ai/dsh-llm": "^0.0.1-rc.1",
-    "@deepseek-ai/dsh-session": "^0.0.1-rc.1",
+    "@deepseek-ai/dsh-llm": "^0.1.0-rc.6",
+    "@deepseek-ai/dsh-session": "^0.1.0-rc.6",
     "@deepseek-ai/dsh-skill-filesystem": "^0.1.0-rc.6",
     "@deepseek-ai/schemastery": "^3.18.1",
     "@deepseek-ai/dsh-tools": "^0.1.0-rc.6"
@@ -47,13 +50,13 @@
     "@deepseek-ai/dsh-agent": "^0.1.0-rc.6",
     "@deepseek-ai/dsh-cordis-host-runner": "^0.1.0-rc.6",
     "@deepseek-ai/dsh-home-paths": "^0.1.0-rc.6",
-    "@deepseek-ai/dsh-llm": "^0.0.1-rc.1",
+    "@deepseek-ai/dsh-llm": "^0.1.0-rc.6",
     "@deepseek-ai/dsh-scope": "^0.1.0-rc.6",
-    "@deepseek-ai/dsh-session": "^0.0.1-rc.1",
+    "@deepseek-ai/dsh-session": "^0.1.0-rc.6",
     "@deepseek-ai/dsh-skill": "^0.1.0-rc.6",
     "@deepseek-ai/dsh-skill-filesystem": "^0.1.0-rc.6",
     "@deepseek-ai/schemastery": "^3.18.1",
-    "@deepseek-ai/dsh-timeout": "^0.0.1-rc.1",
+    "@deepseek-ai/dsh-timeout": "^0.1.0-rc.6",
     "@types/node": "^20.0.0",
     "typescript": "^5.0.0",
     "@deepseek-ai/dsh-tools": "^0.1.0-rc.6",
