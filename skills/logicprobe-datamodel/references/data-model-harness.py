@@ -101,6 +101,10 @@ def ds2_required_completeness(model, options):
     for pair in options.get('copyPairs', []):
         for target in pair.get('mapping', {}).values():
             copy_targets.add(pair.get('targetEntity') + '.' + target)
+    before_paths = set()
+    if options.get('beforeModel') is not None:
+        mapping = options.get('fieldMapping', {})
+        before_paths = {map_field(mapping, path) for path in all_field_paths(options['beforeModel'])}
     for entity in model.get('entities', []):
         for field in entity.get('fields', []):
             if field.get('required') is not True:
@@ -109,7 +113,7 @@ def ds2_required_completeness(model, options):
                 findings.append({'code': 'DS2_NULLABLE_PRIMARY_KEY', 'severity': 'error', 'message': f'Primary key {entity.get("name")}.{field.get("name")} must not be nullable', 'evidence': {'entity': entity.get('name'), 'field': field.get('name')}})
             if options.get('beforeModel') is not None:
                 path = entity.get('name') + '.' + field.get('name')
-                if path not in migration_from and path not in copy_targets:
+                if path not in before_paths and path not in migration_from and path not in copy_targets:
                     findings.append({'code': 'DS2_REQUIRED_FIELD_UNSOURCED', 'severity': 'warning', 'message': f'Required field {path} has no migration mapping or copy target', 'evidence': {'entity': entity.get('name'), 'field': field.get('name')}})
     return check_result('DS2', findings, 'Required-field completeness')
 

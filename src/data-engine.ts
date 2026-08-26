@@ -364,6 +364,14 @@ function DS2_requiredCompleteness(model: DataModelV1, options: DataVerificationO
   for (const pair of options.copyPairs ?? []) {
     for (const target of Object.values(pair.mapping)) copyTargets.add(pair.targetEntity + '.' + target)
   }
+  const beforePaths = new Set<string>()
+  if (options.beforeModel !== undefined) {
+    const beforeValidation = validateDataModel(options.beforeModel)
+    if (beforeValidation.ok) {
+      const mapping = options.fieldMapping ?? {}
+      for (const path of allFieldPaths(beforeValidation.model)) beforePaths.add(mapFieldPath(mapping, path))
+    }
+  }
   for (const entity of model.entities) {
     for (const field of entity.fields) {
       if (field.required !== true) continue
@@ -372,7 +380,7 @@ function DS2_requiredCompleteness(model: DataModelV1, options: DataVerificationO
       }
       if (options.beforeModel !== undefined) {
         const path = entity.name + '.' + field.name
-        if (!migrationFrom.has(path) && !copyTargets.has(path)) {
+        if (!beforePaths.has(path) && !migrationFrom.has(path) && !copyTargets.has(path)) {
           findings.push({ code: 'DS2_REQUIRED_FIELD_UNSOURCED', severity: 'warning', message: 'Required field ' + path + ' has no explicit migration mapping or copy target in a before/after migration', evidence: { entity: entity.name, field: field.name } })
         }
       }
