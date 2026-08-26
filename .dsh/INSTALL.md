@@ -63,7 +63,7 @@ To change the gate text, interaction mode, or disable injection, override the ro
 - `dsh --profile <scratch> --dump-config` shows the `logicprobe` row with `enabled: true` (create a scratch profile with `dsh plugin --profile <scratch> add ...` first).
 - Start a session and check the gate text appears in the model context of the first step.
 - `cordis_inspect_list` shows the `logicprobe` provider; `cordis_inspect_query` with method `status` returns `enabled: true`, `interaction: follow-approval`, `toolRegistered: true`, and `engineSchemaVersion: 1`.
-- The model-visible `logicprobe_verify` tool accepts Model schema v1 (see `skills/logicprobe/references/dsh-model-schema.md`) and returns the S1-S7 + A1-A7 report.
+- The model-visible `logicprobe_verify` tool accepts Model schema v1 (see `skills/logicprobe/references/dsh-model-schema.md`) and returns the S1-S7 + A1-A7 report; passing `beforeModel` (and optional `stateMapping`) adds D1-D4 before/after regression checks.
 - Ask in a `dsh` session: "你有设计文档 / 计划 claim 核查相关的 skill 吗?"
 
 ## Notes

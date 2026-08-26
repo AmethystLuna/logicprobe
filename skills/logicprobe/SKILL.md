@@ -159,6 +159,8 @@ When the document under review is a refactoring plan (modifying existing state m
    | Complexity claim | If plan claims "simpler": count states + transitions + guards. Is AFTER objectively simpler? | Warning — unsubstantiated claim |
    | Unreachable code | New states added in AFTER must be reachable (otherwise they're dead code from the start) | Warning |
 
+   In DSH, pass `beforeModel` and optional `stateMapping` to `logicprobe_verify`; the engine runs D1 Behavioral Preservation, D2 Invariant Continuity, D3 Regression Delta, and D4 Deadlock/Liveness Regression automatically.
+
 6. **Flag any behavioral delta not documented in the plan** — the most common refactoring bug is an unintended side effect that the plan doesn't acknowledge
 
 **Detection step**: Before generating any verification code, run `python3 --version 2>&1` or `python --version 2>&1`. Check the output:

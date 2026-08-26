@@ -1,6 +1,6 @@
 # DSH Model Schema v1 — logicprobe_verify
 
-The dsh-native `logicprobe_verify` tool accepts a structured JSON model. The engine runs 14 checks (S1-S7 structural, A1-A7 adversarial) and returns a JSON report. Guards and updates are structured data — no code strings, no arbitrary execution.
+The dsh-native `logicprobe_verify` tool accepts a structured JSON model. The engine runs 14 checks (S1-S7 structural, A1-A7 adversarial) and returns a JSON report. When `beforeModel` is supplied, it also runs D1-D4 before/after regression checks. Guards and updates are structured data — no code strings, no arbitrary execution.
 
 ## Top-level model
 
@@ -96,6 +96,31 @@ In `interaction=auto`, do NOT call `ask_user_question` for model confirmation. R
   "boundaryChecks": [{ "variable": "retry", "values": [0, 1, 2, 3] }]
 }
 ```
+
+## Before/after comparison (D1-D4)
+
+When `beforeModel` is passed to `logicprobe_verify`, the engine treats `model` as AFTER and runs four extra checks after S1-A7:
+
+| Check | Purpose |
+|---|---|
+| D1 Behavioral Preservation | Every BEFORE (state, event) that could fire must still be fireable from the mapped AFTER state |
+| D2 Invariant Continuity | Every BEFORE invariant (mapped through `stateMapping`) must still hold in AFTER |
+| D3 Regression Delta | Lists added/removed states, events, and transitions |
+| D4 Deadlock/Liveness Regression | New deadlock states or closed SCCs not present in BEFORE |
+
+`stateMapping` maps BEFORE state ids to AFTER state ids. Omit it when state names are unchanged.
+
+Example tool call shape:
+
+```json
+{
+  "model": { "...": "AFTER LogicModelV1" },
+  "beforeModel": { "...": "BEFORE LogicModelV1" },
+  "stateMapping": { "OLD_INIT": "INIT", "OLD_ACTIVE": "ACTIVE" }
+}
+```
+
+The report's `comparison` object includes both model hashes, state/transition counts, and delta arrays.
 
 ## Limits
 

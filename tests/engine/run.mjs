@@ -104,6 +104,82 @@ for (const testCase of cases) {
   }
 }
 
+// Before/after regression comparison (D1-D4)
+async function runDiffTests() {
+  const before = {
+    schemaVersion: 1,
+    init: 'INIT',
+    states: [
+      { id: 'INIT' },
+      { id: 'ACTIVE', terminal: true },
+    ],
+    transitions: [
+      { from: 'INIT', event: 'go', to: 'ACTIVE' },
+    ],
+    invariants: [
+      { id: 'go-before-active', description: 'go must precede ACTIVE', kind: 'event-before-state', event: 'go', state: 'ACTIVE' },
+    ],
+  }
+  const after = {
+    schemaVersion: 1,
+    init: 'INIT',
+    states: [
+      { id: 'INIT' },
+      { id: 'ACTIVE' },
+    ],
+    transitions: [
+      { from: 'INIT', event: 'skip', to: 'ACTIVE' },
+    ],
+  }
+  const report = runVerification(after, { beforeModel: before })
+  if (!report.ok) throw new Error('diff report should be ok: ' + JSON.stringify(report.checks[0]?.findings ?? []))
+  const ids = report.checks.map((check) => check.id)
+  for (const id of ['D1', 'D2', 'D3', 'D4']) {
+    if (!ids.includes(id)) throw new Error('missing diff check ' + id)
+  }
+  const d1 = report.checks.find((check) => check.id === 'D1')
+  if (!d1?.findings.some((finding) => finding.code === 'D1_EVENT_DISABLED')) throw new Error('missing D1_EVENT_DISABLED')
+  const d2 = report.checks.find((check) => check.id === 'D2')
+  if (!d2?.findings.some((finding) => finding.code === 'D2_INVARIANT_REGRESSION')) throw new Error('missing D2_INVARIANT_REGRESSION')
+  const d4 = report.checks.find((check) => check.id === 'D4')
+  if (!d4?.findings.some((finding) => finding.code === 'D4_DEADLOCK_REGRESSION')) throw new Error('missing D4_DEADLOCK_REGRESSION')
+  if (report.comparison === undefined) throw new Error('missing comparison summary')
+  assertNoUndefinedValues(report)
+  console.log('PASS before-after-regression')
+
+  const beforeRename = {
+    schemaVersion: 1,
+    init: 'IDLE',
+    states: [
+      { id: 'IDLE' },
+      { id: 'DONE', terminal: true },
+    ],
+    transitions: [
+      { from: 'IDLE', event: 'go', to: 'DONE' },
+    ],
+  }
+  const afterRename = {
+    schemaVersion: 1,
+    init: 'READY',
+    states: [
+      { id: 'READY' },
+      { id: 'DONE', terminal: true },
+    ],
+    transitions: [
+      { from: 'READY', event: 'go', to: 'DONE' },
+    ],
+  }
+  const renameReport = runVerification(afterRename, { beforeModel: beforeRename, stateMapping: { IDLE: 'READY' } })
+  if (!renameReport.ok) throw new Error('rename diff report should be ok')
+  const renameD1 = renameReport.checks.find((check) => check.id === 'D1')
+  if (renameD1 === undefined || renameD1.findings.length !== 0) throw new Error('rename D1 should pass')
+  const renameD3 = renameReport.checks.find((check) => check.id === 'D3')
+  if (renameD3 === undefined || renameD3.findings.length !== 0) throw new Error('rename D3 should pass')
+  assertNoUndefinedValues(renameReport)
+  console.log('PASS before-after-rename-mapping')
+}
+
+await runDiffTests()
 if (failures > 0) {
   console.log('engine fixtures failed:', failures)
   process.exit(1)

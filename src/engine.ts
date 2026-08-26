@@ -86,6 +86,8 @@ export interface LogicModelV1 {
 export interface VerificationOptions {
   maxStates?: number
   maxPermutationEvents?: number
+  beforeModel?: unknown
+  stateMapping?: Record<string, string>
 }
 
 export interface PathStep {
@@ -123,6 +125,23 @@ export interface VerificationReport {
     truncated?: boolean
   }
   checks: CheckResult[]
+  comparison?: ComparisonSummary
+}
+
+export interface ComparisonSummary {
+  beforeModelHash: string
+  afterModelHash: string
+  stateMapping: Record<string, string>
+  beforeStates: number
+  beforeTransitions: number
+  afterStates: number
+  afterTransitions: number
+  addedStates: string[]
+  removedStates: string[]
+  addedEvents: string[]
+  removedEvents: string[]
+  addedTransitions: TransitionSpec[]
+  removedTransitions: TransitionSpec[]
 }
 
 export interface RuntimeState {
@@ -1102,6 +1121,247 @@ function A7_shortestViolations(model: LogicModelV1, options: NormalizedOptions):
   return checkResult('A7', 'Minimal Counter-Example', findings, violations.length === 0 ? 'All invariants hold for all reachable paths' : 'Violated invariants: ' + findings.length)
 }
 
+function mapStateId(mapping: Record<string, string>, state: string): string {
+  return mapping[state] ?? state
+}
+
+function D1_behavioralPreservation(before: LogicModelV1, after: LogicModelV1, mapping: Record<string, string>): CheckResult {
+  const findings: Finding[] = []
+  const afterStates = new Set(after.states.map((state) => state.id))
+  const afterByFromEvent = new Map<string, Set<string>>()
+  for (const transition of after.transitions) {
+    const key = transition.from + '|' + transition.event
+    const set = afterByFromEvent.get(key) ?? new Set<string>()
+    set.add(transition.to)
+    afterByFromEvent.set(key, set)
+  }
+  const beforeInitMapped = mapStateId(mapping, before.init)
+  if (beforeInitMapped !== after.init) {
+    findings.push({
+      code: 'D1_INIT_MISMATCH',
+      severity: 'warning',
+      message: 'Mapped BEFORE init ' + beforeInitMapped + ' does not match AFTER init ' + after.init + '.',
+      evidence: { beforeInit: before.init, mappedInit: beforeInitMapped, afterInit: after.init },
+    })
+  }
+  for (const state of before.states) {
+    const mapped = mapStateId(mapping, state.id)
+    if (!afterStates.has(mapped)) {
+      findings.push({
+        code: 'D1_MAPPED_STATE_MISSING',
+        severity: 'error',
+        message: 'BEFORE state ' + state.id + ' maps to ' + mapped + ', which is not declared in AFTER.',
+        evidence: { beforeState: state.id, mappedState: mapped },
+      })
+      continue
+    }
+    for (const transition of before.transitions.filter((entry) => entry.from === state.id)) {
+      const key = mapped + '|' + transition.event
+      const targets = afterByFromEvent.get(key)
+      if (targets === undefined || targets.size === 0) {
+        findings.push({
+          code: 'D1_EVENT_DISABLED',
+          severity: 'error',
+          message: 'BEFORE can fire event ' + transition.event + ' from ' + state.id + ' (mapped to ' + mapped + '), but AFTER has no transition for that (state, event).',
+          path: [{ from: state.id, event: transition.event, to: transition.to }],
+          evidence: { beforeState: state.id, mappedState: mapped, event: transition.event },
+        })
+      }
+    }
+  }
+  return checkResult('D1', 'Behavioral Preservation', findings, findings.length === 0 ? 'BEFORE event behavior is preserved in AFTER' : 'Behavioral preservation findings: ' + findings.length)
+}
+
+function mapInvariantForComparison(invariant: InvariantSpec, mapping: Record<string, string>): InvariantSpec {
+  if (invariant.kind === 'never-states') {
+    return {
+      ...invariant,
+      id: invariant.id + ':before',
+      description: invariant.description + ' (from BEFORE)',
+      states: invariant.states.map((state) => mapStateId(mapping, state)),
+    }
+  }
+  if (invariant.kind === 'event-before-state') {
+    return {
+      ...invariant,
+      id: invariant.id + ':before',
+      description: invariant.description + ' (from BEFORE)',
+      state: mapStateId(mapping, invariant.state),
+    }
+  }
+  return { ...invariant, id: invariant.id + ':before', description: invariant.description + ' (from BEFORE)' }
+}
+
+function D2_invariantContinuity(before: LogicModelV1, after: LogicModelV1, options: NormalizedOptions, mapping: Record<string, string>): CheckResult {
+  const findings: Finding[] = []
+  const afterStates = new Set(after.states.map((state) => state.id))
+  const afterVariables = new Set((after.variables ?? []).map((variable) => variable.name))
+  for (const invariant of before.invariants ?? []) {
+    const mapped = mapInvariantForComparison(invariant, mapping)
+    if (mapped.kind === 'never-states') {
+      for (const state of mapped.states) {
+        if (!afterStates.has(state)) {
+          findings.push({
+            code: 'D2_MAPPED_STATE_MISSING',
+            severity: 'warning',
+            message: 'BEFORE invariant "' + invariant.id + '" maps to state ' + state + ', which is not declared in AFTER.',
+            evidence: { invariant: invariant.id, state },
+          })
+        }
+      }
+    } else if (mapped.kind === 'event-before-state') {
+      if (!afterStates.has(mapped.state)) {
+        findings.push({
+          code: 'D2_MAPPED_STATE_MISSING',
+          severity: 'warning',
+          message: 'BEFORE invariant "' + invariant.id + '" maps to state ' + mapped.state + ', which is not declared in AFTER.',
+          evidence: { invariant: invariant.id, state: mapped.state },
+        })
+      }
+    } else if (mapped.kind === 'var-in-range') {
+      if (!afterVariables.has(mapped.variable)) {
+        findings.push({
+          code: 'D2_VARIABLE_MISSING',
+          severity: 'warning',
+          message: 'BEFORE invariant "' + invariant.id + '" references variable ' + mapped.variable + ', which is not declared in AFTER.',
+          evidence: { invariant: invariant.id, variable: mapped.variable },
+        })
+        continue
+      }
+    }
+    const violation = shortestViolationForInvariant(after, options, mapped)
+    if (violation !== undefined) {
+      findings.push({
+        code: 'D2_INVARIANT_REGRESSION',
+        severity: 'error',
+        message: 'BEFORE invariant "' + invariant.id + '" no longer holds in AFTER: ' + violation.reason,
+        path: violation.path,
+        evidence: { beforeInvariant: invariant, afterInvariant: mapped },
+      })
+    }
+  }
+  return checkResult('D2', 'Invariant Continuity', findings, findings.length === 0 ? 'All BEFORE invariants continue to hold' : 'Invariant continuity findings: ' + findings.length)
+}
+
+function D3_regressionDelta(before: LogicModelV1, after: LogicModelV1, mapping: Record<string, string>): CheckResult {
+  const afterStateIds = new Set(after.states.map((state) => state.id))
+  const beforeMappedIds = new Set(before.states.map((state) => mapStateId(mapping, state.id)))
+  const addedStates = after.states.filter((state) => !beforeMappedIds.has(state.id)).map((state) => state.id).sort()
+  const removedStates = before.states.filter((state) => !afterStateIds.has(mapStateId(mapping, state.id))).map((state) => state.id).sort()
+  const beforeEvents = new Set(before.transitions.map((transition) => transition.event))
+  const afterEvents = new Set(after.transitions.map((transition) => transition.event))
+  const addedEvents = [...afterEvents].filter((event) => !beforeEvents.has(event)).sort()
+  const removedEvents = [...beforeEvents].filter((event) => !afterEvents.has(event)).sort()
+  const removedTransitions = before.transitions.filter((transition) => !after.transitions.some((candidate) =>
+    candidate.from === mapStateId(mapping, transition.from) &&
+    candidate.event === transition.event &&
+    candidate.to === mapStateId(mapping, transition.to)
+  ))
+  const addedTransitions = after.transitions.filter((transition) => !before.transitions.some((candidate) =>
+    mapStateId(mapping, candidate.from) === transition.from &&
+    candidate.event === transition.event &&
+    mapStateId(mapping, candidate.to) === transition.to
+  ))
+  const findings: Finding[] = []
+  for (const state of removedStates) {
+    findings.push({ code: 'D3_REMOVED_STATE', severity: 'warning', message: 'BEFORE state ' + state + ' is not present in AFTER under the given mapping.', evidence: { state } })
+  }
+  for (const event of removedEvents) {
+    findings.push({ code: 'D3_REMOVED_EVENT', severity: 'warning', message: 'BEFORE event ' + event + ' is not present in AFTER.', evidence: { event } })
+  }
+  for (const transition of removedTransitions) {
+    findings.push({
+      code: 'D3_REMOVED_TRANSITION',
+      severity: 'warning',
+      message: 'BEFORE transition ' + transition.from + ' -' + transition.event + '-> ' + transition.to + ' has no exact AFTER counterpart.',
+      evidence: { transition },
+    })
+  }
+  const detail = 'Delta: +' + addedStates.length + ' states, -' + removedStates.length + ' states, +' + addedEvents.length + ' events, -' + removedEvents.length + ' events, +' + addedTransitions.length + ' transitions, -' + removedTransitions.length + ' transitions'
+  return checkResult('D3', 'Regression Delta', findings, detail)
+}
+
+function deadlockStateIds(model: LogicModelV1): string[] {
+  const outgoing = new Set(model.transitions.map((transition) => transition.from))
+  return model.states.filter((state) => state.terminal !== true && !outgoing.has(state.id)).map((state) => state.id)
+}
+
+function closedSccStateSets(model: LogicModelV1): string[][] {
+  return sccs(model)
+    .filter((component) => {
+      const componentSet = new Set(component)
+      const internalEdges = model.transitions.some((transition) => componentSet.has(transition.from) && componentSet.has(transition.to))
+      const escapingEdges = model.transitions.some((transition) => componentSet.has(transition.from) && !componentSet.has(transition.to))
+      return internalEdges && !escapingEdges && !component.some((state) => isTerminal(model, state))
+    })
+    .map((component) => component.sort())
+}
+
+function D4_deadlockLivenessRegression(before: LogicModelV1, after: LogicModelV1, mapping: Record<string, string>): CheckResult {
+  const findings: Finding[] = []
+  const beforeDeadlock = new Set(deadlockStateIds(before).map((state) => mapStateId(mapping, state)))
+  const afterDeadlock = deadlockStateIds(after)
+  for (const state of afterDeadlock) {
+    if (!beforeDeadlock.has(state)) {
+      findings.push({
+        code: 'D4_DEADLOCK_REGRESSION',
+        severity: 'error',
+        message: 'AFTER introduces deadlock in state ' + state + ' that was not deadlocked in BEFORE.',
+        evidence: { state },
+      })
+    }
+  }
+  const beforeScc = new Set(closedSccStateSets(before).map((component) => component.map((state) => mapStateId(mapping, state)).sort().join(',')))
+  const afterScc = closedSccStateSets(after)
+  for (const component of afterScc) {
+    const key = component.join(',')
+    if (!beforeScc.has(key)) {
+      findings.push({
+        code: 'D4_LIVENESS_REGRESSION',
+        severity: 'error',
+        message: 'AFTER introduces a closed SCC with no exit and no terminal state: ' + key,
+        evidence: { states: component },
+      })
+    }
+  }
+  return checkResult('D4', 'Deadlock/Liveness Regression', findings, findings.length === 0 ? 'No new deadlock or liveness regressions' : 'Regression findings: ' + findings.length)
+}
+
+function buildComparisonSummary(before: LogicModelV1, after: LogicModelV1, mapping: Record<string, string>): ComparisonSummary {
+  const afterStateIds = new Set(after.states.map((state) => state.id))
+  const beforeMappedIds = new Set(before.states.map((state) => mapStateId(mapping, state.id)))
+  const addedStates = after.states.filter((state) => !beforeMappedIds.has(state.id)).map((state) => state.id).sort()
+  const removedStates = before.states.filter((state) => !afterStateIds.has(mapStateId(mapping, state.id))).map((state) => state.id).sort()
+  const beforeEvents = new Set(before.transitions.map((transition) => transition.event))
+  const afterEvents = new Set(after.transitions.map((transition) => transition.event))
+  const addedEvents = [...afterEvents].filter((event) => !beforeEvents.has(event)).sort()
+  const removedEvents = [...beforeEvents].filter((event) => !afterEvents.has(event)).sort()
+  const removedTransitions = before.transitions.filter((transition) => !after.transitions.some((candidate) =>
+    candidate.from === mapStateId(mapping, transition.from) &&
+    candidate.event === transition.event &&
+    candidate.to === mapStateId(mapping, transition.to)
+  ))
+  const addedTransitions = after.transitions.filter((transition) => !before.transitions.some((candidate) =>
+    mapStateId(mapping, candidate.from) === transition.from &&
+    candidate.event === transition.event &&
+    mapStateId(mapping, candidate.to) === transition.to
+  ))
+  return {
+    beforeModelHash: modelHash(before),
+    afterModelHash: modelHash(after),
+    stateMapping: mapping,
+    beforeStates: before.states.length,
+    beforeTransitions: before.transitions.length,
+    afterStates: after.states.length,
+    afterTransitions: after.transitions.length,
+    addedStates,
+    removedStates,
+    addedEvents,
+    removedEvents,
+    addedTransitions,
+    removedTransitions,
+  }
+}
 // ---------------------------------------------------------------------------
 // main entry
 // ---------------------------------------------------------------------------
@@ -1145,6 +1405,44 @@ export function runVerification(input: unknown, options: VerificationOptions = {
     A6_resourceInjection(model),
     A7_shortestViolations(model, normalized),
   ]
+  let comparison: ComparisonSummary | undefined
+  if (options.beforeModel !== undefined) {
+    const beforeValidation = validateModel(options.beforeModel)
+    if (!beforeValidation.ok) {
+      return {
+        ok: false,
+        schemaVersion: 1,
+        modelHash: modelHash(model),
+        summary: {
+          states: model.states.length,
+          transitions: model.transitions.length,
+          errors: beforeValidation.errors.length,
+          warnings: 0,
+          checksRun: checks.length + 1,
+          truncated: exploration.truncated,
+        },
+        checks: [
+          ...checks,
+          {
+            id: 'BEFORE_MODEL',
+            name: 'Before Model Validation',
+            status: 'fail',
+            detail: 'Before model schema validation failed: ' + beforeValidation.errors.length + ' errors',
+            findings: beforeValidation.errors.map((message) => ({ code: 'BEFORE_MODEL_INVALID', severity: 'error', message })),
+          },
+        ],
+      }
+    }
+    const before = beforeValidation.model
+    const mapping = options.stateMapping ?? {}
+    checks.push(
+      D1_behavioralPreservation(before, model, mapping),
+      D2_invariantContinuity(before, model, normalized, mapping),
+      D3_regressionDelta(before, model, mapping),
+      D4_deadlockLivenessRegression(before, model, mapping),
+    )
+    comparison = buildComparisonSummary(before, model, mapping)
+  }
   const errors = checks.reduce((sum, check) => sum + check.findings.filter((finding) => finding.severity === 'error').length, 0)
   const warnings = checks.reduce((sum, check) => sum + check.findings.filter((finding) => finding.severity === 'warning').length, 0)
   return {
@@ -1160,5 +1458,6 @@ export function runVerification(input: unknown, options: VerificationOptions = {
       truncated: exploration.truncated,
     },
     checks,
+    ...(comparison === undefined ? {} : { comparison }),
   }
 }

@@ -83,6 +83,8 @@ export interface LogicModelV1 {
 export interface VerificationOptions {
     maxStates?: number;
     maxPermutationEvents?: number;
+    beforeModel?: unknown;
+    stateMapping?: Record<string, string>;
 }
 export interface PathStep {
     from: string;
@@ -116,6 +118,22 @@ export interface VerificationReport {
         truncated?: boolean;
     };
     checks: CheckResult[];
+    comparison?: ComparisonSummary;
+}
+export interface ComparisonSummary {
+    beforeModelHash: string;
+    afterModelHash: string;
+    stateMapping: Record<string, string>;
+    beforeStates: number;
+    beforeTransitions: number;
+    afterStates: number;
+    afterTransitions: number;
+    addedStates: string[];
+    removedStates: string[];
+    addedEvents: string[];
+    removedEvents: string[];
+    addedTransitions: TransitionSpec[];
+    removedTransitions: TransitionSpec[];
 }
 export interface RuntimeState {
     state: string;
