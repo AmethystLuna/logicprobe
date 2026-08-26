@@ -47,7 +47,17 @@ const KEYWORD_RULES: KeywordRule[] = [
   { pattern: /\bshared\s+memory\b/i, label: 'shared memory', absolute: false },
   { pattern: /\bglobal\s+state\b/i, label: 'global state', absolute: false },
   { pattern: /\breentrant\b/i, label: 'reentrant', absolute: false },
-  { pattern: /\binterrupt\s*-?\s*safe\b/i, label: 'interrupt-safe', absolute: false },
+  { pattern: /\binterrupt\s*-?\s*safe\b/i, label: 'interrupt-safe', absolute: true },
+  { pattern: /\bISR\s*-?\s*safe\b/i, label: 'ISR-safe', absolute: true },
+  { pattern: /\binterrupt\s+safety\b/i, label: 'interrupt safety', absolute: false },
+  { pattern: /\binterrupt\s+context\b/i, label: 'interrupt context', absolute: false },
+  { pattern: /\bISR\b/i, label: 'ISR', absolute: false },
+  { pattern: /\bIRQ\b/i, label: 'IRQ', absolute: false },
+  { pattern: /\bNMI\b/i, label: 'NMI', absolute: false },
+  { pattern: /\bcritical\s+section\b/i, label: 'critical section', absolute: false },
+  { pattern: /\bdisable_irq\b/i, label: 'disable_irq', absolute: false },
+  { pattern: /\benable_irq\b/i, label: 'enable_irq', absolute: false },
+  { pattern: /\bspin_lock_irqsave\b/i, label: 'spin_lock_irqsave', absolute: false },
 ]
 
 export function runConcurrencyScan(text: string): ConcurrencyScanReport {

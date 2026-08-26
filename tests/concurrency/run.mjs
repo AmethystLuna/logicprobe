@@ -38,6 +38,15 @@ test('plain text has no concurrency findings', () => {
   assertNoUndefinedValues(report)
 })
 
+test('flags interrupt safety claims and IRQ keywords', () => {
+  const report = runConcurrencyScan('The ISR is interrupt-safe and uses disable_irq/enable_irq.')
+  const absolute = report.findings.filter((finding) => finding.code === 'CONCURRENCY_ABSOLUTE_CLAIM')
+  if (!absolute.some((finding) => finding.keyword === 'interrupt-safe')) throw new Error('expected interrupt-safe absolute claim')
+  const keywords = report.findings.filter((finding) => finding.code === 'CONCURRENCY_KEYWORD')
+  if (!keywords.some((finding) => finding.keyword === 'disable_irq')) throw new Error('expected disable_irq keyword')
+  assertNoUndefinedValues(report)
+})
+
 if (failures > 0) {
   console.log('concurrency tests failed:', failures)
   process.exit(1)

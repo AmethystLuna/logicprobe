@@ -31,6 +31,21 @@ Returns:
 - [ ] If no evidence exists, mark the claim `UNVERIFIED` and escalate to concurrency analysis.
 - [ ] Do not treat "uses mutex" as "thread-safe" — synchronization primitives are not proof.
 
+## Interrupt safety
+
+Interrupt safety is a first-class concurrency dimension in embedded/real-time designs. The scan treats the following as interrupt-related risk points:
+
+- `interrupt-safe`, `ISR-safe` → absolute claims (error)
+- `interrupt safety`, `interrupt context`, `ISR`, `IRQ`, `NMI`, `critical section`
+- `disable_irq`, `enable_irq`, `spin_lock_irqsave` → warning, verify pairing and nesting
+
+Manual checklist:
+
+- [ ] If the design claims "interrupt-safe", require evidence: critical sections, IRQ disable windows, atomic operations, or formal reasoning.
+- [ ] Check that `disable_irq` / `enable_irq` are paired on all paths.
+- [ ] Check that ISR-context code does not call blocking/sleeping primitives.
+- [ ] Check that shared variables between ISR and thread context are protected (atomic, critical section, or lock-free protocol).
+
 ## Escalation targets
 
 - C/C++: ThreadSanitizer, Helgrind

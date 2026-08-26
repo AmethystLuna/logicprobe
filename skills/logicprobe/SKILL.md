@@ -268,6 +268,7 @@ logicprobe does **not** prove concurrency safety. It mines documents and plans f
 
 - Absolute claims ("thread-safe", "lock-free", "no data race") → error / `UNVERIFIED` unless dedicated evidence is provided.
 - Risk keywords ("race condition", "shared variable", "mutex", "atomic", "shared memory") → warning; review whether the plan addresses them.
+- Interrupt safety is included: `interrupt-safe` / `ISR-safe` are absolute claims; `ISR`, `IRQ`, `NMI`, `critical section`, `disable_irq` / `enable_irq` are risk keywords.
 
 In DSH, use the `logicprobe_concurrency_scan` tool. For manual review, follow `references/concurrency-risk-guide.md`.
 
