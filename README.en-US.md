@@ -13,10 +13,11 @@ Design documents are not truth — code is. A claim-verification skill that chec
 | Phase | What |
 |-------|------|
 | Phase 1-2 | Enumerate every verifiable claim (API names, file paths, enum values, counts, mechanism feasibility) → verify each against the codebase with evidence |
-| Phase 2a | **7 structural checks** on extracted state-machine models: reachability, deadlock, liveness, determinism, event/guard completeness, invariant validity |
-| Phase 2b | **7 adversarial probes**: unexpected events, race interleaving, order permutation, pair symmetry (lock/unlock), boundary blast, resource injection, minimal counter-example |
+| Phase 2a | **8 structural checks** on extracted state-machine models: reachability, deadlock, liveness, determinism, event/guard completeness, invariant validity, monotonic variables |
+| Phase 2b | **11 adversarial probes**: unexpected events, race interleaving, order permutation, pair symmetry (lock/unlock), boundary blast, resource injection, minimal counter-example, idempotent replay, leads-to, sequence, atomicity |
 | Refactoring | Before/after model comparison — behavioral preservation, invariant continuity, deadlock regression, complexity claims |
 | Data models | DataModelV1 verification — DS/DA/DD checks, migration coverage, copy consistency, before/after breaking-change regression |
+| Concurrency risk mining | Scans documents/plans for concurrency safety claims (thread-safe, lock-free, race condition, interrupt safety, etc.) and flags them for dedicated verification |
 | Output | Structured findings with exact file:line evidence, severity classification, correction direction — never inline fixes |
 
 The model is always shown as a transition table and **confirmed with the user before running** — extraction errors are the dominant failure mode.

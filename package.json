@@ -1,7 +1,7 @@
 {
   "name": "dsh-logicprobe",
   "version": "0.5.0",
-  "description": "Design document & plan claim verification — enumerate claims, verify against codebase facts, then escalate to logic-primitive verification (7 structural checks + 7 adversarial probes) for behavioral claims. Before/after model comparison for refactoring regression detection. Ships a native DeepSeek Harness (dsh) bundle that injects the claim-verification gate into the first model step.",
+  "description": "Design document & plan claim verification — enumerate claims, verify against codebase facts, then escalate to state-machine verification (S1-S8/A1-A11) and data-model verification (DS/DA/DD) for behavioral claims. Supports before/after regression, idempotency/monotonic/sequence/leads-to/atomicity constraints, and concurrency risk mining. Ships a native DeepSeek Harness (dsh) bundle that injects the claim-verification gate into the first model step.",
   "type": "module",
   "main": "lib/index.js",
   "types": "lib/types/index.d.ts",
