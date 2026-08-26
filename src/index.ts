@@ -34,6 +34,7 @@ import type { HostCordisInspectProviderRegistration } from '@deepseek-ai/dsh-cor
 import type { AssembleContext, PromptContext } from '@deepseek-ai/dsh-system-prompt'
 import { FileSystemSkillProvider } from '@deepseek-ai/dsh-skill-filesystem'
 import { logicProbeVerifyTool } from './tool.js'
+import { logicProbeDataModelVerifyTool, DATA_ENGINE_SCHEMA_VERSION } from './data-tool.js'
 import { ENGINE_SCHEMA_VERSION } from './engine.js'
 
 export const name = 'logicprobe'
@@ -65,7 +66,7 @@ Plugin logicprobe is active. Documents are not truth — code is. Verify every v
 | "I'll verify while implementing" | Verification happens before implementation, not during. |
 | "I can check this with reasoning alone" | Behavioral claims are verified with code/models, not intuition. One counter-example refutes a universal claim. |
 
-**Native verification path**: In dsh, prefer the \`logicprobe_verify\` tool for executable state-machine checks. The skill's Python harness remains the fallback for non-dsh hosts.
+**Native verification path**: In dsh, prefer the \`logicprobe_verify\` tool for executable state-machine checks and \`logicprobe_datamodel_verify\` for data-model checks. The skill's Python harness remains the fallback for non-dsh hosts.
 
 **Proactive suggestion**: When a user asks code-level behavioral questions — "could this state machine deadlock", "is this retry limit safe", "check this timing sequence for bugs" — suggest logicprobe as an optional verification pass (do not auto-escalate).
 </EXTREMELY_IMPORTANT>`
@@ -123,7 +124,7 @@ function resolveInteraction(config: Config, session: Session): 'ask' | 'auto' {
 function modeContextText(config: Config, session: Session): string {
   const interaction = resolveInteraction(config, session)
   const lines = [
-    'logicprobe: use the `logicprobe_verify` tool for executable state-machine verification.',
+    'logicprobe: use the `logicprobe_verify` tool for state-machine verification and `logicprobe_datamodel_verify` for data-model verification.',
     interaction === 'auto'
       ? 'logicprobe interaction=auto: do NOT call ask_user_question for model confirmation; run round-trip validation of the extracted transition table and mark the result UNCONFIRMED.'
       : 'logicprobe interaction=ask: show the extracted transition table and get user confirmation before running verification.',
@@ -147,7 +148,7 @@ interface SystemPromptLike {
  * lets the model read this plugin's runtime status without guessing. Mirrors
  * the registration pattern of the official dsh-tool-cordis host providers.
  */
-function inspectProvider(config: Config, isToolRegistered: () => boolean): HostCordisInspectProviderRegistration {
+function inspectProvider(config: Config, isToolRegistered: () => boolean, isDataToolRegistered: () => boolean): HostCordisInspectProviderRegistration {
   return {
     manifest: {
       id: 'logicprobe',
@@ -169,9 +170,11 @@ function inspectProvider(config: Config, isToolRegistered: () => boolean): HostC
               gateContentLength: { type: 'integer', description: 'Length in characters of the injected gate text.' },
               interaction: { type: 'string', enum: ['ask', 'auto', 'follow-approval'], description: 'Configured interaction mode. follow-approval resolves per session from approval/policy.' },
               toolRegistered: { type: 'boolean', description: 'Whether the logicprobe_verify tool is registered on ctx.tools.' },
-              engineSchemaVersion: { type: 'integer', description: 'Model schema version the bundled verification engine accepts.' },
+              dataToolRegistered: { type: 'boolean', description: 'Whether the logicprobe_datamodel_verify tool is registered on ctx.tools.' },
+              engineSchemaVersion: { type: 'integer', description: 'Model schema version the bundled state-machine verification engine accepts.' },
+              dataEngineSchemaVersion: { type: 'integer', description: 'Model schema version the bundled data-model verification engine accepts.' },
             },
-            required: ['enabled', 'gateContentLength', 'interaction', 'toolRegistered', 'engineSchemaVersion'],
+            required: ['enabled', 'gateContentLength', 'interaction', 'toolRegistered', 'dataToolRegistered', 'engineSchemaVersion', 'dataEngineSchemaVersion'],
             additionalProperties: false,
           },
         },
@@ -184,7 +187,9 @@ function inspectProvider(config: Config, isToolRegistered: () => boolean): HostC
           gateContentLength: config.gateContent.length,
           interaction: config.interaction,
           toolRegistered: isToolRegistered(),
+          dataToolRegistered: isDataToolRegistered(),
           engineSchemaVersion: ENGINE_SCHEMA_VERSION,
+          dataEngineSchemaVersion: DATA_ENGINE_SCHEMA_VERSION,
         }
       }
       return null
@@ -198,13 +203,14 @@ export function apply(ctx: Context, config: Config): void {
   // agent/pre-step — by then the app is fully booted.
   let providerRegistered = false
   let toolRegistered = false
+  let dataToolRegistered = false
   let modeContextRegistered = false
   const registerProvider = (): void => {
     if (providerRegistered) return
     const inspect = ctx.get('cordisInspect')
     if (inspect === undefined) return
     try {
-      ctx.effect(() => inspect.register(inspectProvider(config, () => toolRegistered)), 'logicprobe: inspect provider')
+      ctx.effect(() => inspect.register(inspectProvider(config, () => toolRegistered, () => dataToolRegistered)), 'logicprobe: inspect provider')
       providerRegistered = true
     } catch (err) {
       console.warn('[logicprobe] inspect provider registration failed', err)
@@ -216,9 +222,11 @@ export function apply(ctx: Context, config: Config): void {
     if (tools === undefined) return
     try {
       ctx.effect(() => tools.register(logicProbeVerifyTool), 'logicprobe: verify tool')
+      ctx.effect(() => tools.register(logicProbeDataModelVerifyTool), 'logicprobe: data verify tool')
       toolRegistered = true
+      dataToolRegistered = true
     } catch (err) {
-      console.warn('[logicprobe] logicprobe_verify tool registration failed', err)
+      console.warn('[logicprobe] logicprobe_verify/logicprobe_datamodel_verify tool registration failed', err)
     }
   }
   const registerModeContext = (): void => {

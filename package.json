@@ -1,81 +1,81 @@
 {
-    "name": "dsh-logicprobe",
-    "version": "0.4.0",
-    "description": "Design document & plan claim verification — enumerate claims, verify against codebase facts, then escalate to logic-primitive verification (7 structural checks + 7 adversarial probes) for behavioral claims. Before/after model comparison for refactoring regression detection. Ships a native DeepSeek Harness (dsh) bundle that injects the claim-verification gate into the first model step.",
-    "type": "module",
-    "main": "lib/index.js",
-    "types": "lib/types/index.d.ts",
-    "exports": {
-        ".": {
-            "types": "./lib/types/index.d.ts",
-            "default": "./lib/index.js"
-        },
-        "./cordis.patch.yml": "./cordis.patch.yml",
-        "./package.json": "./package.json"
+  "name": "dsh-logicprobe",
+  "version": "0.5.0",
+  "description": "Design document & plan claim verification — enumerate claims, verify against codebase facts, then escalate to logic-primitive verification (7 structural checks + 7 adversarial probes) for behavioral claims. Before/after model comparison for refactoring regression detection. Ships a native DeepSeek Harness (dsh) bundle that injects the claim-verification gate into the first model step.",
+  "type": "module",
+  "main": "lib/index.js",
+  "types": "lib/types/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/types/index.d.ts",
+      "default": "./lib/index.js"
     },
-    "files": [
-        "lib",
-        "src",
-        "skills",
-        "cordis.patch.yml"
-    ],
-    "dsh": {
-        "category": "skill",
-        "displayName": "逻辑探针",
-        "bundle": {
-            "patch": "./cordis.patch.yml"
-        }
-    },
-    "scripts": {
-        "build": "tsc -p tsconfig.json",
-        "typecheck": "tsc -p tsconfig.json --noEmit",
-        "test:engine": "npm run build && node tests/engine/run.mjs && node tests/apply-smoke.mjs"
-    },
-    "dependencies": {},
-    "peerDependencies": {
-        "@deepseek-ai/cordis": "^4.0.1",
-        "@deepseek-ai/dsh-agent": "^0.1.0-rc.6",
-        "@deepseek-ai/dsh-llm": "^0.0.1-rc.1",
-        "@deepseek-ai/dsh-session": "^0.0.1-rc.1",
-        "@deepseek-ai/dsh-skill-filesystem": "^0.1.0-rc.6",
-        "@deepseek-ai/schemastery": "^3.18.1",
-        "@deepseek-ai/dsh-tools": "^0.1.0-rc.6"
-    },
-    "devDependencies": {
-        "@deepseek-ai/cordis": "^4.0.1",
-        "@deepseek-ai/dsh-agent": "^0.1.0-rc.6",
-        "@deepseek-ai/dsh-cordis-host-runner": "^0.1.0-rc.6",
-        "@deepseek-ai/dsh-home-paths": "^0.1.0-rc.6",
-        "@deepseek-ai/dsh-llm": "^0.0.1-rc.1",
-        "@deepseek-ai/dsh-scope": "^0.1.0-rc.6",
-        "@deepseek-ai/dsh-session": "^0.0.1-rc.1",
-        "@deepseek-ai/dsh-skill": "^0.1.0-rc.6",
-        "@deepseek-ai/dsh-skill-filesystem": "^0.1.0-rc.6",
-        "@deepseek-ai/schemastery": "^3.18.1",
-        "@deepseek-ai/dsh-timeout": "^0.0.1-rc.1",
-        "@types/node": "^20.0.0",
-        "typescript": "^5.0.0",
-        "@deepseek-ai/dsh-tools": "^0.1.0-rc.6",
-        "@deepseek-ai/dsh-system-prompt": "^0.1.0-rc.6"
-    },
-    "author": {
-        "name": "Amethyst Luna",
-        "url": "https://github.com/AmethystLuna"
-    },
-    "license": "MIT",
-    "repository": "https://github.com/AmethystLuna/logicprobe",
-    "keywords": [
-        "verification",
-        "fact-check",
-        "design-review",
-        "plan-review",
-        "state-machine",
-        "logic-verification",
-        "adversarial",
-        "refactoring",
-        "model-checking",
-        "agentskills",
-        "plugin",
-        "dsh"
-    ]
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib",
+    "src",
+    "skills",
+    "cordis.patch.yml"
+  ],
+  "dsh": {
+    "category": "skill",
+    "displayName": "逻辑探针",
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test:engine": "npm run build && node tests/engine/run.mjs && node tests/data-engine/run.mjs && node tests/apply-smoke.mjs"
+  },
+  "dependencies": {},
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.1",
+    "@deepseek-ai/dsh-agent": "^0.1.0-rc.6",
+    "@deepseek-ai/dsh-llm": "^0.0.1-rc.1",
+    "@deepseek-ai/dsh-session": "^0.0.1-rc.1",
+    "@deepseek-ai/dsh-skill-filesystem": "^0.1.0-rc.6",
+    "@deepseek-ai/schemastery": "^3.18.1",
+    "@deepseek-ai/dsh-tools": "^0.1.0-rc.6"
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "^4.0.1",
+    "@deepseek-ai/dsh-agent": "^0.1.0-rc.6",
+    "@deepseek-ai/dsh-cordis-host-runner": "^0.1.0-rc.6",
+    "@deepseek-ai/dsh-home-paths": "^0.1.0-rc.6",
+    "@deepseek-ai/dsh-llm": "^0.0.1-rc.1",
+    "@deepseek-ai/dsh-scope": "^0.1.0-rc.6",
+    "@deepseek-ai/dsh-session": "^0.0.1-rc.1",
+    "@deepseek-ai/dsh-skill": "^0.1.0-rc.6",
+    "@deepseek-ai/dsh-skill-filesystem": "^0.1.0-rc.6",
+    "@deepseek-ai/schemastery": "^3.18.1",
+    "@deepseek-ai/dsh-timeout": "^0.0.1-rc.1",
+    "@types/node": "^20.0.0",
+    "typescript": "^5.0.0",
+    "@deepseek-ai/dsh-tools": "^0.1.0-rc.6",
+    "@deepseek-ai/dsh-system-prompt": "^0.1.0-rc.6"
+  },
+  "author": {
+    "name": "Amethyst Luna",
+    "url": "https://github.com/AmethystLuna"
+  },
+  "license": "MIT",
+  "repository": "https://github.com/AmethystLuna/logicprobe",
+  "keywords": [
+    "verification",
+    "fact-check",
+    "design-review",
+    "plan-review",
+    "state-machine",
+    "logic-verification",
+    "adversarial",
+    "refactoring",
+    "model-checking",
+    "agentskills",
+    "plugin",
+    "dsh"
+  ]
 }

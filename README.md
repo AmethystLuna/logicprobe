@@ -14,6 +14,7 @@
 | Phase 2a | 对提取的状态机模型执行 **7 项结构检查**：可达性、死锁、活性、确定性、事件/守卫完备性、不变量有效性 |
 | Phase 2b | **7 种对抗探针**：意外事件、竞态交错、顺序置换、配对对称（lock/unlock）、边界轰炸、资源注入、最小反例 |
 | 重构模式 | 前后模型对比——行为保持、不变量连续性、死锁回归、复杂度声称 |
+| 数据模型模式 | DataModelV1 数据模型验证——DS/DA/DD 检查，迁移覆盖、copy 一致性、before/after 破坏性变更回归 |
 | 输出 | 结构化发现：精确 file:line 证据、严重性分级、修正方向——绝不在核查中直接改代码 |
 
 模型永远先以转换表形式展示并**经用户确认后才运行**——模型提取错误是验证的头号失败模式。
@@ -63,6 +64,7 @@ git clone https://github.com/AmethystLuna/logicprobe.git ~/.claude/plugins/dev/l
 - 技能遵循 Agent Skills 开放标准，被 dsh 的 `skill-filesystem` provider 原样发现——零代码。
 - bundle 将 claim 验证门禁（1% Rule / Red Flags / 主动建议）注入每个 agent 会话的第一个模型步骤——是 Claude `SessionStart` hook 在 dsh 的原生对应物，并注册模型可见目录条目（`cordis_inspect`）、原生工具 `logicprobe_verify`（`ctx.tools`）以及策略感知上下文 `logicprobe:mode`（`ctx.systemPrompt`）。
 - `logicprobe_verify` 支持 `beforeModel` + `stateMapping` 的 BEFORE/AFTER 对比（D1-D4），可直接验证重构/迁移的行为保持、不变量连续性、回归增量和死锁/活性回归。
+- `logicprobe_datamodel_verify` 新增数据模型验证：DataModelV1、迁移覆盖、copy 一致性、DD1-DD4 before/after 数据回归。
 - 与 embedded-workbench bundle 的 Plan Verification Gate 配合，在 dsh 中闭环了 claim 验证链路。
 
 安装：参见 [`.dsh/INSTALL.md`](.dsh/INSTALL.md)（四种方式，从纯技能拷贝到 `dsh plugin add`）。
@@ -76,10 +78,11 @@ git clone https://github.com/AmethystLuna/logicprobe.git ~/.claude/plugins/dev/l
 - **设计文档 / 计划审查** — "Review this design document" → 声称枚举与代码库核查
 - **行为类问题** — "could this state machine deadlock"、"is this retry limit safe"、"check this timing for bugs" → 主动建议（不自动加载）作为可选验证
 - **重构计划** — 管线对比前后模型，标记计划未声明的行为变化
+- **数据模型/迁移审查** — "is this migration non-breaking"、"does this copy cover all required fields" → 使用 `logicprobe-datamodel` 技能
 
 技能在 Phase 0 依据计划特征自动分级（LIGHTWEIGHT / STANDARD / ESCALATED），并在计划文件追加 `## Plan Verification` 摘要块作为审计痕迹。
 
-Python 可选：可用时使用 `references/verification-harness.py` 自动执行检查；不可用（如离线开发机）时，`references/logic-verification-guide.md` 提供手动验证模式。
+Python 可选：状态机验证使用 `skills/logicprobe/references/verification-harness.py`，数据模型验证使用 `skills/logicprobe-datamodel/references/data-model-harness.py`；不可用（如离线开发机）时，对应 guide 提供手动验证模式。
 
 ## Codex CLI
 

@@ -16,6 +16,7 @@ Design documents are not truth — code is. A claim-verification skill that chec
 | Phase 2a | **7 structural checks** on extracted state-machine models: reachability, deadlock, liveness, determinism, event/guard completeness, invariant validity |
 | Phase 2b | **7 adversarial probes**: unexpected events, race interleaving, order permutation, pair symmetry (lock/unlock), boundary blast, resource injection, minimal counter-example |
 | Refactoring | Before/after model comparison — behavioral preservation, invariant continuity, deadlock regression, complexity claims |
+| Data models | DataModelV1 verification — DS/DA/DD checks, migration coverage, copy consistency, before/after breaking-change regression |
 | Output | Structured findings with exact file:line evidence, severity classification, correction direction — never inline fixes |
 
 The model is always shown as a transition table and **confirmed with the user before running** — extraction errors are the dominant failure mode.
@@ -64,6 +65,7 @@ Native dsh support ships as a cordis plugin bundle at the repository root (the r
 
 - The skill is discovered as-is by dsh's `skill-filesystem` provider (Agent Skills open standard) — zero code.
 - The bundle injects the claim-verification gate (1% Rule / Red Flags / proactive suggestion) into the first model step of every agent session — the dsh-native counterpart of the Claude `SessionStart` hook. It also registers a model-visible catalog entry (`cordis_inspect`), a native `logicprobe_verify` tool (`ctx.tools`), and a policy-aware `logicprobe:mode` context (`ctx.systemPrompt`).
+- `logicprobe_datamodel_verify` adds data-model verification: DataModelV1, migration coverage, copy consistency, and DD1-DD4 before/after data regression.
 - Together with the embedded-workbench bundle's Plan Verification Gate, this closes the claim-verification loop in dsh.
 
 Install: see [`.dsh/INSTALL.md`](.dsh/INSTALL.md) (four options, from plain skill copy to `dsh plugin add`).
@@ -77,10 +79,11 @@ The plugin auto-injects a capability notification into the first model step. The
 - **Design doc / plan review** — "Review this design document" → claim enumeration and codebase verification
 - **Behavioral questions** — "could this state machine deadlock", "is this retry limit safe", "check this timing for bugs" → the skill is proactively suggested (not auto-loaded) as an optional verification pass
 - **Refactoring plans** — the pipeline compares before/after models to flag undocumented behavioral changes
+- **Data model / migration review** — "is this migration non-breaking", "does this copy cover all required fields" → use the `logicprobe-datamodel` skill
 
 The skill auto-classifies depth (LIGHTWEIGHT / STANDARD / ESCALATED) from plan features in Phase 0, and appends a `## Plan Verification` summary block as the audit trail.
 
-In DSH, prefer the native `logicprobe_verify` tool (see `skills/logicprobe/references/dsh-model-schema.md`). Python remains optional for non-DSH hosts: when available, the reusable harness at `references/verification-harness.py` runs the checks; when not (air-gapped machines), the guide at `references/logic-verification-guide.md` provides a manual verification mode.
+In DSH, prefer the native `logicprobe_verify` tool for state machines and `logicprobe_datamodel_verify` for data models (see the schema references under each skill). Python remains optional for non-DSH hosts: state-machine checks use `skills/logicprobe/references/verification-harness.py`; data-model checks use `skills/logicprobe-datamodel/references/data-model-harness.py`. When Python is unavailable, the corresponding guide provides a manual verification mode.
 
 ## Codex CLI
 
