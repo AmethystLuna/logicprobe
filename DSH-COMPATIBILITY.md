@@ -14,7 +14,7 @@ track as [AI-Scarlett/DSH-Store#251](https://github.com/AI-Scarlett/DSH-Store/is
 | npm | 11.13.0 |
 | pnpm | 11.21.0 |
 | Test date | 2026-08-27 |
-| Package under test | `dsh-logicprobe` 0.6.0 (bundle patch `cordis.patch.yml`, entry id `logicprobe`) |
+| Package under test | `dsh-logicprobe` 0.5.3 (bundle patch `cordis.patch.yml`, entry id `logicprobe`) |
 
 ## Method (one disposable profile per version)
 
