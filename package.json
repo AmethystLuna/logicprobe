@@ -1,6 +1,6 @@
 {
   "name": "dsh-logicprobe",
-  "version": "0.6.0",
+  "version": "0.5.3",
   "description": "Design document & plan claim verification — enumerate claims, verify against codebase facts, then escalate to state-machine verification (S1-S8/A1-A11) and data-model verification (DS/DA/DD) for behavioral claims. Supports before/after regression, idempotency/monotonic/sequence/leads-to/atomicity constraints, and concurrency risk mining. Ships a native DeepSeek Harness (dsh) bundle that injects the claim-verification gate into the first model step.",
   "type": "module",
   "main": "lib/index.js",
@@ -44,6 +44,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
+    "bump": "node scripts/bump-version.mjs",
     "test:engine": "npm run build && node tests/engine/run.mjs && node tests/data-engine/run.mjs && node tests/concurrency/run.mjs && node tests/apply-smoke.mjs",
     "test:full": "npm run build && node tests/full-suite.mjs"
   },
