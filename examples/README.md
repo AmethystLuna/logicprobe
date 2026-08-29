@@ -7,6 +7,10 @@ Sample models for testing logicprobe and logicprobe-datamodel.
 - `order-state-machine.before.json` — order processing BEFORE model
 - `order-state-machine.after.json` — AFTER model with an added VERIFY step
 
+Both order examples include a `narrative` block that explains every state, every
+event, and every (state, event) scenario in natural language — the model as shown
+to the user before verification.
+
 Run D1-D4 comparison:
 
 ```bash

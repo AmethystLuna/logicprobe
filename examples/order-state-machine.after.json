@@ -63,5 +63,54 @@
       "event": "pay",
       "state": "SHIPPED"
     }
-  ]
+  ],
+  "narrative": {
+    "states": {
+      "NEW": "订单已创建，等待支付",
+      "PAID": "已支付，等待风控核验",
+      "VERIFY": "风控核验中，等待通过后发货",
+      "SHIPPED": "已发货，等待签收",
+      "DONE": "已完成（终态）",
+      "CANCELLED": "已取消（终态）"
+    },
+    "events": {
+      "pay": "买家完成支付",
+      "verify": "风控核验通过",
+      "ship": "仓库发货",
+      "deliver": "买家签收",
+      "cancel": "取消订单"
+    },
+    "scenarios": [
+      {
+        "from": "NEW",
+        "event": "pay",
+        "scenario": "下单后支付成功，订单进入待核验"
+      },
+      {
+        "from": "PAID",
+        "event": "verify",
+        "scenario": "风控核验通过，可以发货"
+      },
+      {
+        "from": "VERIFY",
+        "event": "ship",
+        "scenario": "核验通过后发货，进入运输中"
+      },
+      {
+        "from": "SHIPPED",
+        "event": "deliver",
+        "scenario": "签收完成，订单结束"
+      },
+      {
+        "from": "NEW",
+        "event": "cancel",
+        "scenario": "未支付订单被取消"
+      },
+      {
+        "from": "PAID",
+        "event": "cancel",
+        "scenario": "已支付订单取消并退款"
+      }
+    ]
+  }
 }

@@ -1,4 +1,5 @@
 import { readFile } from 'node:fs/promises'
+import { readFileSync } from 'node:fs'
 import { runVerification } from '../../lib/engine.js'
 
 const root = new URL('./fixtures/', import.meta.url)
@@ -76,6 +77,17 @@ const cases = [
     name: 'happy-path.json',
     errors: 0,
     findings: [],
+  },
+  {
+    name: 'narrative-complete.json',
+    errors: 0,
+    findings: [],
+    assert(report) {
+      const model = JSON.parse(readFileSync(new URL('narrative-complete.json', root), 'utf8'))
+      if (JSON.stringify(report.narrative) !== JSON.stringify(model.narrative)) {
+        throw new Error('report must echo the model narrative block')
+      }
+    },
   },
 ]
 
@@ -305,6 +317,63 @@ await runAdvancedConstraintTests()
 await runIdempotencyTests()
 
 await runDiffTests()
+
+async function runNarrativeValidationTests() {
+  const complete = {
+    schemaVersion: 1,
+    init: 'A',
+    states: [{ id: 'A' }, { id: 'B', terminal: true }],
+    transitions: [{ from: 'A', event: 'go', to: 'B' }],
+    narrative: {
+      states: { A: 'start', B: 'done' },
+      events: { go: 'go ahead' },
+      scenarios: [{ from: 'A', event: 'go', scenario: 'start -> done' }],
+    },
+  }
+  const okReport = runVerification(complete)
+  if (!okReport.ok) throw new Error('complete narrative should validate: ' + JSON.stringify(okReport.checks[0]?.findings ?? []))
+  if (JSON.stringify(okReport.narrative) !== JSON.stringify(complete.narrative)) {
+    throw new Error('report must echo the narrative block')
+  }
+  assertNoUndefinedValues(okReport)
+
+  const clone = (value) => JSON.parse(JSON.stringify(value))
+  const missingScenario = clone(complete)
+  missingScenario.narrative.scenarios = []
+  const bad1 = runVerification(missingScenario)
+  if (bad1.ok || bad1.checks[0]?.id !== 'MODEL' || !bad1.checks[0].findings.some((entry) => entry.message.includes('missing scenario'))) {
+    throw new Error('missing scenario must fail MODEL validation: ' + JSON.stringify(bad1.checks[0]?.findings ?? []))
+  }
+
+  const unknownState = clone(complete)
+  unknownState.narrative.states.Z = 'ghost state'
+  const bad2 = runVerification(unknownState)
+  if (bad2.ok || !bad2.checks[0].findings.some((entry) => entry.message.includes('unknown state'))) {
+    throw new Error('unknown state in narrative must fail validation')
+  }
+
+  const missingEvent = clone(complete)
+  missingEvent.narrative.events = {}
+  const bad3 = runVerification(missingEvent)
+  if (bad3.ok || !bad3.checks[0].findings.some((entry) => entry.message.includes('missing description for event'))) {
+    throw new Error('missing event description must fail validation')
+  }
+
+  const duplicate = clone(complete)
+  duplicate.narrative.scenarios = [
+    { from: 'A', event: 'go', scenario: 'first' },
+    { from: 'A', event: 'go', scenario: 'second' },
+  ]
+  const bad4 = runVerification(duplicate)
+  if (bad4.ok || !bad4.checks[0].findings.some((entry) => entry.message.includes('duplicate scenario'))) {
+    throw new Error('duplicate scenario must fail validation')
+  }
+
+  for (const bad of [bad1, bad2, bad3, bad4]) assertNoUndefinedValues(bad)
+  console.log('PASS narrative-validation')
+}
+
+await runNarrativeValidationTests()
 if (failures > 0) {
   console.log('engine fixtures failed:', failures)
   process.exit(1)

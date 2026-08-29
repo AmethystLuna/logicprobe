@@ -147,7 +147,7 @@ When the document under review is a refactoring plan (modifying existing state m
 
 1. **Extract the BEFORE model** from the existing codebase (not the plan — verify what the code actually does, not what the plan claims it does)
 2. **Extract the AFTER model** from the refactoring plan
-3. **Show both tables** to the user side by side and confirm the delta is intentional
+3. **Show both tables AND their model narratives** to the user side by side and confirm the delta is intentional
 4. **Run Phase 2a + 2b on the AFTER model** — same 14 checks as new design
 5. **Compare BEFORE vs AFTER**:
 
@@ -217,25 +217,76 @@ For every probe failure:
 
 ### Extraction Rule
 
-Before writing any verification code, output a transition table:
+Before writing any verification code, output the model in one of the rendering
+forms below. Default is Form A; switch forms when the machine is large or the
+display area is narrow — never let a table row wrap.
+
+**Form A — integrated transition table (default)**: formal symbols with their
+natural-language meaning inlined; the scenario each (state, event) combination
+represents is the last column:
 
 ```text
-State       | Event/Condition            | Next State    | Guard?
-------------|----------------------------|---------------|-------
-INIT        | power_ready                | IDLE          | -
-IDLE        | start_cmd                  | STARTING      | -
-IDLE        | error_detected             | ERROR         | -
-STARTING    | ack_received               | ACTIVE        | -
-STARTING    | timeout                    | ERROR         | retry==0
-STARTING    | timeout                    | FATAL         | retry>=1
-ACTIVE      | done                       | IDLE          | -
-ERROR       | cooldown_elapsed           | RECOVERING    | -
-RECOVERING  | reinit_complete            | IDLE          | -
+状态（含义）             | 事件（含义）          | 下一状态（含义）      | Guard?  | 场景（状态+事件）
+------------------------|-----------------------|----------------------|---------|--------------------
+INIT（上电待就绪）       | power_ready（电源就绪）| IDLE（空闲待命）     | -       | 就绪后进入待命
+IDLE（空闲待命）         | start_cmd（启动命令） | STARTING（启动中）   | -       | 收到命令开始启动
+STARTING（启动中）       | ack_received（收到ACK）| ACTIVE（运行中）    | -       | 启动成功进入运行
+STARTING（启动中）       | timeout（等待超时）   | ERROR（出错待恢复）  | retry==0 | 首次超时进入重试
+STARTING（启动中）       | timeout（等待超时）   | FATAL（不可恢复）    | retry>=1 | 重试耗尽转致命
+ERROR（出错待恢复）      | cooldown_elapsed（冷却结束）| RECOVERING（重初始化）| -     | 冷却结束开始恢复
 ```
 
-**CRITICAL**: Show this table to the user and ask for confirmation before generating the harness. The #1 failure mode of verification is extracting the wrong model. If the plan is ambiguous, flag it as a finding first — don't guess.
+Width discipline (Form A): keep parenthetical meanings short (state/event ≤ 6
+characters, scenario ≤ 10) and estimate every row's display width (CJK counts as
+2) to fit the available area. If any row would wrap, shorten the meanings; if it
+still will not fit, switch to Form C. A wrapped table row loses column alignment
+and is harder to read than no table at all.
 
-**Exception**: If the runtime reports `logicprobe interaction=auto`, do NOT call `ask_user_question`. Instead: (a) cite evidence for every extracted state/transition/guard, (b) round-trip the filled model back into a transition table and compare it with the extraction table, and (c) mark the report `UNCONFIRMED`.
+**Form B — sentence blocks (reading-accessible)**: one transition per block,
+scenario sentence first, fixed three-line frame. Use for detailed confirmation,
+users with reading difficulties, or machines with ≤ 10 transitions:
+
+```text
+第 1 步：就绪后进入待命
+    状态 INIT（上电待就绪）
+    发生 power_ready（电源就绪）
+    进入 IDLE（空闲待命）
+```
+
+**Form C — grouped by source state (large machines / narrow panes)**: one
+section per state, each rendered as its own small 3-column table
+（事件（含义）| 下一状态（含义）| 场景）; no cross-group column alignment to track:
+
+```text
+DEGRADED_LOADING（降级加载）
+  事件（含义）          | 下一状态（含义）      | 场景
+  first_data（首帧数据）| OK_READY（正常就绪）  | 收到首帧转就绪
+  fault（故障）         | FAULT（故障锁存）     | 故障锁存
+  power_off（下电）     | POWER_OFF（下电）     | 下电
+```
+
+Each group table is narrow (3 columns, roughly ≤ 60 display columns with short
+meanings). If one group's table would still wrap, fall back to a one-line-per-event
+bullet list for that group only.
+
+Reading rule: every row/block is one sentence — "在【状态（含义）】下发生【事件（含义）】
+→ 进入【下一状态（含义）】，即【实际场景】"。Meanings repeat on purpose: each entry is
+self-contained. The machine-readable model keeps the same information in its
+`narrative` block (`narrative.states`, `narrative.events`, `narrative.scenarios`).
+
+**CRITICAL**: Show the chosen form to the user and ask for confirmation before
+generating the harness. Because the natural language is inlined, any entry that
+reads wrong to the user — a state/event meaning that is off, or a scenario that
+does not match reality — means the model is wrong even if the symbols are
+consistent. The #1 failure mode of verification is extracting the wrong model. If
+the plan is ambiguous, flag it as a finding first — don't guess.
+
+**Exception**: If the runtime reports `logicprobe interaction=auto`, do NOT call
+`ask_user_question`. Instead: (a) cite evidence for every cell/entry — each
+state/event meaning and each scenario must trace to a source sentence, (b)
+round-trip the filled model (including its `narrative` block) back into the SAME
+rendering form and compare it with the extraction, and (c) mark the report
+`UNCONFIRMED`.
 
 ### Code-Level Behavioral Suggestion
 

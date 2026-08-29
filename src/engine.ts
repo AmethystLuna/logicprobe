@@ -46,6 +46,22 @@ export interface TransitionSpec {
   updates?: UpdateSpec[]
 }
 
+export interface TransitionScenarioSpec {
+  from: string
+  event: string
+  /** Natural language: what this (state, event) combination represents in the real scenario. */
+  scenario: string
+}
+
+export interface ModelNarrative {
+  /** Natural-language meaning of each state id. */
+  states?: Record<string, string>
+  /** Natural-language meaning of each event id. */
+  events?: Record<string, string>
+  /** Natural-language scenario for each distinct (from, event) combination. */
+  scenarios?: TransitionScenarioSpec[]
+}
+
 export interface VariableSpec {
   name: string
   kind: 'integer' | 'boolean'
@@ -86,6 +102,8 @@ export interface LogicModelV1 {
   boundaryChecks?: BoundaryCheckSpec[]
   resourcePairs?: ResourcePairSpec[]
   idempotentEvents?: string[]
+  /** Natural-language descriptions of states, events, and (state, event) scenarios. */
+  narrative?: ModelNarrative
 }
 
 export interface VerificationOptions {
@@ -121,6 +139,8 @@ export interface VerificationReport {
   ok: boolean
   schemaVersion: 1
   modelHash: string
+  /** Echo of the model's natural-language narrative, when present. */
+  narrative?: ModelNarrative
   summary: {
     states: number
     transitions: number
@@ -346,6 +366,66 @@ export function validateModel(input: unknown): { ok: true; model: LogicModelV1 }
       if (typeof pair.releaseEvent !== 'string' || pair.releaseEvent.length === 0) bad(path + '.releaseEvent', 'must be a non-empty string')
       if (pair.failEvent !== undefined && typeof pair.failEvent !== 'string') bad(path + '.failEvent', 'must be a string')
     })
+  }
+  if (root.narrative !== undefined) {
+    const narrativePath = 'narrative'
+    if (typeof root.narrative !== 'object' || root.narrative === null || Array.isArray(root.narrative)) {
+      bad(narrativePath, 'must be an object')
+    } else {
+      const narrative = root.narrative as Record<string, unknown>
+      const stateIds = new Set<string>(Array.isArray(root.states) ? (root.states as StateSpec[]).map((state) => state.id) : [])
+      const eventIds = new Set<string>(Array.isArray(root.transitions) ? (root.transitions as TransitionSpec[]).map((transition) => transition.event) : [])
+      const fromEventGroups = new Set<string>(Array.isArray(root.transitions) ? (root.transitions as TransitionSpec[]).map((transition) => transition.from + '|' + transition.event) : [])
+      if (typeof narrative.states !== 'object' || narrative.states === null || Array.isArray(narrative.states)) {
+        bad(narrativePath + '.states', 'must be an object mapping state id -> natural-language description')
+      } else {
+        for (const [id, description] of Object.entries(narrative.states as Record<string, unknown>)) {
+          if (!stateIds.has(id)) bad(narrativePath + '.states', 'references unknown state ' + id)
+          if (typeof description !== 'string' || description.length === 0) bad(narrativePath + '.states.' + id, 'must be a non-empty string')
+        }
+        for (const id of stateIds) {
+          if (typeof (narrative.states as Record<string, unknown>)[id] !== 'string') bad(narrativePath + '.states', 'missing description for state ' + id)
+        }
+      }
+      if (typeof narrative.events !== 'object' || narrative.events === null || Array.isArray(narrative.events)) {
+        bad(narrativePath + '.events', 'must be an object mapping event id -> natural-language description')
+      } else {
+        for (const [id, description] of Object.entries(narrative.events as Record<string, unknown>)) {
+          if (!eventIds.has(id)) bad(narrativePath + '.events', 'references unknown event ' + id)
+          if (typeof description !== 'string' || description.length === 0) bad(narrativePath + '.events.' + id, 'must be a non-empty string')
+        }
+        for (const id of eventIds) {
+          if (typeof (narrative.events as Record<string, unknown>)[id] !== 'string') bad(narrativePath + '.events', 'missing description for event ' + id)
+        }
+      }
+      if (!Array.isArray(narrative.scenarios)) {
+        bad(narrativePath + '.scenarios', 'must be an array of { from, event, scenario }')
+      } else {
+        const seen = new Set<string>()
+        narrative.scenarios.forEach((entry, index) => {
+          const scenarioPath = narrativePath + '.scenarios[' + index + ']'
+          if (typeof entry !== 'object' || entry === null || Array.isArray(entry)) {
+            bad(scenarioPath, 'must be an object')
+            return
+          }
+          const scenario = entry as Record<string, unknown>
+          if (typeof scenario.from !== 'string' || scenario.from.length === 0) bad(scenarioPath + '.from', 'must be a non-empty string')
+          else if (!stateIds.has(scenario.from)) bad(scenarioPath + '.from', 'unknown state ' + scenario.from)
+          if (typeof scenario.event !== 'string' || scenario.event.length === 0) bad(scenarioPath + '.event', 'must be a non-empty string')
+          else if (!eventIds.has(scenario.event)) bad(scenarioPath + '.event', 'unknown event ' + scenario.event)
+          if (typeof scenario.scenario !== 'string' || scenario.scenario.length === 0) bad(scenarioPath + '.scenario', 'must be a non-empty string')
+          const key = String(scenario.from) + '|' + String(scenario.event)
+          if (seen.has(key)) bad(scenarioPath, 'duplicate scenario for (' + scenario.from + ', ' + scenario.event + ')')
+          seen.add(key)
+        })
+        for (const key of fromEventGroups) {
+          if (!seen.has(key)) {
+            const sep = key.indexOf('|')
+            bad(narrativePath + '.scenarios', 'missing scenario for (' + key.slice(0, sep) + ', ' + key.slice(sep + 1) + ')')
+          }
+        }
+      }
+    }
   }
   // Guard/update variable references were validated structurally; re-walk for references.
   if (Array.isArray(root.transitions)) {
@@ -1692,6 +1772,7 @@ export function runVerification(input: unknown, options: VerificationOptions = {
       truncated: exploration.truncated,
     },
     checks,
+    ...(model.narrative === undefined ? {} : { narrative: model.narrative }),
     ...(comparison === undefined ? {} : { comparison }),
   }
 }

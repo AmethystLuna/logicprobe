@@ -33,6 +33,20 @@ export interface TransitionSpec {
     guard?: GuardNode;
     updates?: UpdateSpec[];
 }
+export interface TransitionScenarioSpec {
+    from: string;
+    event: string;
+    /** Natural language: what this (state, event) combination represents in the real scenario. */
+    scenario: string;
+}
+export interface ModelNarrative {
+    /** Natural-language meaning of each state id. */
+    states?: Record<string, string>;
+    /** Natural-language meaning of each event id. */
+    events?: Record<string, string>;
+    /** Natural-language scenario for each distinct (from, event) combination. */
+    scenarios?: TransitionScenarioSpec[];
+}
 export interface VariableSpec {
     name: string;
     kind: 'integer' | 'boolean';
@@ -99,6 +113,8 @@ export interface LogicModelV1 {
     boundaryChecks?: BoundaryCheckSpec[];
     resourcePairs?: ResourcePairSpec[];
     idempotentEvents?: string[];
+    /** Natural-language descriptions of states, events, and (state, event) scenarios. */
+    narrative?: ModelNarrative;
 }
 export interface VerificationOptions {
     maxStates?: number;
@@ -129,6 +145,8 @@ export interface VerificationReport {
     ok: boolean;
     schemaVersion: 1;
     modelHash: string;
+    /** Echo of the model's natural-language narrative, when present. */
+    narrative?: ModelNarrative;
     summary: {
         states: number;
         transitions: number;

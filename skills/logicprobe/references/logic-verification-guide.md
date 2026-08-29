@@ -45,16 +45,48 @@ Extract every claim that uses absolute language:
 | "cannot ..." | "cannot deadlock" | No absorbing cycle exists |
 | "all paths ..." | "all paths lead to ERROR on failure" | Every failure event reaches ERROR (not FATAL, not stuck) |
 
+### Step 4.5: Write the Natural Language and Pick a Rendering Form
+
+Do NOT keep the natural-language explanations in a separate block — integrate them
+into the model presentation so every entry reads like a sentence in the real
+scenario. Write meanings for every state, every event, and every distinct
+(state, event) combination (carry them in the model's `narrative` block:
+`narrative.states`, `narrative.events`, `narrative.scenarios`; the report
+echoes them back). Then render one of three forms:
+
+**Form A — integrated transition table (default)**: `STATE（含义）` /
+`event（含义）` / `NEXT（含义）` columns plus a final scenario column, so each
+row is one self-contained sentence. Width discipline: keep meanings short
+(state/event ≤ 6 characters, scenario ≤ 10) and estimate row width (CJK counts
+as 2) to fit the display area — a wrapped row loses column alignment and
+readability collapses. If a row would wrap, shorten meanings; if it still will
+not fit, use Form C.
+
+**Form B — sentence blocks (reading-accessible)**: one transition per block,
+scenario sentence first, then a fixed three-line frame (状态…/发生…/进入…). Use
+for detailed confirmation, users with reading difficulties, or ≤ 10 transitions.
+
+**Form C — grouped by source state (large machines / narrow panes)**: one
+section per state, each rendered as its own small 3-column table
+（`event（含义）| NEXT（含义）| 场景`）; no cross-group column alignment to track.
+Use for ≥ 15 transitions or when the display area is too narrow for Form A. If one
+group's table would still wrap, fall back to a one-line-per-event bullet list for
+that group only.
+
 ### Step 5: Confirm with User
 
-Show the extracted transition table BEFORE writing the harness. Ask:
+Show the rendered model (the chosen form, symbols + inlined natural language)
+BEFORE writing the harness. Ask:
 
 1. Are all states captured?
 2. Are all transitions and guards correct?
 3. Are there undocumented transitions not in the plan?
 4. Is the initial state correct?
+5. Does every entry read correctly — state/event meanings and the (state, event)
+   scenario all match the real situation?
 
-Only proceed after confirmation. A wrong model produces wrong counter-examples, which wastes more time than no verification at all.
+Only proceed after confirmation. A wrong model produces wrong counter-examples,
+which wastes more time than no verification at all.
 
 ## Probe Design Patterns
 
@@ -348,7 +380,7 @@ The BEFORE model comes from **code, not the plan**. The plan may describe the cu
 1. Read the relevant source files (state machine dispatch, state enum, handler functions)
 2. Extract the ACTUAL transition logic from code, not from the plan's description of "current behavior"
 3. Extract the AFTER model from the plan as usual
-4. Display both tables side by side
+4. Display both tables AND their model narratives side by side
 
 ### Comparison Methodology
 
@@ -389,7 +421,7 @@ Manual verification is reliable for state machines with **≤ 10 states and ≤ 
 
 ### Prerequisites
 
-- Transition table has been extracted and confirmed with the user
+- Transition table and model narrative have been extracted and confirmed with the user
 - You have the full table in context (from Phase 2 extraction step)
 - **Harness validation** (Python mode only): After filling in `verification-harness.py`, translate the Python `STATES` dict BACK into a transition table and compare it against the confirmed extraction table. If they differ, fix the harness. This catches typo and whitespace errors in manual dict construction.
 

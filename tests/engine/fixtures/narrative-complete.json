@@ -1,0 +1,77 @@
+{
+  "schemaVersion": 1,
+  "init": "INIT",
+  "states": [
+    {
+      "id": "INIT"
+    },
+    {
+      "id": "IDLE"
+    },
+    {
+      "id": "DONE",
+      "terminal": true
+    },
+    {
+      "id": "ERROR",
+      "terminal": true
+    }
+  ],
+  "transitions": [
+    {
+      "from": "INIT",
+      "event": "ready",
+      "to": "IDLE"
+    },
+    {
+      "from": "INIT",
+      "event": "fail",
+      "to": "ERROR"
+    },
+    {
+      "from": "IDLE",
+      "event": "done",
+      "to": "DONE"
+    },
+    {
+      "from": "IDLE",
+      "event": "fail",
+      "to": "ERROR"
+    }
+  ],
+  "narrative": {
+    "states": {
+      "INIT": "上电复位，等待就绪信号",
+      "IDLE": "空闲待命，可开始任务",
+      "DONE": "任务完成（终态）",
+      "ERROR": "发生错误（终态）"
+    },
+    "events": {
+      "ready": "就绪信号到达",
+      "done": "任务正常完成",
+      "fail": "发生故障"
+    },
+    "scenarios": [
+      {
+        "from": "INIT",
+        "event": "ready",
+        "scenario": "上电就绪后进入空闲"
+      },
+      {
+        "from": "INIT",
+        "event": "fail",
+        "scenario": "上电自检失败直接进入错误态"
+      },
+      {
+        "from": "IDLE",
+        "event": "done",
+        "scenario": "任务完成回到结束态"
+      },
+      {
+        "from": "IDLE",
+        "event": "fail",
+        "scenario": "运行中故障进入错误态"
+      }
+    ]
+  }
+}

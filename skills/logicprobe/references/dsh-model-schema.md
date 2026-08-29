@@ -33,6 +33,65 @@ The dsh-native `logicprobe_verify` tool accepts a structured JSON model. The eng
 | `boundaryChecks` | no | `{ variable, values: number[] }` for A5 |
 | `resourcePairs` | no | `{ resource, acquireEvent, releaseEvent, failEvent? }` for A4/A6 |
 | `idempotentEvents` | no | Events that must be replay-safe; verified by A8 |
+| `narrative` | no | Natural-language descriptions of states, events, and (state, event) scenarios — echoed in the report |
+
+## Model narrative (natural-language context)
+
+The model may carry a `narrative` block explaining, in natural language, what
+every symbol means in the real scenario. It is what gets shown to the user when
+the extracted model is presented for confirmation, and the report echoes it back
+so findings can be read against real scenarios instead of bare ids.
+
+```json
+"narrative": {
+  "states": {
+    "NEW": "订单已创建，等待支付",
+    "PAID": "已支付，等待发货",
+    "SHIPPED": "已发货，等待签收",
+    "DONE": "已完成（终态）",
+    "CANCELLED": "已取消（终态）"
+  },
+  "events": {
+    "pay": "买家完成支付",
+    "ship": "仓库发货",
+    "deliver": "买家签收",
+    "cancel": "取消订单"
+  },
+  "scenarios": [
+    { "from": "NEW", "event": "pay", "scenario": "下单后支付成功，订单进入待发货" },
+    { "from": "PAID", "event": "ship", "scenario": "已支付订单发货，进入运输中" },
+    { "from": "SHIPPED", "event": "deliver", "scenario": "签收完成，订单结束" },
+    { "from": "NEW", "event": "cancel", "scenario": "未支付订单被取消" },
+    { "from": "PAID", "event": "cancel", "scenario": "已支付订单取消并退款" }
+  ]
+}
+```
+
+**Completeness contract**: when `narrative` is present, all three parts are
+required and must fully cover the model — every declared state needs a
+`narrative.states` entry, every event used in `transitions` needs a
+`narrative.events` entry, and every distinct `(from, event)` group needs a
+`narrative.scenarios` entry. Keys must reference declared ids; unknown
+references, missing coverage, and duplicate scenario keys are model validation
+errors. The report's `narrative` field echoes the block unchanged.
+
+**Presenting the model**: when showing the extracted model for confirmation, render
+the natural language INLINE in the model presentation, not as a separate block.
+Three rendering forms (all derive from the same `narrative` data):
+
+- **Form A — integrated transition table (default)**: one row per transition with
+  state/event meanings in parentheses and the scenario as the last column. Keep
+  meanings short (state/event ≤ 6 characters, scenario ≤ 10) and estimate row
+  width (CJK counts as 2) so rows fit the display area — a wrapped row loses
+  column alignment and readability collapses.
+- **Form B — sentence blocks (reading-accessible)**: scenario sentence first, then
+  a fixed three-line frame (状态…/发生…/进入…). Use for detailed confirmation,
+  users with reading difficulties, or ≤ 10 transitions.
+- **Form C — grouped by source state (large machines / narrow panes)**: one
+  section per state, each rendered as its own small 3-column table
+  （`event（含义）| NEXT（含义）| 场景`）; no cross-group column alignment to
+  track. Use for ≥ 15 transitions or narrow display areas; if a group table would
+  still wrap, fall back to a one-line-per-event bullet list for that group.
 
 ## Guards
 
