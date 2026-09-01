@@ -1,6 +1,6 @@
 {
   "name": "logicprobe",
-  "version": "0.5.4",
+  "version": "0.5.5",
   "description": "Design document & plan claim verification — enumerate every verifiable claim, verify against codebase facts, then escalate to logic-primitive verification (8 structural checks + 11 adversarial probes) and data-model verification (DS/DA/DD checks) for behavioral claims. For refactoring plans, compares before/after state-machine and data-model models for regression detection.",
   "author": {
     "name": "Amethyst Luna",
