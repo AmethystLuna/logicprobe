@@ -499,6 +499,24 @@ async function runCoverageNoteTests() {
   if (!report.coverageNotes.some((note) => note.includes('preemptive'))) throw new Error('preemption note must be present')
   assertNoUndefinedValues(report)
 
+  // hybrid + probabilistic vocabulary routes to SpaceEx/PRISM
+  const hybridProb = {
+    schemaVersion: 1,
+    init: 'IDLE',
+    states: [{ id: 'IDLE' }, { id: 'RUN' }, { id: 'SAFE', terminal: true }],
+    transitions: [
+      { from: 'IDLE', event: 'pid_tune', to: 'RUN' },
+      { from: 'RUN', event: 'mtbf_report', to: 'SAFE' },
+    ],
+  }
+  const hpReport = runVerification(hybridProb)
+  if (!Array.isArray(hpReport.coverageNotes) || hpReport.coverageNotes.length !== 2) {
+    throw new Error('expected two coverage notes (hybrid + probabilistic), got ' + JSON.stringify(hpReport.coverageNotes))
+  }
+  if (!hpReport.coverageNotes.some((note) => note.includes('SpaceEx'))) throw new Error('hybrid note should route to SpaceEx')
+  if (!hpReport.coverageNotes.some((note) => note.includes('PRISM'))) throw new Error('probabilistic note should route to PRISM')
+  assertNoUndefinedValues(hpReport)
+
   // plain machine with no risky vocabulary: no coverage notes at all
   const plain = {
     schemaVersion: 1,
