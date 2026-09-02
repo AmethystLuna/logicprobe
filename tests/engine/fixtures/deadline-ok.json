@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 1,
+  "init": "IDLE",
+  "states": [
+    {
+      "id": "IDLE"
+    },
+    {
+      "id": "BUSY",
+      "maxTicks": 2
+    },
+    {
+      "id": "DONE",
+      "terminal": true
+    }
+  ],
+  "transitions": [
+    {
+      "from": "IDLE",
+      "event": "fault",
+      "to": "BUSY"
+    },
+    {
+      "from": "BUSY",
+      "event": "tick",
+      "to": "DONE"
+    },
+    {
+      "from": "BUSY",
+      "event": "recover",
+      "to": "DONE"
+    }
+  ],
+  "tickEvents": [
+    "tick"
+  ]
+}

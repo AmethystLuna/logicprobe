@@ -140,6 +140,8 @@ const hsA = { schemaVersion: 1, init: 'A0', states: [{ id: 'A0' }, { id: 'A_REQ'
 const hsB = { schemaVersion: 1, init: 'B0', states: [{ id: 'B0' }, { id: 'B_BUSY' }, { id: 'B_DONE', terminal: true }], transitions: [{ from: 'B0', event: 'req', to: 'B_BUSY' }, { from: 'B_BUSY', event: 'ack', to: 'B_DONE' }] }
 check('CMP C1/C2: handshake composition passes', runCompositionVerification([hsA, hsB], { rendezvous: ['req', 'ack'] }).summary.errors === 0)
 const hsStuck = { schemaVersion: 1, init: 'B0', states: [{ id: 'B0' }, { id: 'B_DONE', terminal: true }], transitions: [{ from: 'B0', event: 'ack', to: 'B_DONE' }] }
+const deadlineBad = { schemaVersion: 1, init: 'L', states: [{ id: 'L' }, { id: 'C', maxTicks: 2 }, { id: 'S', terminal: true }], transitions: [{ from: 'L', event: 'fault', to: 'C' }, { from: 'C', event: 'tick', to: 'C' }, { from: 'C', event: 'recover', to: 'S' }], tickEvents: ['tick'] }
+check('SM A14: deadline miss detected', hasFinding(runVerification(deadlineBad), 'A14', 'A14_DEADLINE_MISS'))
 check('CMP C1: blocked handshake deadlocks', hasFinding(runCompositionVerification([hsA, hsStuck], { rendezvous: ['req', 'ack'] }), 'C1', 'C1_COMPOSITION_DEADLOCK'))
 check('SM coverage: timing note routed', runVerification(smCoverage).coverageNotes?.some((note) => note.includes('UPPAAL')) === true)
 

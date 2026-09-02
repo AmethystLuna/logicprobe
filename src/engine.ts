@@ -33,6 +33,8 @@ export interface StateSpec {
   onEntry?: string[]
   /** Actions fired automatically when the state is left. Same semantics as onEntry. */
   onExit?: string[]
+  /** Deadline (A14): the state must be left within this many declared tick events of entering it. */
+  maxTicks?: number
 }
 
 export interface UpdateSpec {
@@ -112,6 +114,8 @@ export interface LogicModelV1 {
   boundaryChecks?: BoundaryCheckSpec[]
   resourcePairs?: ResourcePairSpec[]
   idempotentEvents?: string[]
+  /** Events that advance the discrete clock by one tick; used by A14 deadline checks. */
+  tickEvents?: string[]
   /** Natural-language descriptions of states, events, and (state, event) scenarios. */
   narrative?: ModelNarrative
 }
@@ -280,6 +284,13 @@ export function validateModel(input: unknown): { ok: true; model: LogicModelV1 }
       }
     })
   }
+  if (Array.isArray(root.states)) {
+    (root.states as StateSpec[]).forEach((state, index) => {
+      if (state.maxTicks !== undefined && (!Number.isInteger(state.maxTicks) || state.maxTicks < 0)) {
+        bad('states[' + index + '].maxTicks', 'must be a non-negative integer')
+      }
+    })
+  }
   const variableNames = new Set<string>()
   if (root.variables !== undefined) {
     if (!Array.isArray(root.variables)) bad('variables', 'must be an array')
@@ -385,6 +396,12 @@ export function validateModel(input: unknown): { ok: true; model: LogicModelV1 }
     if (!Array.isArray(root.idempotentEvents)) bad('idempotentEvents', 'must be an array')
     else root.idempotentEvents.forEach((entry, index) => {
       if (typeof entry !== 'string' || entry.length === 0) bad('idempotentEvents[' + index + ']', 'must be a non-empty string')
+    })
+  }
+  if (root.tickEvents !== undefined) {
+    if (!Array.isArray(root.tickEvents)) bad('tickEvents', 'must be an array')
+    else root.tickEvents.forEach((entry, index) => {
+      if (typeof entry !== 'string' || entry.length === 0) bad('tickEvents[' + index + ']', 'must be a non-empty string')
     })
   }
   if (root.resourcePairs !== undefined) {
@@ -2142,6 +2159,80 @@ function A13_probability(model: LogicModelV1, options: NormalizedOptions): Check
 }
 
 // ---------------------------------------------------------------------------
+// A14 — Deadline (discrete tick clock)
+// ---------------------------------------------------------------------------
+
+function A14_deadline(model: LogicModelV1, options: NormalizedOptions): CheckResult {
+  const findings: Finding[] = []
+  const tickEvents = new Set(model.tickEvents ?? [])
+  const limits = new Map<string, number>()
+  let hasLimit = false
+  for (const state of model.states) {
+    if (state.maxTicks !== undefined) {
+      limits.set(state.id, state.maxTicks)
+      hasLimit = true
+    }
+  }
+  if (!hasLimit) {
+    return checkResult('A14', 'Deadline', [], 'No state declares maxTicks')
+  }
+  if (tickEvents.size === 0) {
+    return checkResult('A14', 'Deadline', [{
+      code: 'A14_NO_TICK_EVENTS',
+      severity: 'warning',
+      message: 'States declare maxTicks, but no tickEvents are declared, so deadline compliance cannot be verified.',
+    }], 'Missing tick events')
+  }
+  const groupMap = groupTransitions(model)
+  const init = initialState(model)
+  const limitOf = (stateId: string): number | undefined => limits.get(stateId)
+  const queue: Array<{ runtime: RuntimeState; ticks: number; path: PathStep[] }> = [{ runtime: init, ticks: 0, path: [] }]
+  const seen = new Set<string>()
+  let steps = 0
+  while (queue.length > 0) {
+    const entry = queue.shift()!
+    if (++steps > options.maxStates) break
+    const key = runtimeKey(entry.runtime) + '|' + entry.ticks
+    if (seen.has(key)) continue
+    seen.add(key)
+    for (const event of allEvents(model)) {
+      const group = groupMap.get(entry.runtime.state + '|' + event)
+      if (group === undefined || group.length === 0) continue
+      for (const transition of applicableTransitions(group, entry.runtime)) {
+        const next = applyUpdates(model, transition, entry.runtime)
+        const isTick = tickEvents.has(event)
+        const stays = next.state === entry.runtime.state
+        const path = [...entry.path, { from: entry.runtime.state, event: transition.event, to: next.state }]
+        let ticks: number
+        if (isTick && stays) {
+          const lim = limitOf(next.state)
+          if (lim !== undefined && entry.ticks + 1 > lim) {
+            findings.push({
+              code: 'A14_DEADLINE_MISS',
+              severity: 'error',
+              message: 'Deadline missed: state ' + next.state + ' can remain resident for more than ' + lim + ' tick(s).',
+              path,
+              evidence: { state: next.state, maxTicks: lim, ticks: entry.ticks + 1 },
+            })
+            continue
+          }
+          ticks = entry.ticks + 1
+        } else if (isTick && !stays) {
+          ticks = 0
+        } else if (!isTick && stays) {
+          ticks = entry.ticks
+        } else {
+          ticks = 0
+        }
+        const nextKey = runtimeKey(next) + '|' + ticks
+        if (!seen.has(nextKey)) queue.push({ runtime: next, ticks, path })
+      }
+    }
+  }
+  return checkResult('A14', 'Deadline', findings, findings.length === 0 ? 'All deadlines respected' : 'Deadline findings: ' + findings.length)
+}
+
+// ---------------------------------------------------------------------------
 // Coverage notes (informational gap notices)
 // ---------------------------------------------------------------------------
 
@@ -2226,6 +2317,7 @@ export function runVerification(input: unknown, options: VerificationOptions = {
     A11_atomicity(model, normalized),
     A12_budget(model, normalized),
     A13_probability(model, normalized),
+    A14_deadline(model, normalized),
   ]
   let comparison: ComparisonSummary | undefined
   if (options.beforeModel !== undefined) {

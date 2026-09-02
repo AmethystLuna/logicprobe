@@ -109,6 +109,24 @@ const cases = [
     },
   },
   {
+    name: 'deadline-over.json',
+    errors: 1,
+    findings: [{ check: 'A14', code: 'A14_DEADLINE_MISS' }],
+    assert(report) {
+      const a14 = report.checks.find((check) => check.id === 'A14')
+      const finding = a14?.findings.find((entry) => entry.code === 'A14_DEADLINE_MISS')
+      const path = finding?.path
+      if (path === undefined || path.length < 3 || path[path.length - 1].event !== 'tick') {
+        throw new Error('deadline miss must carry the over-residency tick path, got ' + JSON.stringify(path))
+      }
+    },
+  },
+  {
+    name: 'deadline-ok.json',
+    errors: 0,
+    findings: [],
+  },
+  {
     name: 'probability-ok.json',
     errors: 0,
     findings: [],
@@ -472,7 +490,7 @@ async function runBudgetTests() {
   const legacyReport = runVerification(legacy)
   const a12 = legacyReport.checks.find((check) => check.id === 'A12')
   if (a12 === undefined || a12.findings.length !== 0 || a12.status !== 'pass') throw new Error('A12 must pass cleanly for legacy machines')
-  if (legacyReport.summary.checksRun !== 21) throw new Error('expected 21 checks, got ' + legacyReport.summary.checksRun)
+  if (legacyReport.summary.checksRun !== 22) throw new Error('expected 22 checks, got ' + legacyReport.summary.checksRun)
   assertNoUndefinedValues(legacyReport)
   console.log('PASS budget-tests')
 }
@@ -836,6 +854,46 @@ async function runTextbookCanonTests() {
 }
 
 await runTextbookCanonTests()
+
+async function runDeadlineTests() {
+  // advisory: maxTicks declared but no tickEvents -> cannot verify
+  const noTicks = {
+    schemaVersion: 1, init: 'A',
+    states: [{ id: 'A', maxTicks: 3 }, { id: 'B', terminal: true }],
+    transitions: [{ from: 'A', event: 'go', to: 'B' }],
+  }
+  const noTicksReport = runVerification(noTicks)
+  if (noTicksReport.summary.errors !== 0) throw new Error('missing tickEvents must not error')
+  const a14n = noTicksReport.checks.find((check) => check.id === 'A14')
+  if (a14n === undefined || !a14n.findings.some((finding) => finding.code === 'A14_NO_TICK_EVENTS')) {
+    throw new Error('expected A14_NO_TICK_EVENTS advisory')
+  }
+  assertNoUndefinedValues(noTicksReport)
+
+  // deadline respected: every tick leaves the guarded state before the limit
+  const ok = {
+    schemaVersion: 1, init: 'IDLE',
+    states: [{ id: 'IDLE' }, { id: 'BUSY', maxTicks: 2 }, { id: 'DONE', terminal: true }],
+    transitions: [
+      { from: 'IDLE', event: 'fault', to: 'BUSY' },
+      { from: 'BUSY', event: 'tick', to: 'DONE' },
+      { from: 'BUSY', event: 'recover', to: 'DONE' },
+    ],
+    tickEvents: ['tick'],
+  }
+  const okReport = runVerification(ok)
+  const a14o = okReport.checks.find((check) => check.id === 'A14')
+  if (a14o === undefined || a14o.findings.length !== 0) throw new Error('deadline-respecting watchdog must pass')
+  assertNoUndefinedValues(okReport)
+
+  // invalid maxTicks fails validation
+  const bad = { schemaVersion: 1, init: 'A', states: [{ id: 'A', maxTicks: -1 }, { id: 'B', terminal: true }], transitions: [{ from: 'A', event: 'go', to: 'B' }] }
+  if (runVerification(bad).ok) throw new Error('negative maxTicks must fail validation')
+  console.log('PASS deadline-tests')
+}
+
+await runDeadlineTests()
+
 
 
 

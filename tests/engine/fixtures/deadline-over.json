@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 1,
+  "init": "LISTEN",
+  "states": [
+    {
+      "id": "LISTEN"
+    },
+    {
+      "id": "CRITICAL",
+      "maxTicks": 2
+    },
+    {
+      "id": "SAFE",
+      "terminal": true
+    }
+  ],
+  "transitions": [
+    {
+      "from": "LISTEN",
+      "event": "fault",
+      "to": "CRITICAL"
+    },
+    {
+      "from": "CRITICAL",
+      "event": "tick",
+      "to": "CRITICAL"
+    },
+    {
+      "from": "CRITICAL",
+      "event": "recover",
+      "to": "SAFE"
+    }
+  ],
+  "tickEvents": [
+    "tick"
+  ]
+}

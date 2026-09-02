@@ -23,6 +23,8 @@ export interface StateSpec {
     onEntry?: string[];
     /** Actions fired automatically when the state is left. Same semantics as onEntry. */
     onExit?: string[];
+    /** Deadline (A14): the state must be left within this many declared tick events of entering it. */
+    maxTicks?: number;
 }
 export interface UpdateSpec {
     variable: string;
@@ -133,6 +135,8 @@ export interface LogicModelV1 {
     boundaryChecks?: BoundaryCheckSpec[];
     resourcePairs?: ResourcePairSpec[];
     idempotentEvents?: string[];
+    /** Events that advance the discrete clock by one tick; used by A14 deadline checks. */
+    tickEvents?: string[];
     /** Natural-language descriptions of states, events, and (state, event) scenarios. */
     narrative?: ModelNarrative;
 }
