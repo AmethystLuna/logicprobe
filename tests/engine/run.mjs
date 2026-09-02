@@ -406,6 +406,25 @@ async function runBudgetTests() {
   }
   assertNoUndefinedValues(guardedReport)
 
+  // DAG merge (several paths into one terminal) must NOT be treated as an unbounded cycle
+  const dagMerge = {
+    schemaVersion: 1,
+    init: 'A',
+    states: [{ id: 'A' }, { id: 'B' }, { id: 'C', terminal: true }],
+    transitions: [
+      { from: 'A', event: 'x', to: 'B', cost: 10 },
+      { from: 'A', event: 'y', to: 'C', cost: 30 },
+      { from: 'B', event: 'z', to: 'C', cost: 5 },
+    ],
+    invariants: [{ id: 'b3', description: 'dag budget', kind: 'budget', budget: 100 }],
+  }
+  const dagReport = runVerification(dagMerge)
+  const a12d = dagReport.checks.find((check) => check.id === 'A12')
+  if (a12d === undefined || a12d.findings.length !== 0) {
+    throw new Error('a DAG merge must not be flagged as an unbounded cycle: ' + JSON.stringify(a12d?.findings))
+  }
+  assertNoUndefinedValues(dagReport)
+
   // legacy machine without cost/budget: A12 passes cleanly and total checks stay 20
   const legacy = {
     schemaVersion: 1,

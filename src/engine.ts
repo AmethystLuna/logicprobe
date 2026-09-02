@@ -1808,9 +1808,145 @@ function transitionCost(transition: TransitionSpec): number {
 
 interface BudgetViolation {
   path: PathStep[]
-  cost: number
+  /** Accumulated cost when the violation was detected (unbounded-cycle witnesses carry no total). */
+  cost?: number
   /** True when the witness is a repeatable positive-cost runtime cycle: cost can grow without bound. */
   unbounded: boolean
+}
+
+interface RuntimeEdge {
+  to: string
+  step: PathStep
+  cost: number
+}
+
+interface RuntimeGraph {
+  edges: Map<string, RuntimeEdge[]>
+  keys: string[]
+  initKey: string
+}
+
+function runtimeGraph(model: LogicModelV1, options: NormalizedOptions): RuntimeGraph {
+  const groupMap = groupTransitions(model)
+  const exploration = explore(model, options)
+  const edges = new Map<string, RuntimeEdge[]>()
+  for (const runtime of exploration.reachable) {
+    const out: RuntimeEdge[] = []
+    for (const event of allEvents(model)) {
+      const group = groupMap.get(runtime.state + '|' + event)
+      if (group === undefined || group.length === 0) continue
+      for (const transition of applicableTransitions(group, runtime)) {
+        const next = applyUpdates(model, transition, runtime)
+        out.push({
+          to: runtimeKey(next),
+          step: { from: runtime.state, event: transition.event, to: next.state },
+          cost: transitionCost(transition),
+        })
+      }
+    }
+    edges.set(runtimeKey(runtime), out)
+  }
+  return {
+    edges,
+    keys: exploration.reachable.map((runtime) => runtimeKey(runtime)),
+    initKey: runtimeKey(exploration.initialState),
+  }
+}
+
+/** Shortest path from init to targetKey over the runtime graph, or undefined when unreachable. */
+function runtimePathToKey(graph: RuntimeGraph, targetKey: string): PathStep[] | undefined {
+  const parent = new Map<string, PathStep>()
+  const visited = new Set<string>([graph.initKey])
+  const queue: string[] = [graph.initKey]
+  while (queue.length > 0) {
+    const current = queue.shift()!
+    if (current === targetKey) {
+      const steps: PathStep[] = []
+      let key = targetKey
+      while (key !== graph.initKey) {
+        const step = parent.get(key)
+        if (step === undefined) break
+        steps.unshift(step)
+        key = step.from === undefined ? graph.initKey : keyOfFromStep(graph, step, key)
+      }
+      return steps
+    }
+    for (const edge of graph.edges.get(current) ?? []) {
+      if (visited.has(edge.to)) continue
+      visited.add(edge.to)
+      parent.set(edge.to, edge.step)
+      queue.push(edge.to)
+    }
+  }
+  return undefined
+}
+
+function keyOfFromStep(graph: RuntimeGraph, step: PathStep, targetKey: string): string {
+  // Reconstruct the source key by scanning predecessors of targetKey whose step matches.
+  for (const [from, edges] of graph.edges) {
+    for (const edge of edges) {
+      if (edge.to === targetKey && edge.step.event === step.event && edge.step.from === step.from && edge.step.to === step.to) {
+        return from
+      }
+    }
+  }
+  return graph.initKey
+}
+
+/** Find a reachable cycle whose total cost is positive; return a witness path init -> one full round. */
+function findUnboundedCycle(model: LogicModelV1, options: NormalizedOptions): PathStep[] | undefined {
+  const graph = runtimeGraph(model, options)
+  const color = new Map<string, number>()
+  for (const start of graph.keys) {
+    if (color.has(start)) continue
+    const nodeStack: string[] = [start]
+    const idxStack: number[] = [0]
+    const depthOf = new Map<string, number>([[start, 0]])
+    const costAt = new Map<string, number>([[start, 0]])
+    const prevKey = new Map<string, string>()
+    const prevStep = new Map<string, PathStep>()
+    color.set(start, 1)
+    while (nodeStack.length > 0) {
+      const node = nodeStack[nodeStack.length - 1]
+      const outs = graph.edges.get(node) ?? []
+      if (idxStack[idxStack.length - 1] < outs.length) {
+        const edge = outs[idxStack[idxStack.length - 1]++]
+        const seen = color.get(edge.to)
+        if (seen === undefined) {
+          color.set(edge.to, 1)
+          depthOf.set(edge.to, depthOf.get(node)! + 1)
+          costAt.set(edge.to, costAt.get(node)! + edge.cost)
+          prevKey.set(edge.to, node)
+          prevStep.set(edge.to, edge.step)
+          nodeStack.push(edge.to)
+          idxStack.push(0)
+        } else if (seen === 1) {
+          // Back edge on the current path: this is a true cycle.
+          const cycleCost = costAt.get(node)! + edge.cost - costAt.get(edge.to)!
+          if (cycleCost > 0) {
+            const entry = runtimePathToKey(graph, edge.to) ?? []
+            const round: PathStep[] = []
+            let cursor = node
+            while (cursor !== edge.to && prevStep.has(cursor)) {
+              round.unshift(prevStep.get(cursor)!)
+              cursor = prevKey.get(cursor)!
+            }
+            round.push(edge.step)
+            return [...entry, ...round]
+          }
+        }
+      } else {
+        color.set(node, 2)
+        nodeStack.pop()
+        idxStack.pop()
+        depthOf.delete(node)
+        costAt.delete(node)
+        prevKey.delete(node)
+        prevStep.delete(node)
+      }
+    }
+  }
+  return undefined
 }
 
 function findBudgetViolation(
@@ -1821,14 +1957,11 @@ function findBudgetViolation(
   const groupMap = groupTransitions(model)
   const init = initialState(model)
   const bestCost = new Map<string, number>([[runtimeKey(init), 0]])
-  const expanded = new Set<string>()
   const queue: Array<{ runtime: RuntimeState; cost: number; path: PathStep[] }> = [{ runtime: init, cost: 0, path: [] }]
   let steps = 0
   while (queue.length > 0) {
     const entry = queue.shift()!
     if (++steps > options.maxStates) break
-    const entryKey = runtimeKey(entry.runtime)
-    expanded.add(entryKey)
     for (const event of allEvents(model)) {
       const group = groupMap.get(entry.runtime.state + '|' + event)
       if (group === undefined || group.length === 0) continue
@@ -1839,23 +1972,19 @@ function findBudgetViolation(
         // Costs are non-negative, so the first step that pushes the accumulated cost
         // over the budget is already a witness.
         if (cost > invariant.budget) return { path, cost, unbounded: false }
-        const nextKey = runtimeKey(next)
-        if (expanded.has(nextKey)) {
-          // Reaching an already-expanded runtime state with a strictly greater cost means a
-          // positive-cost runtime cycle is reachable. Under the model's event semantics that
-          // cycle can repeat indefinitely, so the cost can grow without bound and no finite
-          // budget holds.
-          if (cost > (bestCost.get(nextKey) ?? 0)) return { path, cost, unbounded: true }
-          continue
-        }
-        const best = bestCost.get(nextKey)
-        if (best === undefined) {
-          bestCost.set(nextKey, cost)
+        const key = runtimeKey(next)
+        const best = bestCost.get(key)
+        if (best === undefined || cost < best) {
+          bestCost.set(key, cost)
           queue.push({ runtime: next, cost, path })
         }
       }
     }
   }
+  // No finite path exceeds the budget within reachable space; a reachable positive-cost
+  // cycle still makes the worst-case unbounded. Plain DAG merges are not cycles.
+  const cycle = findUnboundedCycle(model, options)
+  if (cycle !== undefined) return { path: cycle, unbounded: true }
   return undefined
 }
 
@@ -1877,10 +2006,10 @@ function A12_budget(model: LogicModelV1, options: NormalizedOptions): CheckResul
         code: 'A12_BUDGET_OVER',
         severity: 'error',
         message: violation.unbounded
-          ? 'Budget invariant "' + invariant.id + '" (' + invariant.description + ') exceeded: a positive-cost cycle is reachable (cost ' + violation.cost + ' at the loop point), so path cost can grow without bound and no finite budget ' + invariant.budget + ' holds.'
+          ? 'Budget invariant "' + invariant.id + '" (' + invariant.description + ') exceeded: a reachable positive-cost cycle lets path cost grow without bound, so no finite budget ' + invariant.budget + ' holds.'
           : 'Budget invariant "' + invariant.id + '" (' + invariant.description + ') exceeded: worst-case path cost ' + violation.cost + ' is over budget ' + invariant.budget + '.',
         path: violation.path,
-        evidence: { invariant, totalCost: violation.cost, unbounded: violation.unbounded },
+        evidence: violation.unbounded ? { invariant, unbounded: true } : { invariant, totalCost: violation.cost, unbounded: false },
       })
     }
   }
