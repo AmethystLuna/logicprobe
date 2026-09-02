@@ -61,6 +61,19 @@ check('SM S8: monotonic decrease detected', hasFinding(runVerification(monoBad),
 check('SM A9: leads-to loop detected', hasFinding(runVerification(leadsBad), 'A9', 'A9_LEADS_TO_VIOLATION'))
 check('SM A10: sequence violation detected', hasFinding(runVerification(seqBad), 'A10', 'A10_SEQUENCE_VIOLATION'))
 check('SM A11: atomicity violation detected', hasFinding(runVerification(atomBad), 'A11', 'A11_ATOMICITY_VIOLATION'))
+const budgetBad = { schemaVersion: 1, init: 'IDLE', states: [{ id: 'IDLE' }, { id: 'RUN' }, { id: 'DONE', terminal: true }], transitions: [{ from: 'IDLE', event: 'start', to: 'RUN', cost: 30 }, { from: 'RUN', event: 'finish', to: 'DONE', cost: 40 }], invariants: [{ id: 'lat', description: 'latency', kind: 'budget', budget: 50 }] }
+check('SM A12: over-budget path detected', hasFinding(runVerification(budgetBad), 'A12', 'A12_BUDGET_OVER'))
+const budgetOk = JSON.parse(JSON.stringify(budgetBad))
+budgetOk.invariants[0].budget = 100
+check('SM A12: within-budget machine passes', runVerification(budgetOk).checks.find((c) => c.id === 'A12')?.findings.length === 0)
+const budgetNoCost = { schemaVersion: 1, init: 'A', states: [{ id: 'A' }, { id: 'B', terminal: true }], transitions: [{ from: 'A', event: 'go', to: 'B', cost: 3 }] }
+check('SM A12: cost without budget warns', hasFinding(runVerification(budgetNoCost), 'A12', 'A12_COST_WITHOUT_BUDGET'))
+const entryBalanced = { schemaVersion: 1, init: 'INIT', states: [{ id: 'INIT' }, { id: 'ACTIVE', onEntry: ['lock'], onExit: ['unlock'] }, { id: 'DONE', terminal: true }], transitions: [{ from: 'INIT', event: 'go', to: 'ACTIVE' }, { from: 'ACTIVE', event: 'finish', to: 'DONE' }], resourcePairs: [{ resource: 'mutex', acquireEvent: 'lock', releaseEvent: 'unlock' }] }
+check('SM A4: entry/exit balanced actions pass', runVerification(entryBalanced).checks.find((c) => c.id === 'A4')?.findings.length === 0)
+const entryUnbalanced = { schemaVersion: 1, init: 'INIT', states: [{ id: 'INIT' }, { id: 'ACTIVE', onEntry: ['lock'] }, { id: 'DONE', terminal: true }], transitions: [{ from: 'INIT', event: 'go', to: 'ACTIVE' }, { from: 'ACTIVE', event: 'finish', to: 'DONE' }], resourcePairs: [{ resource: 'mutex', acquireEvent: 'lock', releaseEvent: 'unlock' }] }
+check('SM A4: onEntry lock with no release flagged', hasFinding(runVerification(entryUnbalanced), 'A4', 'A4_NO_RELEASE_EVENT'))
+const entryTerminal = { schemaVersion: 1, init: 'INIT', states: [{ id: 'INIT' }, { id: 'ACTIVE', onEntry: ['lock'] }, { id: 'DONE', terminal: true }, { id: 'SAFE', onExit: ['unlock'], terminal: true }], transitions: [{ from: 'INIT', event: 'go', to: 'ACTIVE' }, { from: 'ACTIVE', event: 'finish', to: 'DONE' }], resourcePairs: [{ resource: 'mutex', acquireEvent: 'lock', releaseEvent: 'unlock' }] }
+check('SM A4: lock held into terminal via onEntry', hasFinding(runVerification(entryTerminal), 'A4', 'A4_TERMINAL_WITH_RESOURCE'))
 
 // ---------- Data model ----------
 const ecommerce = {
@@ -115,6 +128,10 @@ check('CONC: interrupt-safe absolute claim', concInt.findings.some((f) => f.code
 check('CONC: disable_irq keyword', concInt.findings.some((f) => f.code === 'CONCURRENCY_KEYWORD' && f.keyword === 'disable_irq'))
 const concPlain = runConcurrencyScan('The migration copies users from source to target.')
 check('CONC: plain sequential no findings', concPlain.findings.length === 0)
+const concRoutes = runConcurrencyScan('This module is thread-safe.')
+check('CONC: absolute claims carry tool routes', concRoutes.findings.some((f) => f.code === 'CONCURRENCY_ABSOLUTE_CLAIM' && Array.isArray(f.suggestions) && f.suggestions.length > 0))
+const smCoverage = { schemaVersion: 1, init: 'IDLE', states: [{ id: 'IDLE' }, { id: 'RUN' }, { id: 'SAFE', terminal: true }], transitions: [{ from: 'IDLE', event: 'start', to: 'RUN' }, { from: 'RUN', event: 'watchdog_timeout', to: 'SAFE' }] }
+check('SM coverage: timing note routed', runVerification(smCoverage).coverageNotes?.some((note) => note.includes('UPPAAL')) === true)
 
 console.log(`\n===== FULL TEST SUMMARY: ${pass} passed, ${fail} failed =====`)
 if (fail > 0) process.exit(1)

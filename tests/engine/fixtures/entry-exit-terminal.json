@@ -1,0 +1,45 @@
+{
+  "schemaVersion": 1,
+  "init": "INIT",
+  "states": [
+    {
+      "id": "INIT"
+    },
+    {
+      "id": "ACTIVE",
+      "onEntry": [
+        "lock"
+      ]
+    },
+    {
+      "id": "DONE",
+      "terminal": true
+    },
+    {
+      "id": "SAFE",
+      "onExit": [
+        "unlock"
+      ],
+      "terminal": true
+    }
+  ],
+  "transitions": [
+    {
+      "from": "INIT",
+      "event": "go",
+      "to": "ACTIVE"
+    },
+    {
+      "from": "ACTIVE",
+      "event": "finish",
+      "to": "DONE"
+    }
+  ],
+  "resourcePairs": [
+    {
+      "resource": "mutex",
+      "acquireEvent": "lock",
+      "releaseEvent": "unlock"
+    }
+  ]
+}

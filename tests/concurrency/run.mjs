@@ -47,6 +47,30 @@ test('flags interrupt safety claims and IRQ keywords', () => {
   assertNoUndefinedValues(report)
 })
 
+test('absolute claims carry dedicated-tool routing suggestions', () => {
+  const report = runConcurrencyScan('This module is thread-safe. The ISR is interrupt-safe.')
+  const absolute = report.findings.filter((finding) => finding.code === 'CONCURRENCY_ABSOLUTE_CLAIM')
+  if (absolute.length === 0) throw new Error('expected absolute claims')
+  for (const finding of absolute) {
+    if (!Array.isArray(finding.suggestions) || finding.suggestions.length === 0) {
+      throw new Error('absolute claim must carry suggestions, got ' + JSON.stringify(finding))
+    }
+  }
+  const threadSafe = absolute.find((finding) => finding.keyword === 'thread-safe')
+  if (threadSafe === undefined || !threadSafe.suggestions.some((s) => s.includes('TLA+'))) {
+    throw new Error('thread-safe should suggest TLA+ among its routes')
+  }
+  const interruptSafe = absolute.find((finding) => finding.keyword === 'interrupt-safe')
+  if (interruptSafe === undefined || !interruptSafe.suggestions.some((s) => s.includes('CBMC'))) {
+    throw new Error('interrupt-safe should suggest CBMC among its routes')
+  }
+  const keywords = report.findings.filter((finding) => finding.code === 'CONCURRENCY_KEYWORD')
+  for (const keyword of keywords) {
+    if (keyword.suggestions !== undefined) throw new Error('keyword findings must not carry suggestions')
+  }
+  assertNoUndefinedValues(report)
+})
+
 if (failures > 0) {
   console.log('concurrency tests failed:', failures)
   process.exit(1)

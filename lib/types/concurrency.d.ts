@@ -5,6 +5,8 @@ export interface ConcurrencyFinding {
     line?: number;
     snippet?: string;
     keyword: string;
+    /** Route to dedicated verification tools when an absolute claim is detected (logicprobe does not prove concurrency safety). */
+    suggestions?: string[];
 }
 export interface ConcurrencyScanReport {
     ok: boolean;

@@ -19,6 +19,10 @@ export type GuardNode = LeafGuard | AllGuard | AnyGuard | NotGuard;
 export interface StateSpec {
     id: string;
     terminal?: boolean;
+    /** Actions fired automatically when the state is entered. They do not change state or variables; checks such as A4 Pair Symmetry treat them as implicit acquire/release events so lock/unlock hidden inside entry actions is verified. */
+    onEntry?: string[];
+    /** Actions fired automatically when the state is left. Same semantics as onEntry. */
+    onExit?: string[];
 }
 export interface UpdateSpec {
     variable: string;
@@ -32,6 +36,8 @@ export interface TransitionSpec {
     /** Absent guard is the else/default branch for the same (from, event) group. */
     guard?: GuardNode;
     updates?: UpdateSpec[];
+    /** Execution cost of firing this transition (e.g. cycles, microseconds). Absent cost defaults to 1, so an unannotated machine keeps step-count semantics. Checked by A12 against budget invariants. */
+    cost?: number;
 }
 export interface TransitionScenarioSpec {
     from: string;
@@ -91,6 +97,11 @@ export type InvariantSpec = {
     events: string[];
     commit: string;
     rollback?: string;
+} | {
+    id: string;
+    description: string;
+    kind: 'budget';
+    budget: number;
 };
 export interface ResourcePairSpec {
     resource: string;
@@ -157,6 +168,9 @@ export interface VerificationReport {
     };
     checks: CheckResult[];
     comparison?: ComparisonSummary;
+    /** Informational notes about semantic dimensions this model references (timing, preemption)
+     * that this engine does not verify. Heuristic, vocabulary-based — never a substitute for the checks. */
+    coverageNotes?: string[];
 }
 export interface ComparisonSummary {
     beforeModelHash: string;

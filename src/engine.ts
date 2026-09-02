@@ -29,6 +29,10 @@ export type GuardNode = LeafGuard | AllGuard | AnyGuard | NotGuard
 export interface StateSpec {
   id: string
   terminal?: boolean
+  /** Actions fired automatically when the state is entered. They do not change state or variables; checks such as A4 Pair Symmetry treat them as implicit acquire/release events so lock/unlock hidden inside entry actions is verified. */
+  onEntry?: string[]
+  /** Actions fired automatically when the state is left. Same semantics as onEntry. */
+  onExit?: string[]
 }
 
 export interface UpdateSpec {
@@ -44,6 +48,8 @@ export interface TransitionSpec {
   /** Absent guard is the else/default branch for the same (from, event) group. */
   guard?: GuardNode
   updates?: UpdateSpec[]
+  /** Execution cost of firing this transition (e.g. cycles, microseconds). Absent cost defaults to 1, so an unannotated machine keeps step-count semantics. Checked by A12 against budget invariants. */
+  cost?: number
 }
 
 export interface TransitionScenarioSpec {
@@ -78,6 +84,7 @@ export type InvariantSpec =
   | { id: string; description: string; kind: 'leads-to'; from: string; to: string }
   | { id: string; description: string; kind: 'sequence'; events: string[] }
   | { id: string; description: string; kind: 'atomicity'; events: string[]; commit: string; rollback?: string }
+  | { id: string; description: string; kind: 'budget'; budget: number }
 
 export interface ResourcePairSpec {
   resource: string
@@ -151,6 +158,9 @@ export interface VerificationReport {
   }
   checks: CheckResult[]
   comparison?: ComparisonSummary
+  /** Informational notes about semantic dimensions this model references (timing, preemption)
+   * that this engine does not verify. Heuristic, vocabulary-based — never a substitute for the checks. */
+  coverageNotes?: string[]
 }
 
 export interface ComparisonSummary {
@@ -215,6 +225,16 @@ export function validateModel(input: unknown): { ok: true; model: LogicModelV1 }
       else if (seen.has(state.id)) bad('states[' + index + '].id', 'duplicate state id ' + state.id)
       else seen.add(state.id)
       if (state.terminal !== undefined && typeof state.terminal !== 'boolean') bad('states[' + index + '].terminal', 'must be a boolean')
+      for (const kind of ['onEntry', 'onExit'] as const) {
+        const actions = state[kind]
+        if (actions !== undefined) {
+          if (!Array.isArray(actions)) bad('states[' + index + '].' + kind, 'must be an array of action names')
+          else if (actions.length > 64) bad('states[' + index + '].' + kind, 'must not exceed 64 actions')
+          else actions.forEach((action, actionIndex) => {
+            if (typeof action !== 'string' || action.length === 0) bad('states[' + index + '].' + kind + '[' + actionIndex + ']', 'must be a non-empty string')
+          })
+        }
+      }
     })
     if (typeof root.init === 'string' && root.init.length > 0 && !seen.has(root.init)) bad('init', 'must name a declared state')
   }
@@ -248,6 +268,9 @@ export function validateModel(input: unknown): { ok: true; model: LogicModelV1 }
           if (record.op !== 'set' && record.op !== 'inc' && record.op !== 'dec') bad(updatePath + '.op', "must be 'set', 'inc', or 'dec'")
           if (record.value !== undefined && typeof record.value !== 'number') bad(updatePath + '.value', 'must be a number')
         })
+      }
+      if (transition.cost !== undefined) {
+        if (typeof transition.cost !== 'number' || !Number.isFinite(transition.cost) || transition.cost < 0) bad(path + '.cost', 'must be a non-negative finite number')
       }
     })
   }
@@ -319,6 +342,8 @@ export function validateModel(input: unknown): { ok: true; model: LogicModelV1 }
         })
         if (typeof invariant.commit !== 'string' || invariant.commit.length === 0) bad(path + '.commit', 'must be a non-empty string')
         if (invariant.rollback !== undefined && typeof invariant.rollback !== 'string') bad(path + '.rollback', 'must be a string')
+      } else if (invariant.kind === 'budget') {
+        if (typeof invariant.budget !== 'number' || !Number.isFinite(invariant.budget) || invariant.budget < 0) bad(path + '.budget', 'must be a non-negative finite number')
       } else {
         bad(path + '.kind', 'unknown invariant kind')
       }
@@ -1063,14 +1088,57 @@ function A3_orderPermutation(model: LogicModelV1, options: NormalizedOptions): C
   return checkResult('A3', 'Order Permutation', [], 'Order-independent (sampled first ' + events.length + ' events)')
 }
 
+function stateActionList(model: LogicModelV1, stateId: string, kind: 'onEntry' | 'onExit'): string[] {
+  const state = model.states.find((entry) => entry.id === stateId)
+  const list = state === undefined ? undefined : state[kind]
+  return list ?? []
+}
+
+function actionsDeclared(model: LogicModelV1): boolean {
+  return model.states.some((state) => (state.onEntry ?? []).length > 0 || (state.onExit ?? []).length > 0)
+}
+
+/** Apply an ordered action list to the held flag. Actions never change state or variables; they only matter to pairing checks. */
+function applyActionList(list: string[], acquireEvent: string, releaseEvent: string, held: boolean): { held: boolean; reacquired: boolean } {
+  let next = held
+  let reacquired = false
+  for (const action of list) {
+    if (action === acquireEvent) {
+      if (next) reacquired = true
+      next = true
+    } else if (action === releaseEvent) {
+      next = false
+    }
+  }
+  return { held: next, reacquired }
+}
+
 function A4_pairSymmetry(model: LogicModelV1): CheckResult {
   const findings: Finding[] = []
+  const hasActions = actionsDeclared(model)
   const transitionEvents = new Set(model.transitions.map((transition) => transition.event))
+  const actionEvents = new Set<string>()
+  if (hasActions) {
+    for (const state of model.states) {
+      for (const action of stateActionList(model, state.id, 'onEntry')) actionEvents.add(action)
+      for (const action of stateActionList(model, state.id, 'onExit')) actionEvents.add(action)
+    }
+  }
+  const pairHasEvent = (event: string): boolean => transitionEvents.has(event) || actionEvents.has(event)
+  const releaseReachableFrom = (stateId: string, releaseEvent: string): boolean => {
+    const reachable = stateGraphReachable(model, stateId)
+    return [...reachable].some((state) =>
+      model.transitions.some((transition) => transition.from === state && transition.event === releaseEvent)
+      || (hasActions && (stateActionList(model, state, 'onEntry').includes(releaseEvent) || stateActionList(model, state, 'onExit').includes(releaseEvent))))
+  }
+  const edges = stateGraphEdges(model)
   for (const pair of model.resourcePairs ?? []) {
     const acquireTransitions = model.transitions.filter((transition) => transition.event === pair.acquireEvent)
-    const releaseExists = transitionEvents.has(pair.releaseEvent)
-    if (acquireTransitions.length === 0 && !releaseExists) continue
-    if (acquireTransitions.length > 0 && !releaseExists) {
+    const actionAcquire = hasActions && model.states.some((state) =>
+      stateActionList(model, state.id, 'onEntry').includes(pair.acquireEvent) || stateActionList(model, state.id, 'onExit').includes(pair.acquireEvent))
+    const releaseExists = pairHasEvent(pair.releaseEvent)
+    if (acquireTransitions.length === 0 && !actionAcquire && !releaseExists) continue
+    if ((acquireTransitions.length > 0 || actionAcquire) && !releaseExists) {
       findings.push({
         code: 'A4_NO_RELEASE_EVENT',
         severity: 'error',
@@ -1078,23 +1146,55 @@ function A4_pairSymmetry(model: LogicModelV1): CheckResult {
       })
       continue
     }
+    // Collect acquire sites: transitions whose event acquires, and state entry/exit actions that end holding the resource.
+    const seeds: Array<{ state: string; held: boolean; path: PathStep[] }> = []
     for (const acquire of acquireTransitions) {
-      // Is any release event reachable in the state graph from the acquired state?
-      const reachable = stateGraphReachable(model, acquire.to)
-      const releaseReachable = [...reachable].some((state) => model.transitions.some((transition) => transition.from === state && transition.event === pair.releaseEvent))
-      if (!releaseReachable) {
+      if (!releaseReachableFrom(acquire.to, pair.releaseEvent)) {
         findings.push({
           code: 'A4_NO_RELEASE_REACHABLE',
           severity: 'error',
-          message: 'Resource "' + pair.resource + '": after ' + pair.acquireEvent + ' into ' + acquire.to + ', no ' + pair.releaseEvent + ' transition is reachable.',
+          message: 'Resource "' + pair.resource + '": after ' + pair.acquireEvent + ' into ' + acquire.to + ', no ' + pair.releaseEvent + ' is reachable.',
           evidence: { acquireTransition: acquire },
         })
         continue
       }
-      // Path-sensitive probe: track the held flag along state-graph paths.
-      const edges = stateGraphEdges(model)
+      seeds.push({ state: acquire.to, held: true, path: [] })
+    }
+    if (hasActions) {
+      for (const state of model.states) {
+        // acquire fired by onEntry: resource is held for the whole stay in the state
+        const entry = stateActionList(model, state.id, 'onEntry')
+        if (entry.includes(pair.acquireEvent)) {
+          const sim = applyActionList(entry, pair.acquireEvent, pair.releaseEvent, false)
+          if (sim.reacquired) {
+            findings.push({
+              code: 'A4_REACQUIRE_WITHOUT_RELEASE',
+              severity: 'warning',
+              message: 'Resource "' + pair.resource + '" is acquired more than once inside onEntry of ' + state.id + ' before ' + pair.releaseEvent + '.',
+            })
+          }
+          if (sim.held) seeds.push({ state: state.id, held: true, path: [] })
+        }
+        // acquire fired by onExit: happens on every outgoing edge, never on a terminal state
+        const exit = stateActionList(model, state.id, 'onExit')
+        if (exit.includes(pair.acquireEvent) && !state.terminal) {
+          const sim = applyActionList(exit, pair.acquireEvent, pair.releaseEvent, false)
+          if (sim.reacquired) {
+            findings.push({
+              code: 'A4_REACQUIRE_WITHOUT_RELEASE',
+              severity: 'warning',
+              message: 'Resource "' + pair.resource + '" is acquired more than once inside onExit of ' + state.id + ' before ' + pair.releaseEvent + '.',
+            })
+          }
+          if (sim.held) seeds.push({ state: state.id, held: false, path: [] })
+        }
+      }
+    }
+    // Path-sensitive probe: track the held flag along state-graph paths, firing
+    // onExit of the source state before each transition and onEntry of the target after it.
+    for (const seed of seeds) {
       const visited = new Set<string>()
-      const queue: Array<{ state: string; held: boolean; path: PathStep[] }> = [{ state: acquire.to, held: true, path: [] }]
+      const queue: Array<{ state: string; held: boolean; path: PathStep[] }> = [seed]
       let steps = 0
       while (queue.length > 0) {
         const entry = queue.shift()!
@@ -1113,6 +1213,19 @@ function A4_pairSymmetry(model: LogicModelV1): CheckResult {
         }
         for (const transition of edges.get(entry.state) ?? []) {
           let held = entry.held
+          if (hasActions) {
+            const sim = applyActionList(stateActionList(model, entry.state, 'onExit'), pair.acquireEvent, pair.releaseEvent, held)
+            if (sim.reacquired) {
+              findings.push({
+                code: 'A4_REACQUIRE_WITHOUT_RELEASE',
+                severity: 'warning',
+                message: 'Resource "' + pair.resource + '" is acquired again in onExit of ' + entry.state + ' before ' + pair.releaseEvent + '.',
+                path: entry.path,
+              })
+              continue
+            }
+            held = sim.held
+          }
           if (transition.event === pair.releaseEvent) held = false
           else if (transition.event === pair.acquireEvent) {
             if (held) {
@@ -1125,6 +1238,19 @@ function A4_pairSymmetry(model: LogicModelV1): CheckResult {
               continue
             }
             held = true
+          }
+          if (hasActions) {
+            const sim = applyActionList(stateActionList(model, transition.to, 'onEntry'), pair.acquireEvent, pair.releaseEvent, held)
+            if (sim.reacquired) {
+              findings.push({
+                code: 'A4_REACQUIRE_WITHOUT_RELEASE',
+                severity: 'warning',
+                message: 'Resource "' + pair.resource + '" is acquired again inside onEntry of ' + transition.to + ' before ' + pair.releaseEvent + '.',
+                path: [...entry.path, { from: entry.state, event: transition.event, to: transition.to }],
+              })
+              continue
+            }
+            held = sim.held
           }
           queue.push({ state: transition.to, held, path: [...entry.path, { from: entry.state, event: transition.event, to: transition.to }] })
         }
@@ -1671,6 +1797,124 @@ function A11_atomicity(model: LogicModelV1, options: NormalizedOptions): CheckRe
   }
   return checkResult('A11', 'Atomicity', findings, findings.length === 0 ? 'All atomicity invariants hold' : 'Atomicity findings: ' + findings.length)
 }
+
+// ---------------------------------------------------------------------------
+// A12 — Budget (worst-case path cost)
+// ---------------------------------------------------------------------------
+
+function transitionCost(transition: TransitionSpec): number {
+  return transition.cost ?? 1
+}
+
+interface BudgetViolation {
+  path: PathStep[]
+  cost: number
+  /** True when the witness is a repeatable positive-cost runtime cycle: cost can grow without bound. */
+  unbounded: boolean
+}
+
+function findBudgetViolation(
+  model: LogicModelV1,
+  options: NormalizedOptions,
+  invariant: Extract<InvariantSpec, { kind: 'budget' }>,
+): BudgetViolation | undefined {
+  const groupMap = groupTransitions(model)
+  const init = initialState(model)
+  const bestCost = new Map<string, number>([[runtimeKey(init), 0]])
+  const expanded = new Set<string>()
+  const queue: Array<{ runtime: RuntimeState; cost: number; path: PathStep[] }> = [{ runtime: init, cost: 0, path: [] }]
+  let steps = 0
+  while (queue.length > 0) {
+    const entry = queue.shift()!
+    if (++steps > options.maxStates) break
+    const entryKey = runtimeKey(entry.runtime)
+    expanded.add(entryKey)
+    for (const event of allEvents(model)) {
+      const group = groupMap.get(entry.runtime.state + '|' + event)
+      if (group === undefined || group.length === 0) continue
+      for (const transition of applicableTransitions(group, entry.runtime)) {
+        const next = applyUpdates(model, transition, entry.runtime)
+        const cost = entry.cost + transitionCost(transition)
+        const path = [...entry.path, { from: entry.runtime.state, event: transition.event, to: next.state }]
+        // Costs are non-negative, so the first step that pushes the accumulated cost
+        // over the budget is already a witness.
+        if (cost > invariant.budget) return { path, cost, unbounded: false }
+        const nextKey = runtimeKey(next)
+        if (expanded.has(nextKey)) {
+          // Reaching an already-expanded runtime state with a strictly greater cost means a
+          // positive-cost runtime cycle is reachable. Under the model's event semantics that
+          // cycle can repeat indefinitely, so the cost can grow without bound and no finite
+          // budget holds.
+          if (cost > (bestCost.get(nextKey) ?? 0)) return { path, cost, unbounded: true }
+          continue
+        }
+        const best = bestCost.get(nextKey)
+        if (best === undefined) {
+          bestCost.set(nextKey, cost)
+          queue.push({ runtime: next, cost, path })
+        }
+      }
+    }
+  }
+  return undefined
+}
+
+function A12_budget(model: LogicModelV1, options: NormalizedOptions): CheckResult {
+  const budgets = (model.invariants ?? []).filter((invariant) => invariant.kind === 'budget') as Array<Extract<InvariantSpec, { kind: 'budget' }>>
+  const usesCost = model.transitions.some((transition) => transition.cost !== undefined)
+  const findings: Finding[] = []
+  if (usesCost && budgets.length === 0) {
+    findings.push({
+      code: 'A12_COST_WITHOUT_BUDGET',
+      severity: 'warning',
+      message: 'Transitions declare cost, but no budget invariant is declared, so worst-case path cost is not verified. Add an invariant of kind budget to check it.',
+    })
+  }
+  for (const invariant of budgets) {
+    const violation = findBudgetViolation(model, options, invariant)
+    if (violation !== undefined) {
+      findings.push({
+        code: 'A12_BUDGET_OVER',
+        severity: 'error',
+        message: violation.unbounded
+          ? 'Budget invariant "' + invariant.id + '" (' + invariant.description + ') exceeded: a positive-cost cycle is reachable (cost ' + violation.cost + ' at the loop point), so path cost can grow without bound and no finite budget ' + invariant.budget + ' holds.'
+          : 'Budget invariant "' + invariant.id + '" (' + invariant.description + ') exceeded: worst-case path cost ' + violation.cost + ' is over budget ' + invariant.budget + '.',
+        path: violation.path,
+        evidence: { invariant, totalCost: violation.cost, unbounded: violation.unbounded },
+      })
+    }
+  }
+  return checkResult('A12', 'Budget', findings, findings.length === 0 ? (budgets.length === 0 ? 'No budget invariants declared' : 'All budget invariants hold') : 'Budget findings: ' + findings.length)
+}
+
+// ---------------------------------------------------------------------------
+// Coverage notes (informational gap notices)
+// ---------------------------------------------------------------------------
+
+// Underscore-separated identifiers like watchdog_timeout or isr_cmd are common in
+// state machines, so boundaries must treat '_' as a separator rather than a word char.
+const TIMING_VOCABULARY = /(?<![a-z0-9])(timeout|watchdog|timer|tick|deadline|period|delay|elapsed|latency)(?![a-z0-9])/i
+const PREEMPTION_VOCABULARY = /(?<![a-z0-9])(isr|irq|interrupt|task|thread|preempt|rtos)(?![a-z0-9])/i
+
+function computeCoverageNotes(model: LogicModelV1): string[] {
+  const names: string[] = []
+  for (const state of model.states) {
+    names.push(state.id)
+    for (const action of state.onEntry ?? []) names.push(action)
+    for (const action of state.onExit ?? []) names.push(action)
+  }
+  for (const transition of model.transitions) names.push(transition.event)
+  const corpus = names.join(' ')
+  const notes: string[] = []
+  if (TIMING_VOCABULARY.test(corpus)) {
+    notes.push('The model references time-like vocabulary (timeout/watchdog/timer/deadline...). logicprobe verifies ordering, counts, and path budgets (A12) but not hard real-time semantics: deadlines, periods, and clock invariants need a timed model checker (e.g. UPPAAL).')
+  }
+  if (PREEMPTION_VOCABULARY.test(corpus)) {
+    notes.push('The model references preemption/concurrency vocabulary (ISR/IRQ/task/interrupt...). logicprobe models event-order interleavings (A2/A3) but not preemptive concurrency; absolute claims such as thread-safe or interrupt-safe need dedicated verification (TSan, CBMC, or a model checker such as TLA+).')
+  }
+  return notes
+}
+
 // ---------------------------------------------------------------------------
 // main entry
 // ---------------------------------------------------------------------------
@@ -1718,6 +1962,7 @@ export function runVerification(input: unknown, options: VerificationOptions = {
     A9_leadsTo(model, exploration),
     A10_sequenceOrder(model, normalized),
     A11_atomicity(model, normalized),
+    A12_budget(model, normalized),
   ]
   let comparison: ComparisonSummary | undefined
   if (options.beforeModel !== undefined) {
@@ -1759,6 +2004,7 @@ export function runVerification(input: unknown, options: VerificationOptions = {
   }
   const errors = checks.reduce((sum, check) => sum + check.findings.filter((finding) => finding.severity === 'error').length, 0)
   const warnings = checks.reduce((sum, check) => sum + check.findings.filter((finding) => finding.severity === 'warning').length, 0)
+  const coverageNotes = computeCoverageNotes(model)
   return {
     ok: true,
     schemaVersion: 1,
@@ -1774,5 +2020,6 @@ export function runVerification(input: unknown, options: VerificationOptions = {
     checks,
     ...(model.narrative === undefined ? {} : { narrative: model.narrative }),
     ...(comparison === undefined ? {} : { comparison }),
+    ...(coverageNotes.length === 0 ? {} : { coverageNotes }),
   }
 }

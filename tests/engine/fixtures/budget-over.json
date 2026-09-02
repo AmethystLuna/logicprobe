@@ -1,0 +1,38 @@
+{
+  "schemaVersion": 1,
+  "init": "IDLE",
+  "states": [
+    {
+      "id": "IDLE"
+    },
+    {
+      "id": "RUN"
+    },
+    {
+      "id": "DONE",
+      "terminal": true
+    }
+  ],
+  "transitions": [
+    {
+      "from": "IDLE",
+      "event": "start",
+      "to": "RUN",
+      "cost": 30
+    },
+    {
+      "from": "RUN",
+      "event": "finish",
+      "to": "DONE",
+      "cost": 40
+    }
+  ],
+  "invariants": [
+    {
+      "id": "latency",
+      "description": "total latency within 50 cycles",
+      "kind": "budget",
+      "budget": 50
+    }
+  ]
+}

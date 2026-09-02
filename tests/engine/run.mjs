@@ -89,6 +89,42 @@ const cases = [
       }
     },
   },
+  {
+    name: 'budget-over.json',
+    errors: 1,
+    findings: [{ check: 'A12', code: 'A12_BUDGET_OVER' }],
+    assert(report) {
+      const a12 = report.checks.find((check) => check.id === 'A12')
+      const finding = a12?.findings.find((entry) => entry.code === 'A12_BUDGET_OVER')
+      const path = finding?.path
+      if (path === undefined || path.length !== 2 || path[0].event !== 'start' || path[1].event !== 'finish') {
+        throw new Error('budget violation must report the full over-budget path, got ' + JSON.stringify(path))
+      }
+      if (finding?.evidence === undefined || finding.evidence.totalCost !== 70) {
+        throw new Error('budget finding must carry totalCost 70, got ' + JSON.stringify(finding?.evidence))
+      }
+    },
+  },
+  {
+    name: 'budget-ok.json',
+    errors: 0,
+    findings: [],
+  },
+  {
+    name: 'entry-exit-balanced.json',
+    errors: 0,
+    findings: [],
+  },
+  {
+    name: 'entry-exit-unbalanced.json',
+    errors: 1,
+    findings: [{ check: 'A4', code: 'A4_NO_RELEASE_EVENT' }],
+  },
+  {
+    name: 'entry-exit-terminal.json',
+    errors: 1,
+    findings: [{ check: 'A4', code: 'A4_TERMINAL_WITH_RESOURCE' }],
+  },
 ]
 
 let failures = 0
@@ -313,6 +349,170 @@ async function runAdvancedConstraintTests() {
 }
 
 await runAdvancedConstraintTests()
+
+async function runBudgetTests() {
+  // cost declared without any budget invariant -> advisory warning, no error
+  const noBudget = {
+    schemaVersion: 1,
+    init: 'A',
+    states: [{ id: 'A' }, { id: 'B', terminal: true }],
+    transitions: [
+      { from: 'A', event: 'go', to: 'B', cost: 7 },
+    ],
+  }
+  const warnReport = runVerification(noBudget)
+  if (warnReport.summary.errors !== 0) throw new Error('cost-without-budget must not produce errors')
+  const a12w = warnReport.checks.find((check) => check.id === 'A12')
+  if (a12w === undefined || !a12w.findings.some((finding) => finding.code === 'A12_COST_WITHOUT_BUDGET')) {
+    throw new Error('missing A12_COST_WITHOUT_BUDGET advisory')
+  }
+  assertNoUndefinedValues(warnReport)
+
+  // over-budget reachable only through a positive-cost cycle
+  const loopOver = {
+    schemaVersion: 1,
+    init: 'A',
+    states: [{ id: 'A' }, { id: 'B' }],
+    transitions: [
+      { from: 'A', event: 'work', to: 'B', cost: 5 },
+      { from: 'B', event: 'work', to: 'A', cost: 5 },
+    ],
+    invariants: [{ id: 'b1', description: 'spin budget', kind: 'budget', budget: 100 }],
+  }
+  const loopReport = runVerification(loopOver)
+  const a12l = loopReport.checks.find((check) => check.id === 'A12')
+  if (a12l === undefined || !a12l.findings.some((finding) => finding.code === 'A12_BUDGET_OVER')) {
+    throw new Error('a positive-cost cycle must exceed the budget')
+  }
+  assertNoUndefinedValues(loopReport)
+
+  // guard-split same event with different costs: only the expensive branch overshoots
+  const guarded = {
+    schemaVersion: 1,
+    init: 'A',
+    states: [{ id: 'A' }, { id: 'B' }, { id: 'C', terminal: true }],
+    transitions: [
+      { from: 'A', event: 'retry', guard: { variable: 'fast', op: '==', value: true }, to: 'B', cost: 10 },
+      { from: 'A', event: 'retry', guard: { variable: 'fast', op: '==', value: false }, to: 'B', cost: 90 },
+      { from: 'B', event: 'done', to: 'C', cost: 5 },
+    ],
+    variables: [{ name: 'fast', kind: 'boolean', init: false }],
+    invariants: [{ id: 'b2', description: 'branch budget', kind: 'budget', budget: 50 }],
+  }
+  const guardedReport = runVerification(guarded)
+  const a12g = guardedReport.checks.find((check) => check.id === 'A12')
+  if (a12g === undefined || !a12g.findings.some((finding) => finding.code === 'A12_BUDGET_OVER')) {
+    throw new Error('expensive guarded branch must exceed budget')
+  }
+  assertNoUndefinedValues(guardedReport)
+
+  // legacy machine without cost/budget: A12 passes cleanly and total checks stay 20
+  const legacy = {
+    schemaVersion: 1,
+    init: 'A',
+    states: [{ id: 'A' }, { id: 'B', terminal: true }],
+    transitions: [{ from: 'A', event: 'go', to: 'B' }],
+  }
+  const legacyReport = runVerification(legacy)
+  const a12 = legacyReport.checks.find((check) => check.id === 'A12')
+  if (a12 === undefined || a12.findings.length !== 0 || a12.status !== 'pass') throw new Error('A12 must pass cleanly for legacy machines')
+  if (legacyReport.summary.checksRun !== 20) throw new Error('expected 20 checks, got ' + legacyReport.summary.checksRun)
+  assertNoUndefinedValues(legacyReport)
+  console.log('PASS budget-tests')
+}
+
+await runBudgetTests()
+
+async function runActionTests() {
+  // reacquire inside a single onEntry list -> warning
+  const reacquire = {
+    schemaVersion: 1,
+    init: 'A',
+    states: [{ id: 'A' }, { id: 'B', onEntry: ['lock', 'lock'], onExit: ['unlock'] }, { id: 'C', terminal: true }],
+    transitions: [
+      { from: 'A', event: 'go', to: 'B' },
+      { from: 'B', event: 'finish', to: 'C' },
+    ],
+    resourcePairs: [{ resource: 'mutex', acquireEvent: 'lock', releaseEvent: 'unlock' }],
+  }
+  const reacquireReport = runVerification(reacquire)
+  const a4r = reacquireReport.checks.find((check) => check.id === 'A4')
+  if (a4r === undefined || !a4r.findings.some((finding) => finding.code === 'A4_REACQUIRE_WITHOUT_RELEASE')) {
+    throw new Error('double acquire inside onEntry must warn')
+  }
+  assertNoUndefinedValues(reacquireReport)
+
+  // acquire inside onExit fires on every outgoing edge
+  const exitAcquire = {
+    schemaVersion: 1,
+    init: 'A',
+    states: [{ id: 'A', onExit: ['lock'] }, { id: 'B', terminal: true }, { id: 'C', terminal: true }],
+    transitions: [
+      { from: 'A', event: 'toB', to: 'B' },
+      { from: 'A', event: 'toC', to: 'C' },
+    ],
+    resourcePairs: [{ resource: 'mutex', acquireEvent: 'lock', releaseEvent: 'unlock' }],
+  }
+  // unlock is never defined anywhere -> A4_NO_RELEASE_EVENT
+  const exitReport = runVerification(exitAcquire)
+  const a4e = exitReport.checks.find((check) => check.id === 'A4')
+  if (a4e === undefined || !a4e.findings.some((finding) => finding.code === 'A4_NO_RELEASE_EVENT')) {
+    throw new Error('exit-acquire with no release anywhere must be flagged')
+  }
+  assertNoUndefinedValues(exitReport)
+
+  // malformed onEntry -> model validation failure
+  const badActions = {
+    schemaVersion: 1,
+    init: 'A',
+    states: [{ id: 'A', onEntry: [5] }, { id: 'B', terminal: true }],
+    transitions: [{ from: 'A', event: 'go', to: 'B' }],
+  }
+  const badReport = runVerification(badActions)
+  if (badReport.ok || !badReport.checks[0].findings.some((finding) => finding.message.includes('onEntry'))) {
+    throw new Error('non-string onEntry must fail model validation')
+  }
+  assertNoUndefinedValues(badReport)
+  console.log('PASS action-tests')
+}
+
+await runActionTests()
+
+async function runCoverageNoteTests() {
+  // timing + preemption vocabulary triggers informational notes
+  const control = {
+    schemaVersion: 1,
+    init: 'IDLE',
+    states: [{ id: 'IDLE' }, { id: 'RUN' }, { id: 'SAFE', terminal: true }],
+    transitions: [
+      { from: 'IDLE', event: 'start', to: 'RUN' },
+      { from: 'RUN', event: 'watchdog_timeout', to: 'SAFE' },
+      { from: 'RUN', event: 'isr_cmd', to: 'RUN' },
+    ],
+  }
+  const report = runVerification(control)
+  if (!report.ok) throw new Error('control model should verify')
+  if (!Array.isArray(report.coverageNotes) || report.coverageNotes.length !== 2) {
+    throw new Error('expected two coverage notes (timing + preemption), got ' + JSON.stringify(report.coverageNotes))
+  }
+  if (!report.coverageNotes.some((note) => note.includes('UPPAAL'))) throw new Error('timing note should route to UPPAAL')
+  if (!report.coverageNotes.some((note) => note.includes('preemptive'))) throw new Error('preemption note must be present')
+  assertNoUndefinedValues(report)
+
+  // plain machine with no risky vocabulary: no coverage notes at all
+  const plain = {
+    schemaVersion: 1,
+    init: 'A',
+    states: [{ id: 'A' }, { id: 'B', terminal: true }],
+    transitions: [{ from: 'A', event: 'go', to: 'B' }],
+  }
+  const plainReport = runVerification(plain)
+  if (plainReport.coverageNotes !== undefined) throw new Error('plain model must not carry coverage notes')
+  assertNoUndefinedValues(plainReport)
+  console.log('PASS coverage-note-tests')
+}
+
+await runCoverageNoteTests()
 
 await runIdempotencyTests()
 
