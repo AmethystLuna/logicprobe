@@ -29,3 +29,8 @@ as outside this engine and points at tooling that can handle it.
   interrupt-safe, ...) carry `suggestions` naming dedicated tools.
 - Manual review: when reading a plan, match its claims against the table above and
   require dedicated evidence before accepting "always"/"never"/"guaranteed" language
+- Generators: `exportModel(model, format)` emits native inputs for UPPAAL (.xta + queries),
+  TLA+ (TLC spec + safety), PRISM (.pm + .pctl), and SPIN (Promela + ltl) from a
+  LogicModelV1 — v1 translates the core machine (guards/updates/weights; booleans as
+  integers) and leaves unrepresentable invariants as explicit warnings.
+  Self-tests: tests/exporters/run.mjs.
