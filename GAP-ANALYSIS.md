@@ -50,7 +50,7 @@
 | D3 | 抢占 / 真并发 | A（明示不覆盖） | `concurrentPairs` 交错 + 扫描 `suggestions`(TSan/CBMC/TLA+/RTOS) + coverageNotes | 「ISR 与任务间无竞争」「无优先级反转」 | ISR 推进 + 主循环消费 | TLA+ / CBMC / TSan / RTOS 专项 |
 | D4 | 连续-离散混合（hybrid） | A | coverageNotes 提示并路由 SpaceEx/Flow*/Stateflow | 「切换后稳定」「无抖动」 | 控制律切换、FOC 模式切换 | SpaceEx / Flow* / Stateflow |
 | D5 | 层次 / 正交结构（statechart） | B（手展平，保真风险） | 扁平 states；文档指引手工展平 | 父态守卫、history、正交互斥 | 嵌套运行态、电源管理 ∥ 通信 | SCXML / Stateflow（原生支持） |
-| D6 | 多机组合 / 跨子系统协议 | A（文档承认不可见） | 单机验证 + 手工契约文档 | 「A 发事件时 B 必能处理」 | 主备切换、上下电跨模块时序 | CSP（FDR）/ mCRL2 / TLA+ |
+| D6 | 多机组合 / 跨子系统协议 | A → **已提供 v1** | `runCompositionVerification`：非握手事件各自推进；握手（rendezvous）事件双方同使能才同步触发；终态机停机不再参与。C1 组合死锁 / C2 握手永不触发 | 跨机契约缺陷（A 发 req 时 B 无法接收 → 死锁）现可查 | 主备切换、上下电跨模块时序、req/ack 握手 | 复杂协议仍可转 CSP（FDR）/ mCRL2 / TLA+ |
 | D7 | 动作语义（entry/exit/do + 副作用） | B → **部分关闭（P0-b）** | 状态 `onEntry`/`onExit` 声明，A4 自动按隐式 acquire/release 配对（不再需要手工伪事件） | do-while 动作、动作内复杂副作用语义 | 安全态进入动作、资源清理 | 状态机代码生成 + 静态分析 |
 | D8 | 概率 / 随机（stochastic） | A → **离散部分关闭** | **A13 概率可达**（`weight`+`probability`，DTMC 值迭代）；coverageNotes 对连续时间概率仍路由 PRISM/Storm | 「≥90% 到达 SAFE」离散已可查；「MTBF ≥ X」「故障率 ≤ p」仍需概率工具 | 降级策略的可靠性预算 | PRISM / Storm（连续时间/全量） |
 | D9 | 资源容量 / 饥饿 / 公平 | C | `resourcePairs` 只做定性配对 | 「队列不溢出」「无饥饿」 | 信号量计数、有界队列 | 模型检查带容量（UPPAAL 等） |
@@ -93,8 +93,8 @@
 
 ### D6 组合维 —— 多机 / 跨子系统协议
 
-- 现状：单机独立验证；指南明确 *「composition bugs … invisible」*。
-- 扩展切口（未实现）：双机组合可达性 / 跨机契约表。
+- 现状（v1 已落地）：新增 `runCompositionVerification(machines, { rendezvous })` —— 两台机组合 BFS：非 rendezvous 事件由触发方单独推进，rendezvous 事件需双方同使能（含守卫）才同步推进，终态机视为停机不再参与；产出 C1 组合死锁（无可推进且非双方终态）与 C2 握手永不触发（warning）。
+- 仍缺：>2 机、非对称广播/缓冲队列语义、DSH 工具封装（现为引擎函数，尚未注册 tool）。
 
 ### D7 动作语义维 —— entry/exit/do-action 与副作用
 
@@ -126,7 +126,7 @@
 | 并发扫描绝对声称带 `suggestions` 工具建议 | D3 | 扫描增强 | ✅ 已实现（52151ee），全绿 |
 | 外部工具路由表（`gap-routing-guide.md` + SKILL/schema/README 同步） | A 类全域 | 文档 | ✅ 已实现（本轮文档提交） |
 | **DTMC 离散概率可达**：transition `weight` + `probability` 不变量（P(到达 target) ≥/≤ p，值迭代） | D8 | 新检查（A13） | ✅ 已实现（本轮，本地提交），全绿 |
-| **双机组合可达性 / 跨机契约表** | D6 | 新检查/新工具 | ⏳ 规划自研（P2） |
+| **双机组合可达性 / 跨机契约表** | D6 | 引擎函数（v1） | ✅ 已实现（`runCompositionVerification`，C1/C2，本地提交）；DSH 工具封装待续 |
 | `clock`/deadline 离散 tick 版（进入重置 + K tick 内必达） | D1 | 引擎增强 | ⏳ 规划自研（P2；dense-time 全量不自研） |
 | statechart 自动展平 + round-trip 确认 | D5 | 工作流工具 | ⏳ 未实现 |
 | 文档散文级「域声称扫描」`runDomainScan` | D1/D4/D8 | 旁路新出口 | ⏳ 可选（与 coverageNotes 互补） |
@@ -172,7 +172,7 @@
 
 ### C. 证据引用清单
 
-- `src/engine.ts`：`LogicModelV1`、`RuntimeState{state, vars}`、S/A/D 检查实现、A12/A13/coverageNotes；
+- `src/engine.ts`：`LogicModelV1`、`RuntimeState{state, vars}`、S/A/D 检查实现、A12/A13/coverageNotes、组合 C1/C2；
 - `src/data-engine.ts`：`DataModelV1`、DS/DA/DD 实现；
 - `src/concurrency.ts` + `skills/logicprobe/references/concurrency-risk-guide.md`：并发挖掘 + 绝对声称 suggestions；
 - `skills/logicprobe/references/logic-verification-guide.md`：Known Limitations / Model Fidelity Warning；

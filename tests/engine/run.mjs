@@ -1,6 +1,6 @@
 import { readFile } from 'node:fs/promises'
 import { readFileSync } from 'node:fs'
-import { runVerification } from '../../lib/engine.js'
+import { runVerification, runCompositionVerification } from '../../lib/engine.js'
 
 const root = new URL('./fixtures/', import.meta.url)
 
@@ -648,6 +648,73 @@ async function runProbabilityTests() {
 }
 
 await runProbabilityTests()
+
+async function runCompositionTests() {
+  // textbook handshake: A sends req, B acks — rendezvous keeps both in lockstep
+  const machineA = {
+    schemaVersion: 1, init: 'A0',
+    states: [{ id: 'A0' }, { id: 'A_REQ' }, { id: 'A_WAIT' }, { id: 'A_DONE', terminal: true }],
+    transitions: [
+      { from: 'A0', event: 'start', to: 'A_REQ' },
+      { from: 'A_REQ', event: 'req', to: 'A_WAIT' },
+      { from: 'A_WAIT', event: 'ack', to: 'A_DONE' },
+    ],
+  }
+  const machineB = {
+    schemaVersion: 1, init: 'B0',
+    states: [{ id: 'B0' }, { id: 'B_BUSY' }, { id: 'B_DONE', terminal: true }],
+    transitions: [
+      { from: 'B0', event: 'req', to: 'B_BUSY' },
+      { from: 'B_BUSY', event: 'ack', to: 'B_DONE' },
+    ],
+  }
+  const okReport = runCompositionVerification([machineA, machineB], { rendezvous: ['req', 'ack'] })
+  if (!okReport.ok || okReport.summary.errors !== 0) throw new Error('handshake composition must pass: ' + JSON.stringify(okReport.checks))
+  const c2ok = okReport.checks.find((check) => check.id === 'C2')
+  if (c2ok === undefined || c2ok.findings.length !== 0) throw new Error('rendezvous should fire: ' + JSON.stringify(c2ok?.findings))
+  assertNoUndefinedValues(okReport)
+
+  // classic bug: B can never be ready for req -> A is left blocked (composition deadlock)
+  const stuckB = {
+    schemaVersion: 1, init: 'B0',
+    states: [{ id: 'B0' }, { id: 'B_DONE', terminal: true }],
+    transitions: [{ from: 'B0', event: 'ack', to: 'B_DONE' }],
+  }
+  const deadReport = runCompositionVerification([machineA, stuckB], { rendezvous: ['req', 'ack'] })
+  const c1 = deadReport.checks.find((check) => check.id === 'C1')
+  if (c1 === undefined || !c1.findings.some((finding) => finding.code === 'C1_COMPOSITION_DEADLOCK')) {
+    throw new Error('blocked handshake must deadlock: ' + JSON.stringify(deadReport.checks))
+  }
+  if (deadReport.summary.errors === 0) throw new Error('expected composition errors')
+  assertNoUndefinedValues(deadReport)
+
+  // rendezvous against a machine that is terminal from the start can never fire
+  const terminalB = {
+    schemaVersion: 1, init: 'B_DONE',
+    states: [{ id: 'B_DONE', terminal: true }],
+    transitions: [],
+  }
+  const termA = {
+    schemaVersion: 1, init: 'A0',
+    states: [{ id: 'A0' }, { id: 'A1', terminal: true }],
+    transitions: [{ from: 'A0', event: 'req', to: 'A1' }],
+  }
+  const termReport = runCompositionVerification([termA, terminalB], { rendezvous: ['req'] })
+  const c1t = termReport.checks.find((check) => check.id === 'C1')
+  if (c1t === undefined || !c1t.findings.some((finding) => finding.code === 'C1_COMPOSITION_DEADLOCK')) {
+    throw new Error('terminal peer must block the rendezvous (deadlock at init)')
+  }
+  assertNoUndefinedValues(termReport)
+
+  // invalid machine fails cleanly
+  const bad = runCompositionVerification([machineA, { schemaVersion: 1, init: 'X', states: [{ id: 'Y' }], transitions: [] }])
+  if (bad.ok) throw new Error('invalid machine must fail composition')
+  assertNoUndefinedValues(bad)
+  console.log('PASS composition-tests')
+}
+
+await runCompositionTests()
+
 
 
 await runIdempotencyTests()

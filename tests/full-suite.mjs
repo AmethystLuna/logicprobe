@@ -1,4 +1,4 @@
-import { runVerification } from '../lib/engine.js'
+import { runVerification, runCompositionVerification } from '../lib/engine.js'
 import { runDataVerification } from '../lib/data-engine.js'
 import { runConcurrencyScan } from '../lib/concurrency.js'
 
@@ -136,6 +136,11 @@ check('SM A13: probability violation detected', hasFinding(runVerification(probF
 const probOk = JSON.parse(JSON.stringify(probFail))
 probOk.invariants[0].p = 0.4
 check('SM A13: probability bound passes', runVerification(probOk).checks.find((c) => c.id === 'A13')?.findings.length === 0)
+const hsA = { schemaVersion: 1, init: 'A0', states: [{ id: 'A0' }, { id: 'A_REQ' }, { id: 'A_WAIT' }, { id: 'A_DONE', terminal: true }], transitions: [{ from: 'A0', event: 'start', to: 'A_REQ' }, { from: 'A_REQ', event: 'req', to: 'A_WAIT' }, { from: 'A_WAIT', event: 'ack', to: 'A_DONE' }] }
+const hsB = { schemaVersion: 1, init: 'B0', states: [{ id: 'B0' }, { id: 'B_BUSY' }, { id: 'B_DONE', terminal: true }], transitions: [{ from: 'B0', event: 'req', to: 'B_BUSY' }, { from: 'B_BUSY', event: 'ack', to: 'B_DONE' }] }
+check('CMP C1/C2: handshake composition passes', runCompositionVerification([hsA, hsB], { rendezvous: ['req', 'ack'] }).summary.errors === 0)
+const hsStuck = { schemaVersion: 1, init: 'B0', states: [{ id: 'B0' }, { id: 'B_DONE', terminal: true }], transitions: [{ from: 'B0', event: 'ack', to: 'B_DONE' }] }
+check('CMP C1: blocked handshake deadlocks', hasFinding(runCompositionVerification([hsA, hsStuck], { rendezvous: ['req', 'ack'] }), 'C1', 'C1_COMPOSITION_DEADLOCK'))
 check('SM coverage: timing note routed', runVerification(smCoverage).coverageNotes?.some((note) => note.includes('UPPAAL')) === true)
 
 console.log(`\n===== FULL TEST SUMMARY: ${pass} passed, ${fail} failed =====`)

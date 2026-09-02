@@ -210,3 +210,39 @@ export declare function validateModel(input: unknown): {
 };
 export declare function guardVariables(guard: GuardNode | undefined): string[];
 export declare function runVerification(input: unknown, options?: VerificationOptions): VerificationReport;
+export interface CompositionStep {
+    event: string;
+    by: 'a' | 'b' | 'both';
+}
+export interface CompositionOptions {
+    /** Events that require BOTH machines to fire together (rendezvous / handshake). */
+    rendezvous?: string[];
+    maxStates?: number;
+}
+export interface CompositionSummary {
+    machines: Array<{
+        modelHash: string;
+        states: number;
+        transitions: number;
+    }>;
+    compositeStates: number;
+    errors: number;
+    warnings: number;
+    truncated: boolean;
+}
+export interface CompositionReport {
+    ok: boolean;
+    summary: CompositionSummary;
+    checks: CheckResult[];
+}
+/**
+ * Two-machine composition under a choice of semantics:
+ * - a non-rendezvous event advances only the machine that fires it;
+ * - a rendezvous event (handshake) fires only when BOTH machines have it enabled
+ *   (guards satisfied) and advances both simultaneously;
+ * - a terminal machine is stopped: it takes no further part, so a rendezvous with a
+ *   terminal machine can never fire.
+ * Checks: C1 composition deadlock (a reachable pair where no machine can advance while
+ * at least one is not terminal) and C2 rendezvous that can never synchronize.
+ */
+export declare function runCompositionVerification(machinesInput: unknown[], options?: CompositionOptions): CompositionReport;
