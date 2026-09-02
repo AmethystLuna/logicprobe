@@ -894,6 +894,133 @@ async function runDeadlineTests() {
 
 await runDeadlineTests()
 
+// Textbook canon II: classic concurrent algorithms + biased Markov chains
+async function runCanonTwoTests() {
+  const code = (report, checkId, want) => {
+    const c = report.checks.find((entry) => entry.id === checkId)
+    return c !== undefined && c.findings.some((finding) => finding.code === want)
+  }
+
+  // Peterson mutual exclusion (classic): pc encodes each process state
+  // 0 idle, 1 want/wait, 2 in CS, 3 done (terminal). flag_i is a 0/1 integer var.
+  const peterson = (bug) => {
+    const id = (a, b) => 'P1_' + a + '_P2_' + b
+    const states = []
+    for (let a = 0; a <= 3; a++) for (let b = 0; b <= 3; b++) {
+      states.push({ id: id(a, b), terminal: a === 3 && b === 3 })
+    }
+    const transitions = []
+    const flag1 = { variable: 'flag1', op: '==', value: 1 }
+    const flag2 = { variable: 'flag2', op: '==', value: 1 }
+    for (let a = 0; a <= 3; a++) for (let b = 0; b <= 3; b++) {
+      const from = id(a, b)
+      // process 1
+      if (a === 0) {
+        transitions.push({ from, event: 'p1step', to: id(1, b), updates: [{ variable: 'flag1', op: 'set', value: 1 }, { variable: 'turn', op: 'set', value: 2 }] })
+      } else if (a === 1) {
+        if (!bug) {
+          transitions.push({ from, event: 'p1step', guard: { all: [flag2, { variable: 'turn', op: '==', value: 2 }] }, to: from })
+        }
+        transitions.push({ from, event: 'p1step', to: id(2, b) })
+      } else if (a === 2) {
+        transitions.push({ from, event: 'p1step', to: id(3, b), updates: [{ variable: 'flag1', op: 'set', value: 0 }] })
+      }
+      // process 2 (mirror; waits while flag1 && turn == 1)
+      if (b === 0) {
+        transitions.push({ from, event: 'p2step', to: id(a, 1), updates: [{ variable: 'flag2', op: 'set', value: 1 }, { variable: 'turn', op: 'set', value: 1 }] })
+      } else if (b === 1) {
+        if (!bug) {
+          transitions.push({ from, event: 'p2step', guard: { all: [flag1, { variable: 'turn', op: '==', value: 1 }] }, to: from })
+        }
+        transitions.push({ from, event: 'p2step', to: id(a, 2) })
+      } else if (b === 2) {
+        transitions.push({ from, event: 'p2step', to: id(a, 3), updates: [{ variable: 'flag2', op: 'set', value: 0 }] })
+      }
+    }
+    return {
+      schemaVersion: 1, init: id(0, 0),
+      states,
+      transitions,
+      variables: [
+        { name: 'flag1', kind: 'integer', init: 0, min: 0, max: 1 },
+        { name: 'flag2', kind: 'integer', init: 0, min: 0, max: 1 },
+        { name: 'turn', kind: 'integer', init: 1, min: 1, max: 2 },
+      ],
+      invariants: [{ id: 'mutex', description: 'at most one process in the critical section', kind: 'never-states', states: [id(2, 2)] }],
+    }
+  }
+  const correct = runVerification(peterson(false))
+  if (correct.summary.errors !== 0) throw new Error('Peterson must be deadlock-free and mutually exclusive: ' + JSON.stringify(correct.checks.filter((c) => c.findings.some((f) => f.severity === 'error')).map((c) => c.id + ':' + c.findings.map((f) => f.code))))
+  assertNoUndefinedValues(correct)
+  const buggy = runVerification(peterson(true))
+  if (!code(buggy, 'S7', 'S7_INVARIANT_VIOLATION')) throw new Error('Peterson without the wait condition must violate mutual exclusion')
+  assertNoUndefinedValues(buggy)
+
+  // Producer-consumer with a rendezvous 'put' (single-slot CSP style)
+  const producer = { schemaVersion: 1, init: 'P0', states: [{ id: 'P0' }, { id: 'P1' }], transitions: [{ from: 'P0', event: 'make', to: 'P1' }, { from: 'P1', event: 'put', to: 'P0' }] }
+  const consumer = { schemaVersion: 1, init: 'C0', states: [{ id: 'C0' }, { id: 'C1' }], transitions: [{ from: 'C0', event: 'put', to: 'C1' }, { from: 'C1', event: 'use', to: 'C0' }] }
+  const pcOk = runCompositionVerification([producer, consumer], { rendezvous: ['put'] })
+  if (!pcOk.ok || pcOk.summary.errors !== 0) throw new Error('producer-consumer rendezvous must pass: ' + JSON.stringify(pcOk.checks))
+  assertNoUndefinedValues(pcOk)
+  const stuckConsumer = { schemaVersion: 1, init: 'C0', states: [{ id: 'C0' }, { id: 'C1' }], transitions: [{ from: 'C0', event: 'put', to: 'C1' }] }
+  const pcBad = runCompositionVerification([producer, stuckConsumer], { rendezvous: ['put'] })
+  if (!code(pcBad, 'C1', 'C1_COMPOSITION_DEADLOCK')) throw new Error('consumer that never drains must deadlock the producer')
+  assertNoUndefinedValues(pcBad)
+
+  // Biased gambler: win weight 4, lose weight 6 (p_win = 0.4); P(broke first) from $1, N=$5 = 0.924...
+  const ruin = JSON.parse(readFileSync(new URL('gamblers-ruin.json', root), 'utf8'))
+  for (const t of ruin.transitions) {
+    if (t.event === 'win') t.weight = 4
+    if (t.event === 'lose') t.weight = 6
+  }
+  ruin.invariants = [
+    { id: 'biased-ruin', description: 'P(broke) ~ 0.924 with p_win = 0.4', kind: 'probability', target: 'BROKE', op: '>=', p: 0.9 },
+  ]
+  const biasedOk = runVerification(ruin)
+  if (biasedOk.summary.errors !== 0) throw new Error('biased ruin 0.924 >= 0.9 must pass: ' + JSON.stringify(biasedOk.checks.find((c) => c.id === 'A13')))
+  const ruinClaim = JSON.parse(JSON.stringify(ruin))
+  ruinClaim.invariants[0].p = 0.93
+  if (!code(runVerification(ruinClaim), 'A13', 'A13_PROBABILITY_VIOLATION')) throw new Error('claiming P >= 0.93 must violate the true 0.924')
+  console.log('PASS canon-two')
+}
+
+await runCanonTwoTests()
+
+// Stress: larger machines must terminate and respect caps without hanging
+async function runStressTests() {
+  // 300-state linear chain, all checks
+  const chain = { schemaVersion: 1, init: 's0', states: [], transitions: [] }
+  for (let i = 0; i < 300; i++) chain.states.push({ id: 's' + i, terminal: i === 299 })
+  for (let i = 0; i < 299; i++) chain.transitions.push({ from: 's' + i, event: 'next', to: 's' + (i + 1) })
+  const chainReport = runVerification(chain)
+  if (!chainReport.ok || chainReport.summary.errors !== 0) throw new Error('300-state chain must pass')
+  assertNoUndefinedValues(chainReport)
+
+  // composition of two 80-state machines, then force truncation with a small cap
+  const make = (p) => { const m = { schemaVersion: 1, init: 'm' + p + '_0', states: [], transitions: [] }; for (let i = 0; i < 80; i++) m.states.push({ id: 'm' + p + '_' + i, terminal: i === 79 }); for (let i = 0; i < 79; i++) m.transitions.push({ from: 'm' + p + '_' + i, event: 'step' + p, to: 'm' + p + '_' + (i + 1) }); return m }
+  const bigA = make('a'); const bigB = make('b')
+  const composed = runCompositionVerification([bigA, bigB])
+  if (!composed.ok || composed.summary.truncated) throw new Error('80x80 product should complete: ' + JSON.stringify(composed.summary))
+  assertNoUndefinedValues(composed)
+  const capped = runCompositionVerification([bigA, bigB], { maxStates: 500 })
+  if (!capped.summary.truncated) throw new Error('small maxStates must truncate the product exploration')
+  assertNoUndefinedValues(capped)
+
+  // deep DTMC chain: value iteration must converge, not hang
+  const deep = { schemaVersion: 1, init: 'n0', states: [], transitions: [], invariants: [] }
+  for (let i = 0; i < 120; i++) deep.states.push({ id: 'n' + i, terminal: i === 119 })
+  for (let i = 0; i < 119; i++) deep.transitions.push({ from: 'n' + i, event: 'next', to: 'n' + (i + 1), weight: 1 })
+  deep.invariants.push({ id: 'reaches-end', description: 'deterministic chain reaches the end', kind: 'probability', target: 'n119', op: '>=', p: 0.999999 })
+  const deepReport = runVerification(deep)
+  const a13 = deepReport.checks.find((c) => c.id === 'A13')
+  if (a13 === undefined || a13.findings.length !== 0) throw new Error('deep chain P=1 must pass: ' + JSON.stringify(a13?.findings))
+  assertNoUndefinedValues(deepReport)
+  console.log('PASS stress-tests')
+}
+
+await runStressTests()
+
+
 
 
 

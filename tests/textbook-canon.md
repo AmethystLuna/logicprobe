@@ -25,5 +25,9 @@ checks and the legacy-gap coverage of the older ones.
 | A13 | gambler's ruin (fair coin, P(broke) = 4/5) | tests/engine/fixtures/gamblers-ruin.json |
 | A14 | watchdog deadline: resident past maxTicks | tests/engine/fixtures/deadline-over.json, deadline-ok.json |
 | C1/C2 | CSP-style request/ack handshake; blocked handshake; 3-machine chain | tests/engine/run.mjs composition-tests |
+| S7/A7 | Peterson mutual exclusion: never both in CS; removing the wait condition breaks it | tests/engine/run.mjs canon-two |
+| C1/C2 | producer-consumer single-slot rendezvous; consumer that never drains deadlocks | tests/engine/run.mjs canon-two |
+| A13 | biased gambler (p_win = 0.4): P(broke first) = 0.924 from $1 | tests/engine/run.mjs canon-two |
+| scale | 300-state chain; 80x80 composition product + forced truncation; deep 120-state DTMC convergence | tests/engine/run.mjs stress-tests |
 | coverageNotes | watchdog/ISR/hybrid/reliability vocabulary routing | tests/engine/run.mjs coverage-note-tests |
 | CONC | thread-safe / interrupt-safe absolute claims routing | tests/concurrency/run.mjs |
