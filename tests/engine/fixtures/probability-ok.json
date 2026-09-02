@@ -1,0 +1,49 @@
+{
+  "schemaVersion": 1,
+  "init": "A",
+  "states": [
+    {
+      "id": "A"
+    },
+    {
+      "id": "B",
+      "terminal": true
+    },
+    {
+      "id": "C",
+      "terminal": true
+    }
+  ],
+  "transitions": [
+    {
+      "from": "A",
+      "event": "ok",
+      "to": "B",
+      "weight": 1
+    },
+    {
+      "from": "A",
+      "event": "bad",
+      "to": "C",
+      "weight": 1
+    }
+  ],
+  "invariants": [
+    {
+      "id": "p-low",
+      "description": "at least 40% reach success",
+      "kind": "probability",
+      "target": "B",
+      "op": ">=",
+      "p": 0.4
+    },
+    {
+      "id": "p-cap",
+      "description": "at most 60% reach success",
+      "kind": "probability",
+      "target": "B",
+      "op": "<=",
+      "p": 0.6
+    }
+  ]
+}

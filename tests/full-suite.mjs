@@ -131,6 +131,11 @@ check('CONC: plain sequential no findings', concPlain.findings.length === 0)
 const concRoutes = runConcurrencyScan('This module is thread-safe.')
 check('CONC: absolute claims carry tool routes', concRoutes.findings.some((f) => f.code === 'CONCURRENCY_ABSOLUTE_CLAIM' && Array.isArray(f.suggestions) && f.suggestions.length > 0))
 const smCoverage = { schemaVersion: 1, init: 'IDLE', states: [{ id: 'IDLE' }, { id: 'RUN' }, { id: 'SAFE', terminal: true }], transitions: [{ from: 'IDLE', event: 'start', to: 'RUN' }, { from: 'RUN', event: 'watchdog_timeout', to: 'SAFE' }] }
+const probFail = { schemaVersion: 1, init: 'A', states: [{ id: 'A' }, { id: 'B', terminal: true }, { id: 'C', terminal: true }], transitions: [{ from: 'A', event: 'ok', to: 'B', weight: 1 }, { from: 'A', event: 'bad', to: 'C', weight: 1 }], invariants: [{ id: 'pr', description: 'success 90%', kind: 'probability', target: 'B', op: '>=', p: 0.9 }] }
+check('SM A13: probability violation detected', hasFinding(runVerification(probFail), 'A13', 'A13_PROBABILITY_VIOLATION'))
+const probOk = JSON.parse(JSON.stringify(probFail))
+probOk.invariants[0].p = 0.4
+check('SM A13: probability bound passes', runVerification(probOk).checks.find((c) => c.id === 'A13')?.findings.length === 0)
 check('SM coverage: timing note routed', runVerification(smCoverage).coverageNotes?.some((note) => note.includes('UPPAAL')) === true)
 
 console.log(`\n===== FULL TEST SUMMARY: ${pass} passed, ${fail} failed =====`)

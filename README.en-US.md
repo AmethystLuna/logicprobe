@@ -14,7 +14,7 @@ Design documents are not truth — code is. A claim-verification skill that chec
 |-------|------|
 | Phase 1-2 | Enumerate every verifiable claim (API names, file paths, enum values, counts, mechanism feasibility) → verify each against the codebase with evidence |
 | Phase 2a | **8 structural checks** on extracted state-machine models: reachability, deadlock, liveness, determinism, event/guard completeness, invariant validity, monotonic variables |
-| Phase 2b | **12 adversarial probes**: unexpected events, race interleaving, order permutation, pair symmetry (lock/unlock), boundary blast, resource injection, minimal counter-example, idempotent replay, leads-to, sequence, atomicity, budget (worst-case path cost, A12) |
+| Phase 2b | **13 adversarial probes**: unexpected events, race interleaving, order permutation, pair symmetry (lock/unlock), boundary blast, resource injection, minimal counter-example, idempotent replay, leads-to, sequence, atomicity, budget (worst-case path cost, A12), probability reachability (A13) |
 | Refactoring | Before/after model comparison — behavioral preservation, invariant continuity, deadlock regression, complexity claims |
 | Data models | DataModelV1 verification — DS/DA/DD checks, migration coverage, copy consistency, before/after breaking-change regression |
 | Concurrency risk mining | Scans documents/plans for concurrency safety claims (thread-safe, lock-free, race condition, interrupt safety, etc.) and flags them for dedicated verification |
@@ -68,7 +68,7 @@ Native dsh support ships as a cordis plugin bundle at the repository root (the r
 - The bundle injects the claim-verification gate (1% Rule / Red Flags / proactive suggestion) into the first model step of every agent session — the dsh-native counterpart of the Claude `SessionStart` hook. It also registers a model-visible catalog entry (`cordis_inspect`), a native `logicprobe_verify` tool (`ctx.tools`), and a policy-aware `logicprobe:mode` context (`ctx.systemPrompt`).
 - `logicprobe_datamodel_verify` adds data-model verification: DataModelV1, migration coverage, copy consistency, and DD1-DD4 before/after data regression.
 - `logicprobe_concurrency_scan` mines documents/plans for concurrency risk claims (thread-safe, lock-free, race condition, mutex, etc.), flags them for dedicated verification, and attaches tool-routing `suggestions` to absolute claims.
-- `logicprobe_verify` also supports transition `cost` (default 1) with `budget` invariants (A12 worst-case path-cost check incl. positive-cost-cycle detection).
+- `logicprobe_verify` also supports transition `cost` (default 1) with `budget` invariants (A12 worst-case path-cost check incl. positive-cost-cycle detection), and transition `weight` (default 1) with `probability` invariants (A13 probability reachability).
 - State `onEntry`/`onExit` actions are treated by A4 Pair Symmetry as implicit acquire/release; report `coverageNotes` routes timing/preemption/hybrid/probability vocabulary to dedicated tools (UPPAAL, TSan/CBMC/TLA+, SpaceEx, PRISM, ...).
 - Together with the embedded-workbench bundle's Plan Verification Gate, this closes the claim-verification loop in dsh.
 

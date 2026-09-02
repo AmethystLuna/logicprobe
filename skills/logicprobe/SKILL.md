@@ -44,7 +44,7 @@ This step is NOT skippable — it creates an explicit, auditable record of what 
 |-------|----------|
 | LIGHTWEIGHT | All 5 checklist items (file paths, API/type names, line numbers, behavioral claims, mechanism feasibility) answered in context with explicit results per item |
 | STANDARD | Phase 1-2: enumerate every verifiable claim → verify each against codebase with evidence |
-| ESCALATED | Full pipeline: Phase 1-5 including Logic Primitive Verification (Phase 2a + 2b, 20 checks) |
+| ESCALATED | Full pipeline: Phase 1-5 including Logic Primitive Verification (Phase 2a + 2b, 21 checks) |
 
 ### Plan Verification Block
 
@@ -136,7 +136,7 @@ Document claims → Extract model → Runtime check:
 
 Refactoring variant:
   Old code + Refactoring plan → Extract BEFORE model + AFTER model
-    → Run pipeline on AFTER model (20 checks)
+    → Run pipeline on AFTER model (21 checks)
     → Compare BEFORE vs AFTER: behavioral preservation, regression, complexity delta
     → Flag any invariant that held in BEFORE but fails in AFTER
 ```
@@ -148,7 +148,7 @@ When the document under review is a refactoring plan (modifying existing state m
 1. **Extract the BEFORE model** from the existing codebase (not the plan — verify what the code actually does, not what the plan claims it does)
 2. **Extract the AFTER model** from the refactoring plan
 3. **Show both tables AND their model narratives** to the user side by side and confirm the delta is intentional
-4. **Run Phase 2a + 2b on the AFTER model** — same 20 checks as new design
+4. **Run Phase 2a + 2b on the AFTER model** — same 21 checks as new design
 5. **Compare BEFORE vs AFTER**:
 
    | Check | Method | Severity if Violated |
@@ -188,7 +188,7 @@ Run these FIRST. They establish basic well-formedness before adversarial probing
 | S7 | **Invariant validity** | Does every reachable state satisfy the plan's stated "always/never/guaranteed" assertions? | Error — plan claim is false |
 | S8 | **Monotonic variables** | If a variable is declared `monotonic: inc/dec`, do all updates respect that direction? | Error — counter can move backwards |
 
-### Phase 2b: Adversarial Probes (12 Attacks)
+### Phase 2b: Adversarial Probes (13 Attacks)
 
 Run these SECOND. Each probe actively tries to BREAK the model. If any probe succeeds (finds a violation), the plan has a behavior gap.
 
@@ -206,6 +206,7 @@ Run these SECOND. Each probe actively tries to BREAK the model. If any probe suc
 | A10 | **Sequence order** | Events declared in a sequence must occur in the specified order. | "backup before modify before commit" |
 | A11 | **Atomicity** | Once an atomic event starts, the machine must commit or roll back before leaving the scope or terminating. | "all-or-nothing transaction" |
 | A12 | **Budget (worst-case path cost)** | With `cost` on transitions (absent = 1) and a `budget` invariant, every reachable path must stay within budget; reports the shortest over-budget counterexample and flags reachable positive-cost cycles as unbounded. | "Worst-case path cost ≤ budget" |
+| A13 | **Probability reachability (DTMC)** | With `weight` on transitions (absent = 1) and a `probability` invariant, P(ever hitting the target) must satisfy the bound; solved by value iteration over the absorbing chain. | "≥ 90% of runs reach SAFE" |
 
 ### Integration Back to Phase 3
 

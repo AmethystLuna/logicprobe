@@ -109,6 +109,24 @@ const cases = [
     },
   },
   {
+    name: 'probability-ok.json',
+    errors: 0,
+    findings: [],
+  },
+  {
+    name: 'probability-fail.json',
+    errors: 1,
+    findings: [{ check: 'A13', code: 'A13_PROBABILITY_VIOLATION' }],
+    assert(report) {
+      const a13 = report.checks.find((check) => check.id === 'A13')
+      const finding = a13?.findings.find((entry) => entry.code === 'A13_PROBABILITY_VIOLATION')
+      const computed = finding?.evidence?.computed
+      if (typeof computed !== 'number' || Math.abs(computed - 0.5) > 1e-6) {
+        throw new Error('expected computed P(hit B) = 0.5, got ' + JSON.stringify(computed))
+      }
+    },
+  },
+  {
     name: 'budget-over.json',
     errors: 1,
     findings: [{ check: 'A12', code: 'A12_BUDGET_OVER' }],
@@ -454,7 +472,7 @@ async function runBudgetTests() {
   const legacyReport = runVerification(legacy)
   const a12 = legacyReport.checks.find((check) => check.id === 'A12')
   if (a12 === undefined || a12.findings.length !== 0 || a12.status !== 'pass') throw new Error('A12 must pass cleanly for legacy machines')
-  if (legacyReport.summary.checksRun !== 20) throw new Error('expected 20 checks, got ' + legacyReport.summary.checksRun)
+  if (legacyReport.summary.checksRun !== 21) throw new Error('expected 21 checks, got ' + legacyReport.summary.checksRun)
   assertNoUndefinedValues(legacyReport)
   console.log('PASS budget-tests')
 }
@@ -569,6 +587,68 @@ async function runCoverageNoteTests() {
 }
 
 await runCoverageNoteTests()
+
+async function runProbabilityTests() {
+  // DTMC with a cycle: P(hit B) converges to 1
+  const cycle = {
+    schemaVersion: 1,
+    init: 'A',
+    states: [{ id: 'A' }, { id: 'B', terminal: true }],
+    transitions: [
+      { from: 'A', event: 'retry', to: 'A', weight: 1 },
+      { from: 'A', event: 'ok', to: 'B', weight: 1 },
+    ],
+    invariants: [{ id: 'pc', description: 'almost surely reaches B', kind: 'probability', target: 'B', op: '>=', p: 0.9999 }],
+  }
+  const cycleReport = runVerification(cycle)
+  const a13c = cycleReport.checks.find((check) => check.id === 'A13')
+  if (a13c === undefined || a13c.findings.length !== 0) {
+    throw new Error('P(hit B)=1 cycle must satisfy >=0.9999: ' + JSON.stringify(a13c?.findings))
+  }
+  assertNoUndefinedValues(cycleReport)
+
+  // skewed weights: P = 9/10
+  const skewed = {
+    schemaVersion: 1,
+    init: 'A',
+    states: [{ id: 'A' }, { id: 'B', terminal: true }, { id: 'C', terminal: true }],
+    transitions: [
+      { from: 'A', event: 'ok', to: 'B', weight: 9 },
+      { from: 'A', event: 'bad', to: 'C', weight: 1 },
+    ],
+    invariants: [{ id: 'ps', description: 'success rate 90%', kind: 'probability', target: 'B', op: '>=', p: 0.85 }],
+  }
+  const skewedReport = runVerification(skewed)
+  const a13s = skewedReport.checks.find((check) => check.id === 'A13')
+  if (a13s === undefined || a13s.findings.length !== 0) throw new Error('skewed 9:1 must satisfy >=0.85')
+  assertNoUndefinedValues(skewedReport)
+
+  // weight 0 = branch never fires probabilistically -> P = 1
+  const zeroWeight = {
+    schemaVersion: 1,
+    init: 'A',
+    states: [{ id: 'A' }, { id: 'B', terminal: true }, { id: 'C', terminal: true }],
+    transitions: [
+      { from: 'A', event: 'ok', to: 'B', weight: 1 },
+      { from: 'A', event: 'bad', to: 'C', weight: 0 },
+    ],
+    invariants: [{ id: 'pz', description: 'bad branch disabled', kind: 'probability', target: 'B', op: '>=', p: 0.999 }],
+  }
+  const zeroReport = runVerification(zeroWeight)
+  const a13z = zeroReport.checks.find((check) => check.id === 'A13')
+  if (a13z === undefined || a13z.findings.length !== 0) throw new Error('zero-weight branch must not fire')
+  assertNoUndefinedValues(zeroReport)
+
+  // malformed probability invariants must fail model validation
+  const badP = { schemaVersion: 1, init: 'A', states: [{ id: 'A' }, { id: 'B', terminal: true }], transitions: [{ from: 'A', event: 'go', to: 'B' }], invariants: [{ id: 'x', description: 'x', kind: 'probability', target: 'B', op: '>=', p: 1.5 }] }
+  if (runVerification(badP).ok) throw new Error('p=1.5 must fail validation')
+  const badW = { schemaVersion: 1, init: 'A', states: [{ id: 'A' }, { id: 'B', terminal: true }], transitions: [{ from: 'A', event: 'go', to: 'B', weight: -1 }] }
+  if (runVerification(badW).ok) throw new Error('weight=-1 must fail validation')
+  console.log('PASS probability-tests')
+}
+
+await runProbabilityTests()
+
 
 await runIdempotencyTests()
 

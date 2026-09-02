@@ -38,6 +38,8 @@ export interface TransitionSpec {
     updates?: UpdateSpec[];
     /** Execution cost of firing this transition (e.g. cycles, microseconds). Absent cost defaults to 1, so an unannotated machine keeps step-count semantics. Checked by A12 against budget invariants. */
     cost?: number;
+    /** Relative probability weight when a probability invariant is declared (DTMC interpretation). Absent weight = 1; weight 0 means the branch never fires probabilistically. */
+    weight?: number;
 }
 export interface TransitionScenarioSpec {
     from: string;
@@ -102,6 +104,13 @@ export type InvariantSpec = {
     description: string;
     kind: 'budget';
     budget: number;
+} | {
+    id: string;
+    description: string;
+    kind: 'probability';
+    target: string;
+    op: '>=' | '<=' | '>' | '<';
+    p: number;
 };
 export interface ResourcePairSpec {
     resource: string;

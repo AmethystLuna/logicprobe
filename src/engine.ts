@@ -50,6 +50,8 @@ export interface TransitionSpec {
   updates?: UpdateSpec[]
   /** Execution cost of firing this transition (e.g. cycles, microseconds). Absent cost defaults to 1, so an unannotated machine keeps step-count semantics. Checked by A12 against budget invariants. */
   cost?: number
+  /** Relative probability weight when a probability invariant is declared (DTMC interpretation). Absent weight = 1; weight 0 means the branch never fires probabilistically. */
+  weight?: number
 }
 
 export interface TransitionScenarioSpec {
@@ -85,6 +87,7 @@ export type InvariantSpec =
   | { id: string; description: string; kind: 'sequence'; events: string[] }
   | { id: string; description: string; kind: 'atomicity'; events: string[]; commit: string; rollback?: string }
   | { id: string; description: string; kind: 'budget'; budget: number }
+  | { id: string; description: string; kind: 'probability'; target: string; op: '>=' | '<=' | '>' | '<'; p: number }
 
 export interface ResourcePairSpec {
   resource: string
@@ -272,6 +275,9 @@ export function validateModel(input: unknown): { ok: true; model: LogicModelV1 }
       if (transition.cost !== undefined) {
         if (typeof transition.cost !== 'number' || !Number.isFinite(transition.cost) || transition.cost < 0) bad(path + '.cost', 'must be a non-negative finite number')
       }
+      if (transition.weight !== undefined) {
+        if (typeof transition.weight !== 'number' || !Number.isFinite(transition.weight) || transition.weight < 0) bad(path + '.weight', 'must be a non-negative finite number')
+      }
     })
   }
   const variableNames = new Set<string>()
@@ -344,6 +350,10 @@ export function validateModel(input: unknown): { ok: true; model: LogicModelV1 }
         if (invariant.rollback !== undefined && typeof invariant.rollback !== 'string') bad(path + '.rollback', 'must be a string')
       } else if (invariant.kind === 'budget') {
         if (typeof invariant.budget !== 'number' || !Number.isFinite(invariant.budget) || invariant.budget < 0) bad(path + '.budget', 'must be a non-negative finite number')
+      } else if (invariant.kind === 'probability') {
+        if (typeof invariant.target !== 'string' || invariant.target.length === 0) bad(path + '.target', 'must be a non-empty string')
+        if (invariant.op !== '>=' && invariant.op !== '<=' && invariant.op !== '>' && invariant.op !== '<') bad(path + '.op', "must be one of '>=', '<=', '>', '<'")
+        if (typeof invariant.p !== 'number' || !Number.isFinite(invariant.p) || invariant.p < 0 || invariant.p > 1) bad(path + '.p', 'must be a number in [0, 1]')
       } else {
         bad(path + '.kind', 'unknown invariant kind')
       }
@@ -2015,6 +2025,121 @@ function A12_budget(model: LogicModelV1, options: NormalizedOptions): CheckResul
   }
   return checkResult('A12', 'Budget', findings, findings.length === 0 ? (budgets.length === 0 ? 'No budget invariants declared' : 'All budget invariants hold') : 'Budget findings: ' + findings.length)
 }
+// ---------------------------------------------------------------------------
+// A13 — Probability reachability (DTMC)
+// ---------------------------------------------------------------------------
+
+function probabilityOutcomes(model: LogicModelV1, runtime: RuntimeState): Map<string, { state: string; weight: number }> {
+  const groupMap = groupTransitions(model)
+  const outcomes = new Map<string, { state: string; weight: number }>()
+  for (const event of allEvents(model)) {
+    const group = groupMap.get(runtime.state + '|' + event)
+    if (group === undefined || group.length === 0) continue
+    for (const transition of applicableTransitions(group, runtime)) {
+      const weight = transition.weight ?? 1
+      if (!(weight > 0)) continue
+      const next = applyUpdates(model, transition, runtime)
+      const key = runtimeKey(next)
+      const current = outcomes.get(key)
+      if (current === undefined) outcomes.set(key, { state: next.state, weight })
+      else current.weight += weight
+    }
+  }
+  return outcomes
+}
+
+/**
+ * Probability of ever reaching targetState from the initial state under the DTMC
+ * interpretation: at each runtime state every applicable transition with weight > 0 is an
+ * outcome chosen proportionally to its weight. Solved by value iteration (least fixed
+ * point of the absorbing chain).
+ */
+function computeHitProbability(model: LogicModelV1, options: NormalizedOptions, targetState: string): { probability: number; converged: boolean } {
+  const exploration = explore(model, options)
+  const reachable = exploration.reachable
+  const n = reachable.length
+  const keyIndex = new Map<string, number>()
+  reachable.forEach((runtime, i) => keyIndex.set(runtimeKey(runtime), i))
+  const fixedValue = new Array<number | null>(n).fill(null)
+  const chains: Array<Array<{ j: number; w: number }>> = []
+  for (let i = 0; i < n; i++) {
+    const runtime = reachable[i]
+    if (runtime.state === targetState) {
+      fixedValue[i] = 1
+      chains.push([])
+      continue
+    }
+    const outs = probabilityOutcomes(model, runtime)
+    let sum = 0
+    const list: Array<{ j: number; w: number }> = []
+    for (const [key, entry] of outs) {
+      const j = keyIndex.get(key)
+      if (j === undefined) continue
+      list.push({ j, w: entry.weight })
+      sum += entry.weight
+    }
+    if (sum <= 0) {
+      fixedValue[i] = 0
+      chains.push([])
+      continue
+    }
+    chains.push(list.map((item) => ({ j: item.j, w: item.w / sum })))
+  }
+  const p = new Array<number>(n).fill(0)
+  let converged = false
+  for (let iter = 0; iter < 20000; iter++) {
+    let maxDelta = 0
+    for (let i = 0; i < n; i++) {
+      if (fixedValue[i] !== null) continue
+      const list = chains[i]
+      let acc = 0
+      for (const item of list) {
+        const fixed = fixedValue[item.j]
+        acc += item.w * (fixed === null ? p[item.j] : fixed)
+      }
+      const delta = Math.abs(acc - p[i])
+      if (delta > maxDelta) maxDelta = delta
+      p[i] = acc
+    }
+    if (maxDelta < 1e-9) {
+      converged = true
+      break
+    }
+  }
+  const initIndex = keyIndex.get(runtimeKey(exploration.initialState)) ?? 0
+  const fixed = fixedValue[initIndex]
+  return { probability: fixed === null ? p[initIndex] : fixed, converged }
+}
+
+function A13_probability(model: LogicModelV1, options: NormalizedOptions): CheckResult {
+  const findings: Finding[] = []
+  const eps = 1e-9
+  for (const invariant of model.invariants ?? []) {
+    if (invariant.kind !== 'probability') continue
+    const { probability, converged } = computeHitProbability(model, options, invariant.target)
+    let violated = false
+    if (invariant.op === '>=') violated = probability < invariant.p - eps
+    else if (invariant.op === '>') violated = probability <= invariant.p + eps
+    else if (invariant.op === '<=') violated = probability > invariant.p + eps
+    else violated = probability >= invariant.p - eps
+    if (violated) {
+      findings.push({
+        code: 'A13_PROBABILITY_VIOLATION',
+        severity: 'error',
+        message: 'Probability invariant "' + invariant.id + '" (' + invariant.description + ') violated: P(hit ' + invariant.target + ') = ' + probability.toFixed(6) + ' does not satisfy ' + invariant.op + ' ' + invariant.p + '.',
+        evidence: { invariant, computed: probability, converged },
+      })
+    } else if (!converged) {
+      findings.push({
+        code: 'A13_NO_CONVERGENCE',
+        severity: 'warning',
+        message: 'Probability invariant "' + invariant.id + '" passes, but value iteration did not fully converge within the iteration cap.',
+        evidence: { invariant, computed: probability, converged },
+      })
+    }
+  }
+  return checkResult('A13', 'Probability Reachability', findings, findings.length === 0 ? 'No probability invariants declared or all hold' : 'Probability findings: ' + findings.length)
+}
 
 // ---------------------------------------------------------------------------
 // Coverage notes (informational gap notices)
@@ -2100,6 +2225,7 @@ export function runVerification(input: unknown, options: VerificationOptions = {
     A10_sequenceOrder(model, normalized),
     A11_atomicity(model, normalized),
     A12_budget(model, normalized),
+    A13_probability(model, normalized),
   ]
   let comparison: ComparisonSummary | undefined
   if (options.beforeModel !== undefined) {

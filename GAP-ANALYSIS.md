@@ -15,7 +15,7 @@
 
 - 运行时状态 = `(state, vars)`，`vars` 仅 integer / boolean（`engine.ts` 的 `RuntimeState`）；
 - 事件按序步进，状态空间 BFS 穷举（上限 `maxStates` 10000）；
-- 检查全是 **定性** 性质：S1-S8（可达/死锁/活性/确定性/完备性/不变量/单调）+ A1-A12（意外事件、交错、置换、配对对称、边界、资源、最短反例、幂等、必达、顺序、原子性、预算/最坏路径代价）+ D1-D4（前后回归）；
+- 检查全是 **定性** 性质：S1-S8（可达/死锁/活性/确定性/完备性/不变量/单调）+ A1-A13（意外事件、交错、置换、配对对称、边界、资源、最短反例、幂等、必达、顺序、原子性、预算/最坏路径代价、概率可达）+ D1-D4（前后回归）；
 - 守卫是变量上的静态布尔表达式（`<`/`>`/`==`/`!=` 与 all/any/not），没有时钟、没有表达式算术；
 - 官方文档自行划定的边界（`references/logic-verification-guide.md` Known Limitations / Model Fidelity Warning）：
   - *「The Python model does not simulate real-time constraints」* — 时间维缺席；
@@ -31,6 +31,11 @@
 | 类别 | 含义 | 补法 |
 |---|---|---|
 | **A 明示边界** | 文档白纸黑字列为 Known Limitation / Non-Goal | 不实现，提供「转交外部工具」指引（`gap-routing-guide.md`、`coverageNotes`、扫描器 `suggestions`） |
+
+> **前提修订（引擎自研）**：`src/engine.ts`/`data-engine.ts`/`concurrency.ts` 为本仓库自研 TS，零第三方验证依赖（仅 `node:crypto`）。因此「自研 vs 外部路由」只剩两个判断标准：
+> (1) **语义模型边界**——分析对象必须在离散模型输入之内（二进制执行时间、连续方程、实测数据都不在）；
+> (2) **工程代价**——dense-time 全量、RTOS 级抢占的高成本/高风险可自愿外包。
+> 由此 **D8（离散概率可达）与 D6（双机组合）转入自研路线图**（见 §3），路由只保留给 D2 真 WCET / D4 hybrid / D3 全量抢占 / dense-time 全量 / 连续时间概率。
 | **B 可近似但低保真** | 可手工退化成现有 schema（展平/伪事件/tick+计数器），但易错且失保真 | 提供结构化辅助，降低人工出错 |
 | **C 结构性缺失** | schema 里连近似字段都没有 | 需要新字段或新机器种类 |
 
@@ -47,7 +52,7 @@
 | D5 | 层次 / 正交结构（statechart） | B（手展平，保真风险） | 扁平 states；文档指引手工展平 | 父态守卫、history、正交互斥 | 嵌套运行态、电源管理 ∥ 通信 | SCXML / Stateflow（原生支持） |
 | D6 | 多机组合 / 跨子系统协议 | A（文档承认不可见） | 单机验证 + 手工契约文档 | 「A 发事件时 B 必能处理」 | 主备切换、上下电跨模块时序 | CSP（FDR）/ mCRL2 / TLA+ |
 | D7 | 动作语义（entry/exit/do + 副作用） | B → **部分关闭（P0-b）** | 状态 `onEntry`/`onExit` 声明，A4 自动按隐式 acquire/release 配对（不再需要手工伪事件） | do-while 动作、动作内复杂副作用语义 | 安全态进入动作、资源清理 | 状态机代码生成 + 静态分析 |
-| D8 | 概率 / 随机（stochastic） | A | coverageNotes 提示并路由 PRISM/Storm/故障树 | 「MTBF ≥ X」「故障率 ≤ p」 | 可靠性预算、降级策略评估 | PRISM / Storm / 故障树 |
+| D8 | 概率 / 随机（stochastic） | A → **离散部分关闭** | **A13 概率可达**（`weight`+`probability`，DTMC 值迭代）；coverageNotes 对连续时间概率仍路由 PRISM/Storm | 「≥90% 到达 SAFE」离散已可查；「MTBF ≥ X」「故障率 ≤ p」仍需概率工具 | 降级策略的可靠性预算 | PRISM / Storm（连续时间/全量） |
 | D9 | 资源容量 / 饥饿 / 公平 | C | `resourcePairs` 只做定性配对 | 「队列不溢出」「无饥饿」 | 信号量计数、有界队列 | 模型检查带容量（UPPAAL 等） |
 | D10 | 数据域性能 / 容量 | A（datamodel 引擎 Non-Goal） | 无 | 「迁移在窗口内完成」「表不膨胀」 | 大数据量迁移、索引代价 | Flyway 压测 / 数据库专项 |
 
@@ -98,7 +103,7 @@
 
 ### D8 概率维（简）
 
-- 无概率语义；coverageNotes 对 mtbf/failure rate/markov 等词汇提示并路由 PRISM/Storm/故障树。A 类边界。
+- 现状（A13 已落地）：transition `weight`（缺省 1，0=不触发）把模型变成 DTMC；`probability` 不变量（P(击中 target) ≥/≤/>/< p）用吸收链值迭代求解，违规给 A13_PROBABILITY_VIOLATION。仍不覆盖连续时间（CTMC）与完整 PRISM 语义——coverageNotes 对 mtbf/failure rate/markov 等词汇仍提示并路由 PRISM/Storm/故障树。
 
 ### D9 资源容量维（简）
 
@@ -120,11 +125,12 @@
 | `coverageNotes` 扩到 hybrid/概率词汇（SpaceEx/PRISM 路由） | D4/D8 | 报告增强 | ✅ 已实现（7a9af54），全绿 |
 | 并发扫描绝对声称带 `suggestions` 工具建议 | D3 | 扫描增强 | ✅ 已实现（52151ee），全绿 |
 | 外部工具路由表（`gap-routing-guide.md` + SKILL/schema/README 同步） | A 类全域 | 文档 | ✅ 已实现（本轮文档提交） |
-| `clock` 变量 + 期限不变量（TimedLogicModelV1） | D1 | 新机器种类 | ⏳ 未实现（风险：状态空间爆炸） |
-| 双机组合可达性 / 跨机契约表 | D6 | 新检查/新工具 | ⏳ 未实现 |
+| **DTMC 离散概率可达**：transition `weight` + `probability` 不变量（P(到达 target) ≥/≤ p，值迭代） | D8 | 新检查（A13） | ✅ 已实现（本轮，本地提交），全绿 |
+| **双机组合可达性 / 跨机契约表** | D6 | 新检查/新工具 | ⏳ 规划自研（P2） |
+| `clock`/deadline 离散 tick 版（进入重置 + K tick 内必达） | D1 | 引擎增强 | ⏳ 规划自研（P2；dense-time 全量不自研） |
 | statechart 自动展平 + round-trip 确认 | D5 | 工作流工具 | ⏳ 未实现 |
-| 文档散文级「域声称扫描」`runDomainScan` | D1/D4/D8 | 旁路新出口 | ⏳ 未实现（可选，与 coverageNotes 互补） |
-| 真并发证明 / hybrid 稳定性 / 精确 WCET / 概率验证 | D3/D4/D2/D8 | 明确不实现 | ⛔ 保持 Non-Goal，路由闭环代替 |
+| 文档散文级「域声称扫描」`runDomainScan` | D1/D4/D8 | 旁路新出口 | ⏳ 可选（与 coverageNotes 互补） |
+| 真并发抢占证明 / hybrid 稳定性 / 精确 WCET / dense-time 全量 / 连续时间概率 | D3/D4/D2/D1/D8 | 明确不自研 | ⛔ 语义模型边界（需二进制/方程/实测输入），保持路由 |
 
 ### 横切建议（已部分落地）
 
@@ -151,7 +157,7 @@
 
 ### A. 现有检查索引（供缺口映射）
 
-- 状态机：S1 可达 / S2 死锁 / S3 活性 / S4 确定性 / S5 事件完备 / S6 守卫完备 / S7 不变量 / S8 单调；A1 意外事件 / A2 竞态交错 / A3 顺序置换 / A4 配对对称（含 onEntry/onExit 动作）/ A5 边界 / A6 资源注入 / A7 最短反例 / A8 幂等重放 / A9 必达 / A10 顺序 / A11 原子性 / A12 预算（最坏路径代价）；
+- 状态机：S1 可达 / S2 死锁 / S3 活性 / S4 确定性 / S5 事件完备 / S6 守卫完备 / S7 不变量 / S8 单调；A1 意外事件 / A2 竞态交错 / A3 顺序置换 / A4 配对对称（含 onEntry/onExit 动作）/ A5 边界 / A6 资源注入 / A7 最短反例 / A8 幂等重放 / A9 必达 / A10 顺序 / A11 原子性 / A12 预算（最坏路径代价） / A13 概率可达（weight+probability，DTMC 值迭代）；
   D1-D4 前后回归。
 - 数据模型：DS1-DS4 / DA1-DA12 / DD1-DD4（镜像 S/A/D）。
 
@@ -166,7 +172,7 @@
 
 ### C. 证据引用清单
 
-- `src/engine.ts`：`LogicModelV1`、`RuntimeState{state, vars}`、S/A/D 检查实现、A12/coverageNotes；
+- `src/engine.ts`：`LogicModelV1`、`RuntimeState{state, vars}`、S/A/D 检查实现、A12/A13/coverageNotes；
 - `src/data-engine.ts`：`DataModelV1`、DS/DA/DD 实现；
 - `src/concurrency.ts` + `skills/logicprobe/references/concurrency-risk-guide.md`：并发挖掘 + 绝对声称 suggestions；
 - `skills/logicprobe/references/logic-verification-guide.md`：Known Limitations / Model Fidelity Warning；
