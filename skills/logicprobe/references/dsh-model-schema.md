@@ -1,6 +1,6 @@
 # DSH Model Schema v1 — logicprobe_verify
 
-The dsh-native `logicprobe_verify` tool accepts a structured JSON model. The engine runs 21 checks (S1-S8 structural, A1-A13 adversarial) and returns a JSON report. When `beforeModel` is supplied, it also runs D1-D4 before/after regression checks. Guards and updates are structured data — no code strings, no arbitrary execution.
+The dsh-native `logicprobe_verify` tool accepts a structured JSON model. The engine runs 22 checks (S1-S8 structural, A1-A14) and returns a JSON report. When `beforeModel` is supplied, it also runs D1-D4 before/after regression checks. Guards and updates are structured data — no code strings, no arbitrary execution.
 
 ## Top-level model
 
@@ -25,7 +25,7 @@ The dsh-native `logicprobe_verify` tool accepts a structured JSON model. The eng
 |---|---|---|
 | `schemaVersion` | yes | Must be `1` |
 | `init` | yes | Initial state id |
-| `states` | yes | `{ id, terminal?, onEntry?, onExit? }`; `terminal` exempts S2/S3/S5/A1; `onEntry`/`onExit` are action-name lists fired on entry/exit and treated by A4 as implicit acquire/release |
+| `states` | yes | `{ id, terminal?, onEntry?, onExit?, maxTicks? }`; `terminal` exempts S2/S3/S5/A1; `onEntry`/`onExit` are action-name lists fired on entry/exit and treated by A4 as implicit acquire/release; `maxTicks` is an A14 deadline since entry (needs top-level `tickEvents`) |
 | `transitions` | yes | `{ from, event, to, guard?, updates?, cost?, weight? }`; `cost` (non-negative, absent = 1) is checked by A12 against `budget` invariants; `weight` (non-negative, absent = 1) makes the machine a DTMC under A13 `probability` invariants |
 | `variables` | no | `{ name, kind: integer\|boolean, init, min?, max?, monotonic? }` |
 | `invariants` | no | See invariant kinds below |
@@ -168,6 +168,16 @@ Declare `weight` on transitions (default 1) to interpret the machine as a DTMC, 
 
 A13 computes P(ever hitting `target`) from the initial state by value iteration over the absorbing chain (transitions with `weight` 0 never fire; terminals other than the target are absorbing failures) and reports a violation when the bound fails. Converges to the least fixed point; an iteration cap protects against non-convergent models.
 
+## Deadline check (A14)
+
+Declare which events advance the discrete clock (`tickEvents`) and set `maxTicks` on a state that must be left within that many ticks of entering it:
+
+```json
+{ "schemaVersion": 1, "init": "LISTEN", "states": [{ "id": "LISTEN" }, { "id": "CRITICAL", "maxTicks": 2 }, { "id": "SAFE", "terminal": true }], "transitions": [ { "from": "LISTEN", "event": "fault", "to": "CRITICAL" }, { "from": "CRITICAL", "event": "recover", "to": "SAFE" } ], "tickEvents": ["tick"] }
+```
+
+A14 explores residency with a per-entry tick counter: a `tickEvents` step that keeps the machine resident past `maxTicks` reports `A14_DEADLINE_MISS` with the over-residency path. Time advances only when a tick event fires — real-time passage (auto-advancing clocks) is not modeled; dense-time claims still route to timed model checkers. States declaring `maxTicks` without any `tickEvents` yield the advisory `A14_NO_TICK_EVENTS`.
+
 ## State entry/exit actions (onEntry / onExit)
 
 States may declare ordered action-name lists that fire automatically:
@@ -177,6 +187,16 @@ States may declare ordered action-name lists that fire automatically:
 ```
 
 Actions never change state or variables. Checks that care about resource discipline see them as implicit events: A4 Pair Symmetry treats an action equal to a pair acquireEvent/releaseEvent as an acquire/release that fires on every entry (resp. exit) of the state, so lock/unlock hidden inside entry/exit actions is verified without hand-written ENTER_x/EXIT_x pseudo-events.
+
+## Composition verification
+
+Two or more machines can be checked together with `runCompositionVerification` (DSH tool `logicprobe_compose_verify`):
+
+- non-rendezvous events advance exactly one firing machine;
+- a rendezvous (handshake) event fires only when at least two machines declare it and every such non-terminal machine has it jointly enabled (guards held); participants advance simultaneously;
+- a terminal machine is stopped and does not participate.
+
+Checks: `C1_COMPOSITION_DEADLOCK` (a reachable composite state with no move while at least one machine is not terminal) and `C2_RENDEZVOUS_NEVER_FIRES`. This is a product-space BFS, so composite state count is the product of the machines; keep `maxStates` in mind.
 
 ## Minimal example
 
@@ -227,7 +247,7 @@ The report's `comparison` object includes both model hashes, state/transition co
 
 List events that must be idempotent in `idempotentEvents`. For every reachable state, applying the event twice must produce the same state as applying it once. This is useful for retries, webhook redelivery, and migration replay.
 
-## Advanced constraints (S8, A9-A13)
+## Advanced constraints (S8, A9-A14)
 
 - **S8 Monotonic Variables**: declare `monotonic: "inc"|"dec"` on a variable; updates must not move in the opposite direction.
 - **A9 Leads-To**: `{ kind: "leads-to", from, to }` — every path from `from` must eventually reach `to`.
@@ -235,6 +255,7 @@ List events that must be idempotent in `idempotentEvents`. For every reachable s
 - **A11 Atomicity**: `{ kind: "atomicity", events, commit, rollback? }` — once an atomic event starts, the machine must reach commit/rollback before leaving the atomic scope or terminating.
 - **A12 Budget**: `{ kind: "budget", budget }` — no reachable path may accumulate transition cost above the budget; reports the shortest over-budget path and flags reachable positive-cost cycles as unbounded.
 - **A13 Probability**: `{ kind: "probability", target, op, p }` — P(ever hitting target) must satisfy the bound under the DTMC induced by transition `weight` (default 1).
+- **A14 Deadline**: state `maxTicks` + top-level `tickEvents` — a tick step may not keep a state resident past its deadline; reports the over-residency path.
 
 ## Limits
 

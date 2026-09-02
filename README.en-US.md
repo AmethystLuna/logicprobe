@@ -14,7 +14,7 @@ Design documents are not truth — code is. A claim-verification skill that chec
 |-------|------|
 | Phase 1-2 | Enumerate every verifiable claim (API names, file paths, enum values, counts, mechanism feasibility) → verify each against the codebase with evidence |
 | Phase 2a | **8 structural checks** on extracted state-machine models: reachability, deadlock, liveness, determinism, event/guard completeness, invariant validity, monotonic variables |
-| Phase 2b | **13 adversarial probes**: unexpected events, race interleaving, order permutation, pair symmetry (lock/unlock), boundary blast, resource injection, minimal counter-example, idempotent replay, leads-to, sequence, atomicity, budget (worst-case path cost, A12), probability reachability (A13) |
+| Phase 2b | **14 adversarial probes**: unexpected events, race interleaving, order permutation, pair symmetry (lock/unlock), boundary blast, resource injection, minimal counter-example, idempotent replay, leads-to, sequence, atomicity, budget (worst-case path cost, A12), probability reachability (A13), deadline (maxTicks + tickEvents, A14) |
 | Refactoring | Before/after model comparison — behavioral preservation, invariant continuity, deadlock regression, complexity claims |
 | Data models | DataModelV1 verification — DS/DA/DD checks, migration coverage, copy consistency, before/after breaking-change regression |
 | Concurrency risk mining | Scans documents/plans for concurrency safety claims (thread-safe, lock-free, race condition, interrupt safety, etc.) and flags them for dedicated verification |
@@ -69,7 +69,8 @@ Native dsh support ships as a cordis plugin bundle at the repository root (the r
 - `logicprobe_datamodel_verify` adds data-model verification: DataModelV1, migration coverage, copy consistency, and DD1-DD4 before/after data regression.
 - `logicprobe_concurrency_scan` mines documents/plans for concurrency risk claims (thread-safe, lock-free, race condition, mutex, etc.), flags them for dedicated verification, and attaches tool-routing `suggestions` to absolute claims.
 - `logicprobe_verify` also supports transition `cost` (default 1) with `budget` invariants (A12 worst-case path-cost check incl. positive-cost-cycle detection), and transition `weight` (default 1) with `probability` invariants (A13 probability reachability).
-- State `onEntry`/`onExit` actions are treated by A4 Pair Symmetry as implicit acquire/release; report `coverageNotes` routes timing/preemption/hybrid/probability vocabulary to dedicated tools (UPPAAL, TSan/CBMC/TLA+, SpaceEx, PRISM, ...).
+- State `onEntry`/`onExit` actions are treated by A4 Pair Symmetry as implicit acquire/release; `maxTicks` + `tickEvents` deadlines (A14); report `coverageNotes` routes timing/preemption/hybrid/probability vocabulary to dedicated tools (UPPAAL, TSan/CBMC/TLA+, SpaceEx, PRISM, ...).
+- `logicprobe_compose_verify`: composition verification of two or more state machines (rendezvous handshake semantics) reporting C1 composition deadlock / C2 rendezvous never fires.
 - Together with the embedded-workbench bundle's Plan Verification Gate, this closes the claim-verification loop in dsh.
 
 Install: see [`.dsh/INSTALL.md`](.dsh/INSTALL.md) (four options, from plain skill copy to `dsh plugin add`).

@@ -388,7 +388,7 @@ When a probe finds a counter-example, classify it:
 
 ### Model Fidelity Warning
 
-The Python model is an APPROXIMATION. It models state transitions, not execution semantics. A model that passes all 21 checks (S1-S8 structural, A1-A13 adversarial) means the plan's LOGIC is consistent — NOT that the implementation will work. Always follow logic verification with code-level review.
+The Python model is an APPROXIMATION. It models state transitions, not execution semantics. A model that passes all 22 checks (S1-S8 structural, A1-A14) means the plan's LOGIC is consistent — NOT that the implementation will work. Always follow logic verification with code-level review.
 
 ## Refactoring Verification
 
@@ -507,7 +507,7 @@ Manual verification takes longer but produces identical-quality findings. The ke
 6b. No Python → use Manual Verification Mode (see above) — execute each check step by step
 7. Extract model → show transition table → GET USER CONFIRMATION
 8. Run Phase 2a (8 structural primitives) → log results
-9. Run Phase 2b (13 adversarial probes) → log results
+9. Run Phase 2b (14 adversarial probes) → log results
 10. Classify counter-examples (true positive / model error / acceptable risk)
 11. Feed confirmed findings into Phase 3 (gap analysis)
 12. Include in Phase 5 (structured output)

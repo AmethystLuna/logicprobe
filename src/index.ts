@@ -36,6 +36,7 @@ import { FileSystemSkillProvider } from '@deepseek-ai/dsh-skill-filesystem'
 import { logicProbeVerifyTool } from './tool.js'
 import { logicProbeDataModelVerifyTool, DATA_ENGINE_SCHEMA_VERSION } from './data-tool.js'
 import { logicProbeConcurrencyScanTool } from './concurrency-tool.js'
+import { logicProbeComposeTool } from './compose-tool.js'
 import { ENGINE_SCHEMA_VERSION } from './engine.js'
 
 export const name = 'logicprobe'
@@ -171,7 +172,7 @@ interface SystemPromptLike {
  * lets the model read this plugin's runtime status without guessing. Mirrors
  * the registration pattern of the official dsh-tool-cordis host providers.
  */
-function inspectProvider(config: Config, isToolRegistered: () => boolean, isDataToolRegistered: () => boolean, isConcurrencyToolRegistered: () => boolean): HostCordisInspectProviderRegistration {
+function inspectProvider(config: Config, isToolRegistered: () => boolean, isDataToolRegistered: () => boolean, isConcurrencyToolRegistered: () => boolean, isComposeToolRegistered: () => boolean): HostCordisInspectProviderRegistration {
   return {
     manifest: {
       id: 'logicprobe',
@@ -195,10 +196,11 @@ function inspectProvider(config: Config, isToolRegistered: () => boolean, isData
               toolRegistered: { type: 'boolean', description: 'Whether the logicprobe_verify tool is registered on ctx.tools.' },
               dataToolRegistered: { type: 'boolean', description: 'Whether the logicprobe_datamodel_verify tool is registered on ctx.tools.' },
               concurrencyToolRegistered: { type: 'boolean', description: 'Whether the logicprobe_concurrency_scan tool is registered on ctx.tools.' },
+              composeToolRegistered: { type: 'boolean', description: 'Whether the logicprobe_compose_verify tool is registered on ctx.tools.' },
               engineSchemaVersion: { type: 'integer', description: 'Model schema version the bundled state-machine verification engine accepts.' },
               dataEngineSchemaVersion: { type: 'integer', description: 'Model schema version the bundled data-model verification engine accepts.' },
             },
-            required: ['enabled', 'gateContentLength', 'interaction', 'toolRegistered', 'dataToolRegistered', 'concurrencyToolRegistered', 'engineSchemaVersion', 'dataEngineSchemaVersion'],
+            required: ['enabled', 'gateContentLength', 'interaction', 'toolRegistered', 'dataToolRegistered', 'concurrencyToolRegistered', 'composeToolRegistered', 'engineSchemaVersion', 'dataEngineSchemaVersion'],
             additionalProperties: false,
           },
         },
@@ -213,6 +215,7 @@ function inspectProvider(config: Config, isToolRegistered: () => boolean, isData
           toolRegistered: isToolRegistered(),
           dataToolRegistered: isDataToolRegistered(),
           concurrencyToolRegistered: isConcurrencyToolRegistered(),
+          composeToolRegistered: isComposeToolRegistered(),
           engineSchemaVersion: ENGINE_SCHEMA_VERSION,
           dataEngineSchemaVersion: DATA_ENGINE_SCHEMA_VERSION,
         }
@@ -230,13 +233,14 @@ export function apply(ctx: Context, config: Config): void {
   let toolRegistered = false
   let dataToolRegistered = false
   let concurrencyToolRegistered = false
+  let composeToolRegistered = false
   let modeContextRegistered = false
   const registerProvider = (): void => {
     if (providerRegistered) return
     const inspect = ctx.get('cordisInspect')
     if (inspect === undefined) return
     try {
-      ctx.effect(() => inspect.register(inspectProvider(config, () => toolRegistered, () => dataToolRegistered, () => concurrencyToolRegistered)), 'logicprobe: inspect provider')
+      ctx.effect(() => inspect.register(inspectProvider(config, () => toolRegistered, () => dataToolRegistered, () => concurrencyToolRegistered, () => composeToolRegistered)), 'logicprobe: inspect provider')
       providerRegistered = true
     } catch (err) {
       console.warn('[logicprobe] inspect provider registration failed', err)
@@ -250,9 +254,11 @@ export function apply(ctx: Context, config: Config): void {
       ctx.effect(() => tools.register(logicProbeVerifyTool), 'logicprobe: verify tool')
       ctx.effect(() => tools.register(logicProbeDataModelVerifyTool), 'logicprobe: data verify tool')
       ctx.effect(() => tools.register(logicProbeConcurrencyScanTool), 'logicprobe: concurrency scan tool')
+      ctx.effect(() => tools.register(logicProbeComposeTool), 'logicprobe: compose tool')
       toolRegistered = true
       dataToolRegistered = true
       concurrencyToolRegistered = true
+      composeToolRegistered = true
     } catch (err) {
       console.warn('[logicprobe] logicprobe_verify/logicprobe_datamodel_verify tool registration failed', err)
     }

@@ -15,7 +15,7 @@
 
 - 运行时状态 = `(state, vars)`，`vars` 仅 integer / boolean（`engine.ts` 的 `RuntimeState`）；
 - 事件按序步进，状态空间 BFS 穷举（上限 `maxStates` 10000）；
-- 检查全是 **定性** 性质：S1-S8（可达/死锁/活性/确定性/完备性/不变量/单调）+ A1-A13（意外事件、交错、置换、配对对称、边界、资源、最短反例、幂等、必达、顺序、原子性、预算/最坏路径代价、概率可达）+ D1-D4（前后回归）；
+- 检查全是 **定性** 性质：S1-S8（可达/死锁/活性/确定性/完备性/不变量/单调）+ A1-A14（意外事件、交错、置换、配对对称、边界、资源、最短反例、幂等、必达、顺序、原子性、预算/最坏路径代价、概率可达、期限）+ D1-D4（前后回归）；
 - 守卫是变量上的静态布尔表达式（`<`/`>`/`==`/`!=` 与 all/any/not），没有时钟、没有表达式算术；
 - 官方文档自行划定的边界（`references/logic-verification-guide.md` Known Limitations / Model Fidelity Warning）：
   - *「The Python model does not simulate real-time constraints」* — 时间维缺席；
@@ -45,7 +45,7 @@
 
 | # | 缺失语义维度 | 类别 | 现状 / 现有机制 | 仍无法验证的声称类型 | 代表场景 | 外部工具域 |
 |---|---|---|---|---|---|---|
-| D1 | 时间（timed） | C（可部分 B） | 计数器+tick 近似；报告 `coverageNotes` 提示并路由 UPPAAL | 「500ms 内必达 SAFE」「不 miss deadline」 | 看门狗、超时预算、周期任务 | UPPAAL / IMITATOR |
+| D1 | 时间（timed） | C → **离散部分关闭** | **A14 期限**（state `maxTicks` + `tickEvents`，按 tick 计驻留）；dense-time 与真实 deadline 仍路由 UPPAAL | 离散 tick 语义下「≤2 tick 内必须离开」可查；稠密时间/毫秒级真实期限不可查 | 看门狗喂狗期限、周期任务预算 | UPPAAL / IMITATOR（dense-time） |
 | D2 | 执行代价 / WCET（性能敏感） | C → **部分关闭（P0-a）** | `cost`（缺省 1）+ `budget` 不变量 + A12（最短超预算反例、正成本环=无界）；无 budget 时 A12_COST_WITHOUT_BUDGET 提示 | 真实 WCET / 执行时间测量（cost 只是模型标注） | 表驱动分发器、临界区长度 | aiT / RapiTime（二进制级） |
 | D3 | 抢占 / 真并发 | A（明示不覆盖） | `concurrentPairs` 交错 + 扫描 `suggestions`(TSan/CBMC/TLA+/RTOS) + coverageNotes | 「ISR 与任务间无竞争」「无优先级反转」 | ISR 推进 + 主循环消费 | TLA+ / CBMC / TSan / RTOS 专项 |
 | D4 | 连续-离散混合（hybrid） | A | coverageNotes 提示并路由 SpaceEx/Flow*/Stateflow | 「切换后稳定」「无抖动」 | 控制律切换、FOC 模式切换 | SpaceEx / Flow* / Stateflow |
@@ -65,8 +65,8 @@
 
 ### D1 时间维 —— 实时 / 定时状态机（timed automata）
 
-- 现状：时间只能建模成「整数计数器 + tick 事件 + 守卫」；报告对 timeout/watchdog/timer/deadline 等词汇给出 `coverageNotes` 并路由 UPPAAL。
-- 缺口：没有时钟变量、没有「状态内时间不变量（clock ≤ deadline）」、没有真正的期限/超时进度语义。
+- 现状（A14 已落地）：state `maxTicks` + 顶层 `tickEvents`，A14 在进入状态后按 tick 计数驻留，超过期限报 `A14_DEADLINE_MISS` 并给路径；缺 `tickEvents` 时给 `A14_NO_TICK_EVENTS` 提示。
+- 仍缺（路由）：稠密时间时钟不变量、真实毫秒级期限/周期语义——需 timed 模型检查器（UPPAAL 等）。
 - 扩展切口：新增 `clock` 变量种类 + 期限类不变量（或独立的 `TimedLogicModelV1`）；状态空间爆炸需沿用 maxStates 截断并明示。
 
 ### D2 执行代价维 —— 性能敏感 / 最坏情形（cost / WCET）【控制系统最贴切】
@@ -125,9 +125,9 @@
 | `coverageNotes` 扩到 hybrid/概率词汇（SpaceEx/PRISM 路由） | D4/D8 | 报告增强 | ✅ 已实现（7a9af54），全绿 |
 | 并发扫描绝对声称带 `suggestions` 工具建议 | D3 | 扫描增强 | ✅ 已实现（52151ee），全绿 |
 | 外部工具路由表（`gap-routing-guide.md` + SKILL/schema/README 同步） | A 类全域 | 文档 | ✅ 已实现（本轮文档提交） |
-| **DTMC 离散概率可达**：transition `weight` + `probability` 不变量（P(到达 target) ≥/≤ p，值迭代） | D8 | 新检查（A13） | ✅ 已实现（本轮，本地提交），全绿 |
-| **双机组合可达性 / 跨机契约表** | D6 | 引擎函数（v1） | ✅ 已实现（`runCompositionVerification`，C1/C2，本地提交）；DSH 工具封装待续 |
-| `clock`/deadline 离散 tick 版（进入重置 + K tick 内必达） | D1 | 引擎增强 | ⏳ 规划自研（P2；dense-time 全量不自研） |
+| **DTMC 离散概率可达**：transition `weight` + `probability` 不变量（P(到达 target) ≥/≤ p，值迭代） | D8 | 新检查（A13） | ✅ 已实现（A13），全绿 |
+| **双机组合可达性 / 跨机契约表** | D6 | 引擎函数 → N 机 | ✅ 已实现（`runCompositionVerification` 支持 N 机，C1/C2）；DSH 工具 `logicprobe_compose_verify` 已注册（本地提交） |
+| `clock`/deadline 离散 tick 版（进入重置 + K tick 内必达） | D1 | 引擎增强（A14） | ✅ 已实现（A14，本地提交）；dense-time 全量不自研 |
 | statechart 自动展平 + round-trip 确认 | D5 | 工作流工具 | ⏳ 未实现 |
 | 文档散文级「域声称扫描」`runDomainScan` | D1/D4/D8 | 旁路新出口 | ⏳ 可选（与 coverageNotes 互补） |
 | 真并发抢占证明 / hybrid 稳定性 / 精确 WCET / dense-time 全量 / 连续时间概率 | D3/D4/D2/D1/D8 | 明确不自研 | ⛔ 语义模型边界（需二进制/方程/实测输入），保持路由 |
@@ -157,7 +157,7 @@
 
 ### A. 现有检查索引（供缺口映射）
 
-- 状态机：S1 可达 / S2 死锁 / S3 活性 / S4 确定性 / S5 事件完备 / S6 守卫完备 / S7 不变量 / S8 单调；A1 意外事件 / A2 竞态交错 / A3 顺序置换 / A4 配对对称（含 onEntry/onExit 动作）/ A5 边界 / A6 资源注入 / A7 最短反例 / A8 幂等重放 / A9 必达 / A10 顺序 / A11 原子性 / A12 预算（最坏路径代价） / A13 概率可达（weight+probability，DTMC 值迭代）；
+- 状态机：S1 可达 / S2 死锁 / S3 活性 / S4 确定性 / S5 事件完备 / S6 守卫完备 / S7 不变量 / S8 单调；A1 意外事件 / A2 竞态交错 / A3 顺序置换 / A4 配对对称（含 onEntry/onExit 动作）/ A5 边界 / A6 资源注入 / A7 最短反例 / A8 幂等重放 / A9 必达 / A10 顺序 / A11 原子性 / A12 预算（最坏路径代价） / A13 概率可达（weight+probability，DTMC 值迭代） / A14 期限（maxTicks+tickEvents，离散 tick）；
   D1-D4 前后回归。
 - 数据模型：DS1-DS4 / DA1-DA12 / DD1-DD4（镜像 S/A/D）。
 
@@ -172,7 +172,7 @@
 
 ### C. 证据引用清单
 
-- `src/engine.ts`：`LogicModelV1`、`RuntimeState{state, vars}`、S/A/D 检查实现、A12/A13/coverageNotes、组合 C1/C2；
+- `src/engine.ts`：`LogicModelV1`、`RuntimeState{state, vars}`、S/A/D 检查实现、A12/A13/A14/coverageNotes、组合 C1/C2；
 - `src/data-engine.ts`：`DataModelV1`、DS/DA/DD 实现；
 - `src/concurrency.ts` + `skills/logicprobe/references/concurrency-risk-guide.md`：并发挖掘 + 绝对声称 suggestions；
 - `skills/logicprobe/references/logic-verification-guide.md`：Known Limitations / Model Fidelity Warning；
