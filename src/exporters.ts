@@ -137,7 +137,7 @@ function exportTla(ex: ExportedModel): ExportResult {
   const typeVar = (model.variables ?? []).map((v) => v.name + ' ' + MEM + ' ' + String(numValue(v.min ?? 0)) + '..' + String(Math.max(1, numValue(v.max ?? 1)))).join(' ' + CONJ + ' ')
   const initParts = ['pc = "' + initId + '"'].concat((model.variables ?? []).map((v) => v.name + ' = ' + String(numValue(v.init)))).join(' ' + CONJ + ' ')
   const nextParts = model.transitions.map((tr) => {
-    const guard = guardExpr(tr.guard, CONJ, DISJ, '~', (v) => v)
+    const guard = guardExpr(tr.guard, CONJ, DISJ, '~', (v) => v).replace(/ == /g, ' = ').replace(/ != /g, ' /= ')
     const updates: string[] = []
     for (const u of tr.updates ?? []) {
       const value = u.value ?? 1
@@ -165,8 +165,6 @@ function exportTla(ex: ExportedModel): ExportResult {
     'Next ==\n' + nextParts + '\n' +
     (props.length ? '\n' + props.join('\n\n') + '\n' : '') +
     '====\n'
-  // TLA uses '=' / '/=' for equality/inequality; leaf guards are emitted with '=='/'!='
-  spec = spec.replace(/ == /g, ' = ').replace(/ != /g, ' /= ')
   const extras: Record<string, string> = props.length ? { properties: props.join('\n') + '\n' } : {}
   return { format: 'tla', primary: spec, extras, warnings }
 }

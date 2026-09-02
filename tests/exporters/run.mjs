@@ -61,6 +61,12 @@ test('tla guard equality/inequality mapping', () => {
   const ne = { schemaVersion: 1, init: 'A', states: [{ id: 'A' }, { id: 'B', terminal: true }], variables: [{ name: 'k', kind: 'integer', init: 0, min: 0, max: 2 }], transitions: [{ from: 'A', event: 'go', to: 'B', guard: { variable: 'k', op: '!=', value: 1 } }] }
   const outNe = exportModel(ne, 'tla')
   if (!outNe.primary.includes('k /= 1')) throw new Error('TLA guard must use /= for inequality')
+  for (const def of ['TypeOK ==', 'States ==', 'Init ==', 'Next ==']) {
+    if (!outEq.primary.includes(def)) throw new Error('definition operator must keep == : missing ' + def)
+  }
+  if (outEq.primary.includes('CheckSafety') && !outEq.primary.includes('CheckSafety ==')) {
+    throw new Error('CheckSafety definition must keep ==')
+  }
 })
 
 test('invalid model rejected', () => {
