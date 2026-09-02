@@ -87,8 +87,10 @@ model calls were not exercised (no real provider key used).
   declared DSH release. Regression-checked with harnessed `agent/pre-step`
   runs against both session event-source shapes (12/12 pass) in addition to
   the per-release boot matrix above.
-- 0.5.5 was unpublished from npm because its `dsh.compatibility.dsh` range
-  (`^0.1.2-alpha.3`) admits 0.1.2-alpha.4 while the released bundle predates
-  the alpha.4 session API fix; installs under alpha.4 should use 0.5.6.
+- 0.5.5 is deprecated on npm with a warning pointing to 0.5.6 (npmjs blocks
+  `npm unpublish` for automation tokens under its 2FA write policy): its
+  `dsh.compatibility.dsh` range (`^0.1.2-alpha.3`) admits 0.1.2-alpha.4 while
+  the released bundle predates the alpha.4 session API fix. Installs under
+  0.1.2-alpha.4 resolve to 0.5.6 (published as `latest`).
 - `dsh.engines.dsh` is `>=0.1.0-rc.7`, matching the verified rc.7 result.
 - Windows-only evidence; other platforms were not exercised.
