@@ -12,7 +12,7 @@ ctx.provide('cordisInspect', { register(provider) { inspectProvider = provider; 
 const mod = await import('../lib/index.js')
 mod.apply(ctx, { enabled: true, gateContent: 'GATE', interaction: 'follow-approval' })
 
-if (toolsRegistered !== 4) throw new Error('expected four tool registrations, got ' + toolsRegistered)
+if (toolsRegistered !== 5) throw new Error('expected five tool registrations, got ' + toolsRegistered)
 if (promptContext === undefined) throw new Error('system prompt context was not registered')
 if (promptContext.name !== 'logicprobe:mode') throw new Error('unexpected context name: ' + promptContext.name)
 if (promptContext.order !== 118) throw new Error('unexpected context order: ' + promptContext.order)
@@ -30,6 +30,7 @@ if (status.toolRegistered !== true) throw new Error('inspect status toolRegister
 if (status.dataToolRegistered !== true) throw new Error('inspect status dataToolRegistered should be true')
 if (status.concurrencyToolRegistered !== true) throw new Error('inspect status concurrencyToolRegistered should be true')
 if (status.composeToolRegistered !== true) throw new Error('inspect status composeToolRegistered should be true')
+if (status.exportToolRegistered !== true) throw new Error('inspect status exportToolRegistered should be true')
 if (status.engineSchemaVersion !== 1) throw new Error('inspect status engineSchemaVersion should be 1')
 if (status.dataEngineSchemaVersion !== 1) throw new Error('inspect status dataEngineSchemaVersion should be 1')
 if (status.interaction !== 'follow-approval') throw new Error('inspect status interaction mismatch')
