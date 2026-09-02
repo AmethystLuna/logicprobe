@@ -54,12 +54,12 @@ function leafExpr(node: { variable: string; op: string; value: number | boolean 
   return varName(node.variable) + ' ' + node.op + ' ' + String(numValue(node.value))
 }
 
-function guardExpr(node: GuardNode | undefined, and: string, or: string, not: string, varName: (v: string) => string): string {
+function guardExpr(node: GuardNode | undefined, and: string, or: string, not: string, varName: (v: string) => string, opFor: (op: string) => string = (op) => op): string {
   if (node === undefined) return ''
-  if ('variable' in node) return leafExpr(node, varName)
-  if ('all' in node) return '(' + node.all.map((g) => guardExpr(g, and, or, not, varName)).join(' ' + and + ' ') + ')'
-  if ('any' in node) return '(' + node.any.map((g) => guardExpr(g, and, or, not, varName)).join(' ' + or + ' ') + ')'
-  if ('not' in node) return not + '(' + guardExpr(node.not, and, or, not, varName) + ')'
+  if ('variable' in node) return varName(node.variable) + ' ' + opFor(node.op) + ' ' + String(numValue(node.value))
+  if ('all' in node) return '(' + node.all.map((g) => guardExpr(g, and, or, not, varName, opFor)).join(' ' + and + ' ') + ')'
+  if ('any' in node) return '(' + node.any.map((g) => guardExpr(g, and, or, not, varName, opFor)).join(' ' + or + ' ') + ')'
+  if ('not' in node) return not + '(' + guardExpr(node.not, and, or, not, varName, opFor) + ')'
   return 'true'
 }
 
@@ -128,38 +128,45 @@ function exportUppaal(ex: ExportedModel): ExportResult {
 function exportTla(ex: ExportedModel): ExportResult {
   const { model, stateIds, stateIdOf, initId } = ex
   const warnings: string[] = []
+  const bs = String.fromCharCode(92) // backslash, composed so no escape pitfalls
+  const CONJ = '/' + bs // /\  (TLA conjunction)
+  const DISJ = bs + '/' // \/  (TLA disjunction)
+  const MEM = bs + 'in' // \in membership
+  const NOTIN = bs + 'notin' // \notin
   const variables = ['pc'].concat((model.variables ?? []).map((v) => v.name))
-  const typeVar = (model.variables ?? []).map((v) => v.name + ' \in ' + String(numValue(v.min ?? 0)) + '..' + String(Math.max(1, numValue(v.max ?? 1)))).join(' /\\ ')
-  const initParts = ['pc = "' + initId + '"'].concat((model.variables ?? []).map((v) => v.name + ' = ' + String(numValue(v.init)))).join(' /\\ ')
-  const nextParts = model.transitions.map((t) => {
-    const guard = guardExpr(t.guard, '/\\', '\\/', '~', (v) => v)
+  const typeVar = (model.variables ?? []).map((v) => v.name + ' ' + MEM + ' ' + String(numValue(v.min ?? 0)) + '..' + String(Math.max(1, numValue(v.max ?? 1)))).join(' ' + CONJ + ' ')
+  const initParts = ['pc = "' + initId + '"'].concat((model.variables ?? []).map((v) => v.name + ' = ' + String(numValue(v.init)))).join(' ' + CONJ + ' ')
+  const nextParts = model.transitions.map((tr) => {
+    const guard = guardExpr(tr.guard, CONJ, DISJ, '~', (v) => v)
     const updates: string[] = []
-    for (const u of t.updates ?? []) {
+    for (const u of tr.updates ?? []) {
       const value = u.value ?? 1
       if (u.op === 'set') updates.push(u.variable + ' = ' + String(value))
       else if (u.op === 'inc') updates.push(u.variable + ' = ' + u.variable + ' + ' + String(value))
       else updates.push(u.variable + ' = ' + u.variable + ' - ' + String(value))
     }
-    const pcPart = 'pc' + "'" + ' = "' + stateIdOf.get(t.to) + '"'
-    const rest = updates.length ? ' /\\ ' + updates.join(' /\\ ') : ''
-    const guardPart = guard === '' ? 'pc = "' + stateIdOf.get(t.from) + '"' : 'pc = "' + stateIdOf.get(t.from) + '" /\\ ' + guard
-    return '\\/ ' + guardPart + ' /\\ ' + pcPart + rest
+    const pcPart = 'pc' + "'" + ' = "' + stateIdOf.get(tr.to) + '"'
+    const rest = updates.length ? ' ' + CONJ + ' ' + updates.join(' ' + CONJ + ' ') : ''
+    const guardPart = guard === '' ? 'pc = "' + stateIdOf.get(tr.from) + '"' : 'pc = "' + stateIdOf.get(tr.from) + '" ' + CONJ + ' ' + guard
+    return DISJ + ' ' + guardPart + ' ' + CONJ + ' ' + pcPart + rest
   }).join('\n')
   const forbids = forbiddenIndexes(ex).map((i) => '"' + stateIds[i] + '"')
   const props: string[] = []
-  if (forbids.length) props.push('CheckSafety == [] (pc \\notin {' + forbids.join(', ') + '})')
+  if (forbids.length) props.push('CheckSafety == [] (pc ' + NOTIN + ' {' + forbids.join(', ') + '})')
   for (const invariant of model.invariants ?? []) {
     if (invariant.kind !== 'never-states') warnings.push('TLA+ v1 does not translate invariant kind ' + invariant.kind + '; only never-states becomes a property.')
   }
-  const spec = '---- MODULE LogicProbe ----\n' +
+  let spec = '---- MODULE LogicProbe ----\n' +
     'EXTENDS Integers\n' +
     'VARIABLES ' + variables.join(', ') + '\n' +
     'States == {' + stateIds.map((s) => '"' + s + '"').join(', ') + '}\n' +
-    'TypeOK == pc \in States' + (typeVar === '' ? '' : ' /\\ ' + typeVar) + '\n' +
+    'TypeOK == pc ' + MEM + ' States' + (typeVar === '' ? '' : ' ' + CONJ + ' ' + typeVar) + '\n' +
     'Init == ' + initParts + '\n' +
     'Next ==\n' + nextParts + '\n' +
     (props.length ? '\n' + props.join('\n\n') + '\n' : '') +
     '====\n'
+  // TLA uses '=' / '/=' for equality/inequality; leaf guards are emitted with '=='/'!='
+  spec = spec.replace(/ == /g, ' = ').replace(/ != /g, ' /= ')
   const extras: Record<string, string> = props.length ? { properties: props.join('\n') + '\n' } : {}
   return { format: 'tla', primary: spec, extras, warnings }
 }

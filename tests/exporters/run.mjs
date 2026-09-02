@@ -53,6 +53,16 @@ test('spin export shape', () => {
   if (!(out.extras?.properties ?? '').includes('ltl safety')) throw new Error('never-states property missing from promela')
 })
 
+test('tla guard equality/inequality mapping', () => {
+  const eq = { schemaVersion: 1, init: 'A', states: [{ id: 'A' }, { id: 'B', terminal: true }], variables: [{ name: 'k', kind: 'integer', init: 0, min: 0, max: 2 }], transitions: [{ from: 'A', event: 'go', to: 'B', guard: { variable: 'k', op: '==', value: 1 } }] }
+  const outEq = exportModel(eq, 'tla')
+  if (outEq.primary.includes(' == 1')) throw new Error('TLA guard must not use == (got: k == 1)')
+  if (!outEq.primary.includes('k = 1')) throw new Error('TLA guard must use = for equality')
+  const ne = { schemaVersion: 1, init: 'A', states: [{ id: 'A' }, { id: 'B', terminal: true }], variables: [{ name: 'k', kind: 'integer', init: 0, min: 0, max: 2 }], transitions: [{ from: 'A', event: 'go', to: 'B', guard: { variable: 'k', op: '!=', value: 1 } }] }
+  const outNe = exportModel(ne, 'tla')
+  if (!outNe.primary.includes('k /= 1')) throw new Error('TLA guard must use /= for inequality')
+})
+
 test('invalid model rejected', () => {
   let thrown = false
   try { exportModel({ schemaVersion: 1, init: 'X', states: [], transitions: [] }, 'tla') } catch (error) { thrown = String(error).includes('model invalid') }
