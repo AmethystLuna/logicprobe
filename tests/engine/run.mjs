@@ -90,6 +90,25 @@ const cases = [
     },
   },
   {
+    name: 'retry-bounded.json',
+    errors: 0,
+    findings: [],
+  },
+  {
+    name: 'retry-unbounded.json',
+    errors: 1,
+    findings: [{ check: 'A12', code: 'A12_BUDGET_OVER' }],
+    assert(report) {
+      const a12 = report.checks.find((check) => check.id === 'A12')
+      const finding = a12?.findings.find((entry) => entry.code === 'A12_BUDGET_OVER')
+      const path = finding?.path
+      if (finding?.evidence?.unbounded !== true) throw new Error('unbounded retry must be flagged as unbounded')
+      if (path === undefined || path.length < 2 || path[path.length - 1].event !== 'timeout') {
+        throw new Error('unbounded retry witness must loop back through timeout, got ' + JSON.stringify(path))
+      }
+    },
+  },
+  {
     name: 'budget-over.json',
     errors: 1,
     findings: [{ check: 'A12', code: 'A12_BUDGET_OVER' }],

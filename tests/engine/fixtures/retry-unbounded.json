@@ -1,0 +1,48 @@
+{
+  "schemaVersion": 1,
+  "init": "IDLE",
+  "states": [
+    {
+      "id": "IDLE"
+    },
+    {
+      "id": "RETRY"
+    },
+    {
+      "id": "SUCCESS",
+      "terminal": true
+    },
+    {
+      "id": "FAIL",
+      "terminal": true
+    }
+  ],
+  "transitions": [
+    {
+      "from": "IDLE",
+      "event": "start",
+      "to": "RETRY",
+      "cost": 5
+    },
+    {
+      "from": "RETRY",
+      "event": "timeout",
+      "to": "RETRY",
+      "cost": 8
+    },
+    {
+      "from": "RETRY",
+      "event": "succeed",
+      "to": "SUCCESS",
+      "cost": 10
+    }
+  ],
+  "invariants": [
+    {
+      "id": "retry-budget",
+      "description": "retry loop stays within 40 cost units",
+      "kind": "budget",
+      "budget": 40
+    }
+  ]
+}

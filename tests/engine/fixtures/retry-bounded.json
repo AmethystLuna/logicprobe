@@ -1,0 +1,80 @@
+{
+  "schemaVersion": 1,
+  "init": "IDLE",
+  "states": [
+    {
+      "id": "IDLE"
+    },
+    {
+      "id": "RETRY"
+    },
+    {
+      "id": "SUCCESS",
+      "terminal": true
+    },
+    {
+      "id": "FAIL",
+      "terminal": true
+    }
+  ],
+  "variables": [
+    {
+      "name": "attempts",
+      "kind": "integer",
+      "init": 0,
+      "min": 0,
+      "max": 3,
+      "monotonic": "inc"
+    }
+  ],
+  "transitions": [
+    {
+      "from": "IDLE",
+      "event": "start",
+      "to": "RETRY",
+      "cost": 5
+    },
+    {
+      "from": "RETRY",
+      "event": "timeout",
+      "guard": {
+        "variable": "attempts",
+        "op": "<",
+        "value": 3
+      },
+      "to": "RETRY",
+      "cost": 8,
+      "updates": [
+        {
+          "variable": "attempts",
+          "op": "inc"
+        }
+      ]
+    },
+    {
+      "from": "RETRY",
+      "event": "timeout",
+      "guard": {
+        "variable": "attempts",
+        "op": ">=",
+        "value": 3
+      },
+      "to": "FAIL",
+      "cost": 2
+    },
+    {
+      "from": "RETRY",
+      "event": "succeed",
+      "to": "SUCCESS",
+      "cost": 10
+    }
+  ],
+  "invariants": [
+    {
+      "id": "retry-budget",
+      "description": "bounded retry mission stays within 40 cost units",
+      "kind": "budget",
+      "budget": 40
+    }
+  ]
+}
