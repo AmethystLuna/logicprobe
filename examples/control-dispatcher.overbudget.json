@@ -1,0 +1,113 @@
+{
+  "schemaVersion": 1,
+  "init": "RESET",
+  "states": [
+    {
+      "id": "RESET"
+    },
+    {
+      "id": "BOOT"
+    },
+    {
+      "id": "READY"
+    },
+    {
+      "id": "RUN",
+      "onEntry": [
+        "sync_lock"
+      ],
+      "onExit": [
+        "sync_unlock"
+      ]
+    },
+    {
+      "id": "FAULT"
+    },
+    {
+      "id": "SAFE",
+      "terminal": true
+    },
+    {
+      "id": "OFF",
+      "terminal": true
+    }
+  ],
+  "transitions": [
+    {
+      "from": "RESET",
+      "event": "power_ok",
+      "to": "BOOT",
+      "cost": 10
+    },
+    {
+      "from": "BOOT",
+      "event": "calibrate_done",
+      "to": "READY",
+      "cost": 40
+    },
+    {
+      "from": "BOOT",
+      "event": "abort",
+      "to": "OFF",
+      "cost": 2
+    },
+    {
+      "from": "READY",
+      "event": "engage",
+      "to": "RUN",
+      "cost": 5
+    },
+    {
+      "from": "READY",
+      "event": "shutdown",
+      "to": "OFF",
+      "cost": 2
+    },
+    {
+      "from": "RUN",
+      "event": "cmd_done",
+      "to": "OFF",
+      "cost": 5
+    },
+    {
+      "from": "RUN",
+      "event": "watchdog_expiry",
+      "to": "FAULT",
+      "cost": 60
+    },
+    {
+      "from": "FAULT",
+      "event": "recover_ok",
+      "to": "SAFE",
+      "cost": 20
+    },
+    {
+      "from": "FAULT",
+      "event": "shutdown",
+      "to": "OFF",
+      "cost": 2
+    }
+  ],
+  "invariants": [
+    {
+      "id": "mission-budget",
+      "description": "any mission path completes within 100 cost units",
+      "kind": "budget",
+      "budget": 100
+    },
+    {
+      "id": "calibrate-first",
+      "description": "calibrate_done must precede engage",
+      "kind": "event-before-state",
+      "event": "calibrate_done",
+      "state": "RUN"
+    }
+  ],
+  "resourcePairs": [
+    {
+      "resource": "mode-register",
+      "acquireEvent": "sync_lock",
+      "releaseEvent": "sync_unlock"
+    }
+  ]
+}
