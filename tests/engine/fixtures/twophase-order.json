@@ -1,0 +1,44 @@
+{
+  "schemaVersion": 1,
+  "init": "START",
+  "states": [
+    {
+      "id": "START"
+    },
+    {
+      "id": "PREPARED"
+    },
+    {
+      "id": "COMMITTED",
+      "terminal": true
+    }
+  ],
+  "transitions": [
+    {
+      "from": "START",
+      "event": "commit",
+      "to": "COMMITTED"
+    },
+    {
+      "from": "START",
+      "event": "prepare",
+      "to": "PREPARED"
+    },
+    {
+      "from": "PREPARED",
+      "event": "commit",
+      "to": "COMMITTED"
+    }
+  ],
+  "invariants": [
+    {
+      "id": "tpc-order",
+      "description": "prepare before commit",
+      "kind": "sequence",
+      "events": [
+        "prepare",
+        "commit"
+      ]
+    }
+  ]
+}

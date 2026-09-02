@@ -1,0 +1,38 @@
+{
+  "schemaVersion": 1,
+  "init": "LISTEN",
+  "states": [
+    {
+      "id": "LISTEN"
+    },
+    {
+      "id": "ESTABLISHED"
+    },
+    {
+      "id": "FIN_WAIT",
+      "terminal": true
+    }
+  ],
+  "transitions": [
+    {
+      "from": "LISTEN",
+      "event": "syn",
+      "to": "ESTABLISHED"
+    },
+    {
+      "from": "LISTEN",
+      "event": "rst",
+      "to": "FIN_WAIT"
+    },
+    {
+      "from": "ESTABLISHED",
+      "event": "data",
+      "to": "ESTABLISHED"
+    },
+    {
+      "from": "ESTABLISHED",
+      "event": "fin",
+      "to": "FIN_WAIT"
+    }
+  ]
+}

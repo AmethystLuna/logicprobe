@@ -1,0 +1,96 @@
+{
+  "schemaVersion": 1,
+  "init": "GAME",
+  "states": [
+    {
+      "id": "GAME"
+    },
+    {
+      "id": "BROKE",
+      "terminal": true
+    },
+    {
+      "id": "JACKPOT",
+      "terminal": true
+    }
+  ],
+  "variables": [
+    {
+      "name": "bankroll",
+      "kind": "integer",
+      "init": 1,
+      "min": 1,
+      "max": 4
+    }
+  ],
+  "transitions": [
+    {
+      "from": "GAME",
+      "event": "lose",
+      "guard": {
+        "variable": "bankroll",
+        "op": "==",
+        "value": 1
+      },
+      "to": "BROKE",
+      "weight": 1
+    },
+    {
+      "from": "GAME",
+      "event": "lose",
+      "guard": {
+        "variable": "bankroll",
+        "op": ">=",
+        "value": 2
+      },
+      "to": "GAME",
+      "weight": 1,
+      "updates": [
+        {
+          "variable": "bankroll",
+          "op": "dec",
+          "value": 1
+        }
+      ]
+    },
+    {
+      "from": "GAME",
+      "event": "win",
+      "guard": {
+        "variable": "bankroll",
+        "op": "<=",
+        "value": 3
+      },
+      "to": "GAME",
+      "weight": 1,
+      "updates": [
+        {
+          "variable": "bankroll",
+          "op": "inc",
+          "value": 1
+        }
+      ]
+    },
+    {
+      "from": "GAME",
+      "event": "win",
+      "guard": {
+        "variable": "bankroll",
+        "op": "==",
+        "value": 4
+      },
+      "to": "JACKPOT",
+      "weight": 1
+    }
+  ],
+  "invariants": [
+    {
+      "id": "ruin-likely",
+      "description": "P(broke before jackpot) = 4/5 for fair coin",
+      "kind": "probability",
+      "target": "BROKE",
+      "op": ">=",
+      "p": 0.75
+    }
+  ]
+}

@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 1,
+  "init": "IDLE",
+  "states": [
+    {
+      "id": "IDLE"
+    },
+    {
+      "id": "COIN"
+    },
+    {
+      "id": "DISPENSE",
+      "terminal": true
+    },
+    {
+      "id": "REFUND",
+      "terminal": true
+    }
+  ],
+  "transitions": [
+    {
+      "from": "IDLE",
+      "event": "insert",
+      "to": "COIN"
+    },
+    {
+      "from": "COIN",
+      "event": "coin",
+      "to": "DISPENSE"
+    },
+    {
+      "from": "COIN",
+      "event": "coin",
+      "to": "REFUND"
+    }
+  ]
+}

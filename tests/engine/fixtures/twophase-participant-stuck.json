@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "init": "START",
+  "states": [
+    {
+      "id": "START"
+    },
+    {
+      "id": "PREPARED"
+    },
+    {
+      "id": "WAITING"
+    },
+    {
+      "id": "COMMITTED",
+      "terminal": true
+    }
+  ],
+  "transitions": [
+    {
+      "from": "START",
+      "event": "begin",
+      "to": "PREPARED"
+    },
+    {
+      "from": "PREPARED",
+      "event": "prepare_ok",
+      "to": "WAITING"
+    },
+    {
+      "from": "PREPARED",
+      "event": "abort",
+      "to": "COMMITTED"
+    }
+  ]
+}

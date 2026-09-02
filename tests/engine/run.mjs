@@ -740,6 +740,104 @@ async function runCompositionTests() {
 
 await runCompositionTests()
 
+// Textbook canon: named cases from the formal-methods / systems literature, each mapped
+// to the check it exercises. Expected outcomes are asserted per case.
+async function runTextbookCanonTests() {
+  const load = async (name) => JSON.parse(readFileSync(new URL(name, root), 'utf8'))
+  const code = (report, checkId, want) => {
+    const c = report.checks.find((entry) => entry.id === checkId)
+    return c !== undefined && c.findings.some((finding) => finding.code === want)
+  }
+
+  // Two-Phase Commit (Gray): participant strands in WAITING with no outgoing transition
+  const tpcStuck = await load('twophase-participant-stuck.json')
+  const stuckReport = runVerification(tpcStuck)
+  if (!code(stuckReport, 'S2', 'S2_NO_TRANSITIONS')) throw new Error('2PC participant deadlock: S2 must fire')
+  assertNoUndefinedValues(stuckReport)
+
+  // Vending machine (classic): one coin event ambiguously leads to both DISPENSE and REFUND
+  const vending = await load('vending-ambiguous.json')
+  const vendReport = runVerification(vending)
+  if (!code(vendReport, 'S4', 'S4_AMBIGUOUS_DEFAULT')) throw new Error('vending ambiguity: S4 must fire')
+  assertNoUndefinedValues(vendReport)
+
+  // Two-Phase Commit ordering: commit before prepare must violate prepare-before-commit
+  const tpcOrder = await load('twophase-order.json')
+  const orderReport = runVerification(tpcOrder)
+  if (!code(orderReport, 'A10', 'A10_SEQUENCE_VIOLATION')) throw new Error('2PC commit-before-prepare: A10 must fire')
+  assertNoUndefinedValues(orderReport)
+
+  // TCP half-close (RFC 793 style): ESTABLISHED silently ignores RST that other states handle
+  const tcp = await load('tcp-missing-rst.json')
+  const tcpReport = runVerification(tcp)
+  if (!code(tcpReport, 'S5', 'S5_UNHANDLED_EVENT')) throw new Error('TCP missing RST handler: S5 must fire')
+  assertNoUndefinedValues(tcpReport)
+
+  // Gambler's ruin (Markov chain textbook): P(broke first) = 4/5 from $1 with a fair coin
+  const ruin = await load('gamblers-ruin.json')
+  const ruinReport = runVerification(ruin)
+  const a13r = ruinReport.checks.find((entry) => entry.id === 'A13')
+  if (a13r === undefined || a13r.findings.length !== 0) throw new Error('gambler ruin 0.8 >= 0.75 must pass: ' + JSON.stringify(a13r?.findings))
+  if (ruinReport.summary.errors !== 0) throw new Error('gambler ruin should have no errors')
+  assertNoUndefinedValues(ruinReport)
+  const ruinClaim = JSON.parse(JSON.stringify(ruin))
+  ruinClaim.invariants[0].p = 0.9
+  const ruinFail = runVerification(ruinClaim)
+  if (!code(ruinFail, 'A13', 'A13_PROBABILITY_VIOLATION')) throw new Error('claiming P>=0.9 must violate the true 0.8')
+  assertNoUndefinedValues(ruinFail)
+
+  // ISR vs task shared counter (embedded classic): event order changes the outcome
+  const counterRace = {
+    schemaVersion: 1, init: 'RUN',
+    states: [{ id: 'RUN' }, { id: 'DONE', terminal: true }],
+    variables: [{ name: 'v', kind: 'integer', init: 0 }],
+    transitions: [
+      { from: 'RUN', event: 'isr_write', to: 'RUN', updates: [{ variable: 'v', op: 'set', value: 1 }] },
+      { from: 'RUN', event: 'task_write', to: 'RUN', updates: [{ variable: 'v', op: 'set', value: 2 }] },
+      { from: 'RUN', event: 'stop', to: 'DONE' },
+    ],
+    concurrentPairs: [['isr_write', 'task_write']],
+  }
+  const raceReport = runVerification(counterRace)
+  if (!code(raceReport, 'A2', 'A2_ORDER_DEPENDENT')) throw new Error('ISR/task write race: A2 must fire')
+  assertNoUndefinedValues(raceReport)
+
+  // Semaphore take without a timeout path (embedded classic): allocation can block forever
+  const semTake = {
+    schemaVersion: 1, init: 'WAIT',
+    states: [{ id: 'WAIT' }, { id: 'READY' }, { id: 'RELEASED' }, { id: 'DONE', terminal: true }],
+    transitions: [
+      { from: 'WAIT', event: 'take', to: 'READY' },
+      { from: 'READY', event: 'give', to: 'RELEASED' },
+      { from: 'RELEASED', event: 'finish', to: 'DONE' },
+    ],
+    resourcePairs: [{ resource: 'queue', acquireEvent: 'take', failEvent: 'timeout', releaseEvent: 'give' }],
+  }
+  const semReport = runVerification(semTake)
+  if (semReport.summary.errors !== 0) throw new Error('semaphore model should have no errors')
+  if (!code(semReport, 'A6', 'A6_NO_FAILURE_HANDLER')) throw new Error('missing timeout handler: A6 must fire')
+  assertNoUndefinedValues(semReport)
+
+  // Webhook redelivery (distributed systems classic): notify is not idempotent
+  const webhook = {
+    schemaVersion: 1, init: 'A',
+    states: [{ id: 'A' }, { id: 'B' }, { id: 'C', terminal: true }],
+    transitions: [
+      { from: 'A', event: 'notify', to: 'B' },
+      { from: 'B', event: 'notify', to: 'C' },
+    ],
+    idempotentEvents: ['notify'],
+  }
+  const webReport = runVerification(webhook)
+  if (!code(webReport, 'A8', 'A8_NOT_IDEMPOTENT')) throw new Error('redelivered notify changes state: A8 must fire')
+  assertNoUndefinedValues(webReport)
+
+  console.log('PASS textbook-canon')
+}
+
+await runTextbookCanonTests()
+
+
 
 
 await runIdempotencyTests()
