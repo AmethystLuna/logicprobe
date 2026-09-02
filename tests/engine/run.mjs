@@ -706,6 +706,31 @@ async function runCompositionTests() {
   }
   assertNoUndefinedValues(termReport)
 
+  // 3-machine chain: all three must be jointly ready on req and on ack
+  const chainA = { schemaVersion: 1, init: 'A0', states: [{ id: 'A0' }, { id: 'A1' }, { id: 'A2' }, { id: 'A3', terminal: true }], transitions: [{ from: 'A0', event: 'start', to: 'A1' }, { from: 'A1', event: 'req', to: 'A2' }, { from: 'A2', event: 'ack', to: 'A3' }] }
+  const chainB = { schemaVersion: 1, init: 'B0', states: [{ id: 'B0' }, { id: 'B1' }, { id: 'B2', terminal: true }], transitions: [{ from: 'B0', event: 'req', to: 'B1' }, { from: 'B1', event: 'ack', to: 'B2' }] }
+  const chainC = { schemaVersion: 1, init: 'C0', states: [{ id: 'C0' }, { id: 'C1' }, { id: 'C2', terminal: true }], transitions: [{ from: 'C0', event: 'req', to: 'C1' }, { from: 'C1', event: 'ack', to: 'C2' }] }
+  const chainOk = runCompositionVerification([chainA, chainB, chainC], { rendezvous: ['req', 'ack'] })
+  if (!chainOk.ok || chainOk.summary.errors !== 0) throw new Error('3-machine chain must pass: ' + JSON.stringify(chainOk.checks))
+  if (chainOk.summary.machineCount !== 3) throw new Error('machineCount should be 3')
+  const c2c = chainOk.checks.find((check) => check.id === 'C2')
+  if (c2c === undefined || c2c.findings.length !== 0) throw new Error('chain rendezvous must fire: ' + JSON.stringify(c2c?.findings))
+  assertNoUndefinedValues(chainOk)
+
+  // 3-machine chain desync: C drops out of the ack handshake -> A/B advance, C is left stranded
+  const chainCdrop = { schemaVersion: 1, init: 'C0', states: [{ id: 'C0' }, { id: 'C1' }], transitions: [{ from: 'C0', event: 'req', to: 'C1' }] }
+  const chainBad = runCompositionVerification([chainA, chainB, chainCdrop], { rendezvous: ['req', 'ack'] })
+  const c1bad = chainBad.checks.find((check) => check.id === 'C1')
+  if (c1bad === undefined || !c1bad.findings.some((finding) => finding.code === 'C1_COMPOSITION_DEADLOCK')) {
+    throw new Error('dropped chain partner must surface as composition deadlock: ' + JSON.stringify(chainBad.checks))
+  }
+  assertNoUndefinedValues(chainBad)
+
+  // fewer than two machines is rejected
+  const one = runCompositionVerification([chainA])
+  if (one.ok) throw new Error('single machine must be rejected')
+  assertNoUndefinedValues(one)
+
   // invalid machine fails cleanly
   const bad = runCompositionVerification([machineA, { schemaVersion: 1, init: 'X', states: [{ id: 'Y' }], transitions: [] }])
   if (bad.ok) throw new Error('invalid machine must fail composition')

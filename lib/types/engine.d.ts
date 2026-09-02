@@ -212,14 +212,16 @@ export declare function guardVariables(guard: GuardNode | undefined): string[];
 export declare function runVerification(input: unknown, options?: VerificationOptions): VerificationReport;
 export interface CompositionStep {
     event: string;
-    by: 'a' | 'b' | 'both';
+    /** Indices of the machines that advanced together on this step. */
+    machines: number[];
 }
 export interface CompositionOptions {
-    /** Events that require BOTH machines to fire together (rendezvous / handshake). */
+    /** Events that require a synchronized multi-machine step (handshake). */
     rendezvous?: string[];
     maxStates?: number;
 }
 export interface CompositionSummary {
+    machineCount: number;
     machines: Array<{
         modelHash: string;
         states: number;
@@ -236,13 +238,14 @@ export interface CompositionReport {
     checks: CheckResult[];
 }
 /**
- * Two-machine composition under a choice of semantics:
- * - a non-rendezvous event advances only the machine that fires it;
- * - a rendezvous event (handshake) fires only when BOTH machines have it enabled
- *   (guards satisfied) and advances both simultaneously;
- * - a terminal machine is stopped: it takes no further part, so a rendezvous with a
- *   terminal machine can never fire.
- * Checks: C1 composition deadlock (a reachable pair where no machine can advance while
- * at least one is not terminal) and C2 rendezvous that can never synchronize.
+ * N-machine composition semantics (documented in dsh-model-schema.md):
+ * - a non-rendezvous event advances exactly ONE non-terminal machine that fires it;
+ * - a rendezvous event (handshake) fires only when AT LEAST TWO machines declare it in
+ *   their alphabet and EVERY such non-terminal machine has it enabled (guards held);
+ *   all participants then advance simultaneously. A machine that is terminal, or whose
+ *   alphabet does not include the event, does not participate;
+ * - a terminal machine is stopped and takes no further part.
+ * Checks: C1 composition deadlock (reachable node where no machine can advance while at
+ * least one is not terminal) and C2 rendezvous that can never fire.
  */
 export declare function runCompositionVerification(machinesInput: unknown[], options?: CompositionOptions): CompositionReport;

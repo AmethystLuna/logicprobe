@@ -2288,21 +2288,23 @@ export function runVerification(input: unknown, options: VerificationOptions = {
 }
 
 // ---------------------------------------------------------------------------
-// Composition verification (two machines, D6)
+// Composition verification (N machines, D6)
 // ---------------------------------------------------------------------------
 
 export interface CompositionStep {
   event: string
-  by: 'a' | 'b' | 'both'
+  /** Indices of the machines that advanced together on this step. */
+  machines: number[]
 }
 
 export interface CompositionOptions {
-  /** Events that require BOTH machines to fire together (rendezvous / handshake). */
+  /** Events that require a synchronized multi-machine step (handshake). */
   rendezvous?: string[]
   maxStates?: number
 }
 
 export interface CompositionSummary {
+  machineCount: number
   machines: Array<{ modelHash: string; states: number; transitions: number }>
   compositeStates: number
   errors: number
@@ -2317,26 +2319,26 @@ export interface CompositionReport {
 }
 
 interface CompositionNode {
-  r1: RuntimeState
-  r2: RuntimeState
+  runtimes: RuntimeState[]
   path: CompositionStep[]
 }
 
 interface CompositionMove {
   next: CompositionNode
   event: string
-  by: 'a' | 'b' | 'both'
+  machines: number[]
 }
 
 /**
- * Two-machine composition under a choice of semantics:
- * - a non-rendezvous event advances only the machine that fires it;
- * - a rendezvous event (handshake) fires only when BOTH machines have it enabled
- *   (guards satisfied) and advances both simultaneously;
- * - a terminal machine is stopped: it takes no further part, so a rendezvous with a
- *   terminal machine can never fire.
- * Checks: C1 composition deadlock (a reachable pair where no machine can advance while
- * at least one is not terminal) and C2 rendezvous that can never synchronize.
+ * N-machine composition semantics (documented in dsh-model-schema.md):
+ * - a non-rendezvous event advances exactly ONE non-terminal machine that fires it;
+ * - a rendezvous event (handshake) fires only when AT LEAST TWO machines declare it in
+ *   their alphabet and EVERY such non-terminal machine has it enabled (guards held);
+ *   all participants then advance simultaneously. A machine that is terminal, or whose
+ *   alphabet does not include the event, does not participate;
+ * - a terminal machine is stopped and takes no further part.
+ * Checks: C1 composition deadlock (reachable node where no machine can advance while at
+ * least one is not terminal) and C2 rendezvous that can never fire.
  */
 export function runCompositionVerification(machinesInput: unknown[], options: CompositionOptions = {}): CompositionReport {
   const models: LogicModelV1[] = []
@@ -2352,49 +2354,66 @@ export function runCompositionVerification(machinesInput: unknown[], options: Co
     }
   })
   const machineSummary = models.map((m, i) => ({ modelHash: hashes[i] ?? '', states: m.states.length, transitions: m.transitions.length }))
-  if (modelFindings.length > 0) {
+  if (modelFindings.length > 0 || models.length < 2) {
+    if (models.length < 2 && modelFindings.length === 0) {
+      modelFindings.push({ code: 'MODEL_INVALID', severity: 'error', message: 'composition requires at least two machines' })
+    }
     return {
       ok: false,
-      summary: { machines: machineSummary, compositeStates: 0, errors: modelFindings.length, warnings: 0, truncated: false },
+      summary: { machineCount: models.length, machines: machineSummary, compositeStates: 0, errors: modelFindings.length, warnings: 0, truncated: false },
       checks: [{ id: 'MODEL', name: 'Machine Validation', status: 'fail', detail: 'composition input validation failed', findings: modelFindings }],
     }
   }
   const rendezvous = new Set(options.rendezvous ?? [])
   const maxStates = options.maxStates ?? DEFAULT_MAX_STATES
+  const machineEventSets = models.map((model) => new Set(model.transitions.map((transition) => transition.event)))
+
   const compositionMoves = (node: CompositionNode): CompositionMove[] => {
     const moves: CompositionMove[] = []
-    const machines: Array<RuntimeState> = [node.r1, node.r2]
-    for (let index = 0; index < 2; index++) {
-      const model = models[index]
-      const runtime = machines[index]
-      if (isTerminal(model, runtime.state)) continue
-      for (const event of allEvents(model)) {
+    // single-machine (non-rendezvous) steps
+    for (let i = 0; i < models.length; i++) {
+      if (isTerminal(models[i], node.runtimes[i].state)) continue
+      for (const event of allEvents(models[i])) {
         if (rendezvous.has(event)) continue
-        for (const next of stepRuntime(model, runtime, event)) {
-          moves.push({
-            next: index === 0 ? { r1: next, r2: node.r2, path: [] } : { r1: node.r1, r2: next, path: [] },
-            event,
-            by: index === 0 ? 'a' : 'b',
-          })
+        for (const next of stepRuntime(models[i], node.runtimes[i], event)) {
+          const runtimes = node.runtimes.slice()
+          runtimes[i] = next
+          moves.push({ next: { runtimes, path: [] }, event, machines: [i] })
         }
       }
     }
+    // synchronized rendezvous steps (>= 2 participants, all enabled)
     for (const event of rendezvous) {
-      if (isTerminal(models[0], node.r1.state) || isTerminal(models[1], node.r2.state)) continue
-      const aOutcomes = stepRuntime(models[0], node.r1, event)
-      if (aOutcomes.length === 0) continue
-      const bOutcomes = stepRuntime(models[1], node.r2, event)
-      if (bOutcomes.length === 0) continue
-      for (const aNext of aOutcomes) {
-        for (const bNext of bOutcomes) {
-          moves.push({ next: { r1: aNext, r2: bNext, path: [] }, event, by: 'both' })
+      const participants: number[] = []
+      for (let i = 0; i < models.length; i++) {
+        if (isTerminal(models[i], node.runtimes[i].state)) continue
+        if (!machineEventSets[i].has(event)) continue
+        participants.push(i)
+      }
+      if (participants.length < 2) continue // handshake needs a partner
+      const outcomes = participants.map((i) => stepRuntime(models[i], node.runtimes[i], event))
+      if (outcomes.some((list) => list.length === 0)) continue // not all participants ready
+      let combos: Array<RuntimeState[]> = [node.runtimes.slice()]
+      participants.forEach((i, slot) => {
+        const nextCombos: Array<RuntimeState[]> = []
+        for (const combo of combos) {
+          for (const outcome of outcomes[slot]) {
+            const copy = combo.slice()
+            copy[i] = outcome
+            nextCombos.push(copy)
+          }
         }
+        combos = nextCombos
+      })
+      for (const runtimes of combos) {
+        moves.push({ next: { runtimes, path: [] }, event, machines: participants })
       }
     }
     return moves
   }
-  const keyOf = (node: CompositionNode): string => runtimeKey(node.r1) + '|' + runtimeKey(node.r2)
-  const init: CompositionNode = { r1: initialState(models[0]), r2: initialState(models[1]), path: [] }
+
+  const keyOf = (node: CompositionNode): string => node.runtimes.map((runtime) => runtimeKey(runtime)).join('|')
+  const init: CompositionNode = { runtimes: models.map((model) => initialState(model)), path: [] }
   const visited = new Set<string>()
   const queue: CompositionNode[] = [init]
   let compositeStates = 0
@@ -2413,38 +2432,37 @@ export function runCompositionVerification(machinesInput: unknown[], options: Co
       break
     }
     const moves = compositionMoves(node)
-    const bothTerminal = isTerminal(models[0], node.r1.state) && isTerminal(models[1], node.r2.state)
-    if (moves.length === 0 && !bothTerminal) {
+    const allTerminal = node.runtimes.every((runtime, i) => isTerminal(models[i], runtime.state))
+    if (moves.length === 0 && !allTerminal) {
       c1Findings.push({
         code: 'C1_COMPOSITION_DEADLOCK',
         severity: 'error',
-        message: 'Composition deadlock: no machine can advance from (a=' + node.r1.state + ', b=' + node.r2.state + ') while at least one is not terminal.',
-        evidence: { steps: node.path, pair: { a: node.r1.state, b: node.r2.state } },
+        message: 'Composition deadlock: no machine can advance from (' + node.runtimes.map((runtime) => runtime.state).join(', ') + ') while at least one is not terminal.',
+        evidence: { steps: node.path, states: node.runtimes.map((runtime) => runtime.state) },
       })
       continue
     }
     for (const move of moves) {
-      if (move.by === 'both') firedCount.set(move.event, (firedCount.get(move.event) ?? 0) + 1)
-      const path = [...node.path, { event: move.event, by: move.by }]
+      if (move.machines.length > 1) firedCount.set(move.event, (firedCount.get(move.event) ?? 0) + 1)
       const nextKey = keyOf(move.next)
       if (visited.has(nextKey)) continue
-      queue.push({ ...move.next, path })
+      queue.push({ runtimes: move.next.runtimes, path: [...node.path, { event: move.event, machines: move.machines }] })
     }
   }
   const c2Findings: Finding[] = []
-  const machineEvents = new Set<string>()
-  for (const model of models) for (const transition of model.transitions) machineEvents.add(transition.event)
+  const allEventsSet = new Set<string>()
+  for (const set of machineEventSets) for (const event of set) allEventsSet.add(event)
   for (const event of rendezvous) {
-    if (!machineEvents.has(event)) continue
+    if (!allEventsSet.has(event)) continue
     if ((firedCount.get(event) ?? 0) === 0) {
       c2Findings.push({
         code: 'C2_RENDEZVOUS_NEVER_FIRES',
         severity: 'warning',
-        message: 'Rendezvous event ' + event + ' can never fire: the two machines are never jointly enabled on it.',
+        message: 'Rendezvous event ' + event + ' can never fire: fewer than two machines ever jointly enable it.',
       })
     }
   }
-  const errors = c1Findings.length + modelFindings.length
+  const errors = c1Findings.length
   const warnings = c2Findings.length
   const checks: CheckResult[] = [
     checkResult('C1', 'Composition Deadlock', c1Findings, c1Findings.length === 0 ? 'No composition deadlock reachable' : 'Composition deadlocks: ' + c1Findings.length),
@@ -2452,7 +2470,7 @@ export function runCompositionVerification(machinesInput: unknown[], options: Co
   ]
   return {
     ok: errors === 0,
-    summary: { machines: machineSummary, compositeStates, errors, warnings, truncated },
+    summary: { machineCount: models.length, machines: machineSummary, compositeStates, errors, warnings, truncated },
     checks,
   }
 }
