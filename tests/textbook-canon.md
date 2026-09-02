@@ -28,6 +28,8 @@ checks and the legacy-gap coverage of the older ones.
 | S7/A7 | Peterson mutual exclusion: never both in CS; removing the wait condition breaks it | tests/engine/run.mjs canon-two |
 | C1/C2 | producer-consumer single-slot rendezvous; consumer that never drains deadlocks | tests/engine/run.mjs canon-two |
 | A13 | biased gambler (p_win = 0.4): P(broke first) = 0.924 from $1 | tests/engine/run.mjs canon-two |
+| A3 | ledger bookings A/B: order-dependent (DONE1 vs DONE2) vs commutative negative | tests/engine/run.mjs canon-three |
+| S1 | post-migration dead code: LEGACY_V1 unreachable after V2 flow | tests/engine/run.mjs canon-three |
 | scale | 300-state chain; 80x80 composition product + forced truncation; deep 120-state DTMC convergence | tests/engine/run.mjs stress-tests |
 | coverageNotes | watchdog/ISR/hybrid/reliability vocabulary routing | tests/engine/run.mjs coverage-note-tests |
 | CONC | thread-safe / interrupt-safe absolute claims routing | tests/concurrency/run.mjs |

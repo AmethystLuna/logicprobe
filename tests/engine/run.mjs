@@ -1020,6 +1020,65 @@ async function runStressTests() {
 
 await runStressTests()
 
+// Textbook canon III: order dependence, dead-code reachability, guard coverage positives
+async function runCanonThreeTests() {
+  const code = (report, checkId, want) => {
+    const c = report.checks.find((entry) => entry.id === checkId)
+    return c !== undefined && c.findings.some((finding) => finding.code === want)
+  }
+
+  // Ledger example: book A then B ends in DONE1, B then A in DONE2 (order matters)
+  const nonCommutative = {
+    schemaVersion: 1, init: 'INIT',
+    states: [{ id: 'INIT' }, { id: 'P' }, { id: 'Q' }, { id: 'DONE1', terminal: true }, { id: 'DONE2', terminal: true }],
+    transitions: [
+      { from: 'INIT', event: 'book_a', to: 'P' },
+      { from: 'INIT', event: 'book_b', to: 'Q' },
+      { from: 'P', event: 'book_b', to: 'DONE1' },
+      { from: 'Q', event: 'book_a', to: 'DONE2' },
+    ],
+  }
+  const orderReport = runVerification(nonCommutative)
+  if (!code(orderReport, 'A3', 'A3_ORDER_DEPENDENT')) throw new Error('non-commutative bookings must be order-dependent (A3)')
+  assertNoUndefinedValues(orderReport)
+
+  // Commutative twin: either order ends in the same DONE
+  const commutative = {
+    schemaVersion: 1, init: 'INIT',
+    states: [{ id: 'INIT' }, { id: 'M' }, { id: 'DONE', terminal: true }],
+    transitions: [
+      { from: 'INIT', event: 'book_a', to: 'M' },
+      { from: 'INIT', event: 'book_b', to: 'M' },
+      { from: 'M', event: 'book_a', to: 'DONE' },
+      { from: 'M', event: 'book_b', to: 'DONE' },
+    ],
+  }
+  const commReport = runVerification(commutative)
+  const a3c = commReport.checks.find((entry) => entry.id === 'A3')
+  if (a3c === undefined || a3c.findings.some((finding) => finding.code === 'A3_ORDER_DEPENDENT')) {
+    throw new Error('commutative bookings must be order-independent')
+  }
+  assertNoUndefinedValues(commReport)
+
+  // Refactoring dead code: the legacy V1 path is no longer reachable after the V2 migration
+  const deadCode = {
+    schemaVersion: 1, init: 'NEW_INIT',
+    states: [{ id: 'NEW_INIT' }, { id: 'ACTIVE' }, { id: 'DONE', terminal: true }, { id: 'LEGACY_V1', terminal: true }],
+    transitions: [
+      { from: 'NEW_INIT', event: 'go', to: 'ACTIVE' },
+      { from: 'ACTIVE', event: 'finish', to: 'DONE' },
+    ],
+  }
+  const deadReport = runVerification(deadCode)
+  if (!code(deadReport, 'S1', 'S1_UNREACHABLE_STATE')) throw new Error('LEGACY_V1 must be flagged unreachable')
+  assertNoUndefinedValues(deadReport)
+
+  console.log('PASS canon-three')
+}
+
+await runCanonThreeTests()
+
+
 
 
 
