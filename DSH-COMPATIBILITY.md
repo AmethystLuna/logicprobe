@@ -2,31 +2,32 @@
 
 Evidence for the DSH STORE fixed-Commit contract: per-release install / start /
 uninstall verification of this plugin's native dsh bundle against the DSH
-releases listed in `dsh.compatibility.dshReleases` (same author-remediation
-track as [AI-Scarlett/DSH-Store#251](https://github.com/AI-Scarlett/DSH-Store/issues/251)).
+releases listed in `dsh.compatibility.dshReleases` (author-remediation track
+[AI-Scarlett/DSH-Store#252](https://github.com/AI-Scarlett/DSH-Store/issues/252)).
 
 ## Environment
 
 | Item | Value |
 |---|---|
 | Host | Windows 11 (x64), build 19045 |
-| Node.js | v24.17.0 |
-| npm | 11.13.0 |
+| Node.js | v22.22.3 |
+| npm | 10.9.8 |
 | pnpm | 11.21.0 |
-| Test date | 2026-09-01 |
-| Package under test | `dsh-logicprobe` 0.5.5 (bundle patch `cordis.patch.yml`, entry id `logicprobe`) |
+| Test date | 2026-09-02 |
+| Package under test | `dsh-logicprobe` 0.5.6 (bundle patch `cordis.patch.yml`, entry id `logicprobe`) |
 
 ## Method (one disposable profile per version)
 
-Each DSH release was installed into its own runtime directory and tested with a
-fresh `DSH_HOME` so no state leaked between versions:
+Each DSH release was run from its own runtime (global CLI for
+0.1.0-rc.7 … 0.1.2-alpha.3; temporary install for 0.1.2-alpha.4) against a
+fresh `DSH_HOME`, so no state leaked between versions:
 
 ```bash
 # 1) install: fresh profile, plugin added as a file: dependency
-dsh plugin --profile lp add "file:<this-repo>"            # pnpm add succeeds
+dsh plugin --profile headless add "file:<this-repo>"      # pnpm add succeeds
 
 # 2) mount check: composed tree contains the plugin row, enabled
-dsh --profile lp --dump-config                             # id: logicprobe / enabled: true
+dsh --profile headless --dump-config                       # id: logicprobe / enabled: true
 
 # 3) start: headless boot with a deliberately invalid API key.
 #    Expected: tree mounts and the app reaches the model-provider stage,
@@ -34,8 +35,8 @@ dsh --profile lp --dump-config                             # id: logicprobe / en
 DEEPSEEK_API_KEY=fake-key-for-boot-test dsh --profile headless "reply OK"
 
 # 4) uninstall: plugin removed, row gone from the composed tree
-dsh plugin --profile lp remove dsh-logicprobe
-dsh --profile lp --dump-config                             # no logicprobe row
+dsh plugin --profile headless remove dsh-logicprobe
+dsh --profile headless --dump-config                       # no logicprobe row
 ```
 
 The headless `AUTH` rejection proves the profile booted with the plugin applied
@@ -52,6 +53,7 @@ model calls were not exercised (no real provider key used).
 | 0.1.1-rc.2 | pass | pass | pass (AUTH-only) | pass |
 | 0.1.2-alpha.2 | pass | pass | pass (AUTH-only) | pass |
 | 0.1.2-alpha.3 | pass | pass | pass (AUTH-only) | pass |
+| 0.1.2-alpha.4 | pass | pass | pass (AUTH-only) | pass |
 
 ## Declared compatibility (package.json)
 
@@ -60,14 +62,15 @@ model calls were not exercised (no real provider key used).
 "dsh": {
   "engines": { "dsh": ">=0.1.0-rc.7" },
   "compatibility": {
-    "dsh": "^0.1.0-rc.7 || ^0.1.1-rc.1 || ^0.1.2-alpha.2 || ^0.1.2-alpha.3",
+    "dsh": "^0.1.0-rc.7 || ^0.1.1-rc.1 || ^0.1.2-alpha.2 || ^0.1.2-alpha.3 || ^0.1.2-alpha.4",
     "dshReleases": {
       "0.1.0-rc.7": "compatible",
       "0.1.0-rc.8": "compatible",
       "0.1.1-rc.1": "compatible",
       "0.1.1-rc.2": "compatible",
       "0.1.2-alpha.2": "compatible",
-      "0.1.2-alpha.3": "compatible"
+      "0.1.2-alpha.3": "compatible",
+      "0.1.2-alpha.4": "compatible"
     },
     "profiles": ["headless"]
   }
@@ -76,6 +79,16 @@ model calls were not exercised (no real provider key used).
 
 ## Notes
 
-- `dsh.engines.dsh` was relaxed from `>=0.1.1-rc.1` to `>=0.1.0-rc.7` to match
-  the verified rc.7 result.
+- DSH 0.1.2-alpha.4 removed the `Session.events` getter and replaced it with
+  on-demand reads (`seq` / `eventAt()` / `snapshotEvents()`). 0.5.6 reads
+  session history through a version-adaptive helper (`readSessionEvents`) that
+  prefers `snapshotEvents()` when present and falls back to the `events`
+  snapshot on earlier releases, so the gate injection keeps working on every
+  declared DSH release. Regression-checked with harnessed `agent/pre-step`
+  runs against both session event-source shapes (12/12 pass) in addition to
+  the per-release boot matrix above.
+- 0.5.5 was unpublished from npm because its `dsh.compatibility.dsh` range
+  (`^0.1.2-alpha.3`) admits 0.1.2-alpha.4 while the released bundle predates
+  the alpha.4 session API fix; installs under alpha.4 should use 0.5.6.
+- `dsh.engines.dsh` is `>=0.1.0-rc.7`, matching the verified rc.7 result.
 - Windows-only evidence; other platforms were not exercised.

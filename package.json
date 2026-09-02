@@ -1,6 +1,6 @@
 {
   "name": "dsh-logicprobe",
-  "version": "0.5.5",
+  "version": "0.5.6",
   "description": "Design document & plan claim verification — enumerate claims, verify against codebase facts, then escalate to state-machine verification (S1-S8/A1-A11) and data-model verification (DS/DA/DD) for behavioral claims. Supports before/after regression, idempotency/monotonic/sequence/leads-to/atomicity constraints, and concurrency risk mining. Ships a native DeepSeek Harness (dsh) bundle that injects the claim-verification gate into the first model step.",
   "type": "module",
   "main": "lib/index.js",
@@ -29,14 +29,15 @@
       "patch": "./cordis.patch.yml"
     },
     "compatibility": {
-      "dsh": "^0.1.0-rc.7 || ^0.1.1-rc.1 || ^0.1.2-alpha.2 || ^0.1.2-alpha.3",
+      "dsh": "^0.1.0-rc.7 || ^0.1.1-rc.1 || ^0.1.2-alpha.2 || ^0.1.2-alpha.3 || ^0.1.2-alpha.4",
       "dshReleases": {
         "0.1.0-rc.7": "compatible",
         "0.1.0-rc.8": "compatible",
         "0.1.1-rc.1": "compatible",
         "0.1.1-rc.2": "compatible",
         "0.1.2-alpha.2": "compatible",
-        "0.1.2-alpha.3": "compatible"
+        "0.1.2-alpha.3": "compatible",
+        "0.1.2-alpha.4": "compatible"
       },
       "profiles": [
         "headless"
