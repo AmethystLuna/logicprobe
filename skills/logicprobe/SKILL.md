@@ -44,7 +44,7 @@ This step is NOT skippable — it creates an explicit, auditable record of what 
 |-------|----------|
 | LIGHTWEIGHT | All 5 checklist items (file paths, API/type names, line numbers, behavioral claims, mechanism feasibility) answered in context with explicit results per item |
 | STANDARD | Phase 1-2: enumerate every verifiable claim → verify each against codebase with evidence |
-| ESCALATED | Full pipeline: Phase 1-5 including Logic Primitive Verification (Phase 2a + 2b, 14 checks) |
+| ESCALATED | Full pipeline: Phase 1-5 including Logic Primitive Verification (Phase 2a + 2b, 20 checks) |
 
 ### Plan Verification Block
 
@@ -136,7 +136,7 @@ Document claims → Extract model → Runtime check:
 
 Refactoring variant:
   Old code + Refactoring plan → Extract BEFORE model + AFTER model
-    → Run pipeline on AFTER model (14 checks)
+    → Run pipeline on AFTER model (20 checks)
     → Compare BEFORE vs AFTER: behavioral preservation, regression, complexity delta
     → Flag any invariant that held in BEFORE but fails in AFTER
 ```
@@ -148,7 +148,7 @@ When the document under review is a refactoring plan (modifying existing state m
 1. **Extract the BEFORE model** from the existing codebase (not the plan — verify what the code actually does, not what the plan claims it does)
 2. **Extract the AFTER model** from the refactoring plan
 3. **Show both tables AND their model narratives** to the user side by side and confirm the delta is intentional
-4. **Run Phase 2a + 2b on the AFTER model** — same 14 checks as new design
+4. **Run Phase 2a + 2b on the AFTER model** — same 20 checks as new design
 5. **Compare BEFORE vs AFTER**:
 
    | Check | Method | Severity if Violated |
@@ -173,7 +173,7 @@ Do NOT attempt to install Python — the user's embedded development machine may
 
 In DSH, prefer the native `logicprobe_verify` tool (model JSON, structured guard DSL, path-aware invariants) — see `references/dsh-model-schema.md`. For non-DSH hosts, the reusable Python harness is `references/verification-harness.py`. For detailed probe patterns, model extraction methodology, and manual verification procedures, load `references/logic-verification-guide.md`.
 
-### Phase 2a: Structural Primitives (7 Checks)
+### Phase 2a: Structural Primitives (8 Checks)
 
 Run these FIRST. They establish basic well-formedness before adversarial probing.
 
@@ -188,7 +188,7 @@ Run these FIRST. They establish basic well-formedness before adversarial probing
 | S7 | **Invariant validity** | Does every reachable state satisfy the plan's stated "always/never/guaranteed" assertions? | Error — plan claim is false |
 | S8 | **Monotonic variables** | If a variable is declared `monotonic: inc/dec`, do all updates respect that direction? | Error — counter can move backwards |
 
-### Phase 2b: Adversarial Probes (7 Attacks)
+### Phase 2b: Adversarial Probes (12 Attacks)
 
 Run these SECOND. Each probe actively tries to BREAK the model. If any probe succeeds (finds a violation), the plan has a behavior gap.
 
@@ -197,7 +197,7 @@ Run these SECOND. Each probe actively tries to BREAK the model. If any probe suc
 | A1 | **Unexpected event** | For each state S, inject every event E where no transition is defined for (S, E). Log whether the model silently ignores or crashes. | "All events are handled in all states" |
 | A2 | **Race interleaving** | For every pair of concurrent events (E1, E2), simulate arrival in both orders: E1-then-E2 vs E2-then-E1. Flag if terminal state differs. | "Behavior is independent of event ordering" |
 | A3 | **Order permutation** | For N independent events, permute arrival order. Flag if different permutations produce different final states or violate invariants. | "Outcome is order-independent" |
-| A4 | **Pair symmetry** | Match every `start/stop`, `lock/unlock`, `alloc/free` pair. Flag if any state allows a path where a pair is unbalanced (start without stop, lock without unlock). | "Resources are always released" |
+| A4 | **Pair symmetry** | Match every `start/stop`, `lock/unlock`, `alloc/free` pair. Flag if any state allows a path where a pair is unbalanced (start without stop, lock without unlock). State `onEntry`/`onExit` actions are treated as implicit acquire/release. | "Resources are always released" |
 | A5 | **Boundary blast** | Probe counters at 0, 1, max-1, max, max+1. Probe timestamps at 0, tick_wraparound. Flag overflow, underflow, or undefined behavior. | "Handles all counter/timer values" |
 | A6 | **Resource injection** | Simulate `malloc→NULL`, `queue→full`, `semaphore→timeout` at each state that calls them. Flag if any state has no recovery path. | "Graceful degradation under resource pressure" |
 | A7 | **Minimal counter-example** | For any invariant that fails, find the SHORTEST event sequence that violates it (BFS from init to violating state). Output the exact path. | "This invariant holds" → refuted by shortest path |
@@ -205,6 +205,7 @@ Run these SECOND. Each probe actively tries to BREAK the model. If any probe suc
 | A9 | **Leads-to** | From a declared source state, every path must eventually reach the target state. | "This state always progresses to completion" |
 | A10 | **Sequence order** | Events declared in a sequence must occur in the specified order. | "backup before modify before commit" |
 | A11 | **Atomicity** | Once an atomic event starts, the machine must commit or roll back before leaving the scope or terminating. | "all-or-nothing transaction" |
+| A12 | **Budget (worst-case path cost)** | With `cost` on transitions (absent = 1) and a `budget` invariant, every reachable path must stay within budget; reports the shortest over-budget counterexample and flags reachable positive-cost cycles as unbounded. | "Worst-case path cost ≤ budget" |
 
 ### Integration Back to Phase 3
 
@@ -322,6 +323,8 @@ logicprobe does **not** prove concurrency safety. It mines documents and plans f
 - Interrupt safety is included: `interrupt-safe` / `ISR-safe` are absolute claims; `ISR`, `IRQ`, `NMI`, `critical section`, `disable_irq` / `enable_irq` are risk keywords.
 
 In DSH, use the `logicprobe_concurrency_scan` tool. For manual review, follow `references/concurrency-risk-guide.md`.
+
+For routing claims in dimensions logicprobe does not verify — hard real time (deadlines/periods), preemptive concurrency, hybrid control stability, probabilistic reliability, and execution-cost budgets — to dedicated tools, see `references/gap-routing-guide.md`. In `logicprobe_verify` reports, matching models carry informational `coverageNotes` with the same routing.
 
 ---
 

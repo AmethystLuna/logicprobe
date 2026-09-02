@@ -319,6 +319,25 @@ ATOMIC_GROUPS = [
 ]
 ```
 
+### A12: Budget (Worst-Case Path Cost)
+
+For performance-sensitive claims ("the dispatch path stays within 100 cycles", "worst-case latency ≤ budget"), model each transition with an execution cost and declare a budget:
+
+```python
+TRANSITION_COSTS = {  # (from, event): cost; absent entries count as 1
+    ("BOOT", "calibrate_done"): 40,
+    ("IDLE", "enable"): 5,
+    ("RUN", "watchdog_expiry"): 15,
+}
+BUDGETS = [
+    {"id": "dispatch-budget", "description": "worst-case path within budget", "budget": 100},
+]
+```
+
+Probe: find the shortest path from init whose accumulated cost exceeds the budget; report it verbatim. A reachable cycle with positive total cost means cost can grow without bound — flag it as a budget violation regardless of the declared budget.
+
+In DSH (`logicprobe_verify`), `cost` is an optional field on transitions (absent = 1) and `budget` is an invariant kind; A12 runs automatically. Cost values are modeler-provided static labels — they verify the model against the declared budget, not the real WCET, which needs binary-level timing analysis.
+
 ## Counter-Example Interpretation
 
 When a probe finds a counter-example, classify it:
@@ -360,14 +379,16 @@ When a probe finds a counter-example, classify it:
 - **Hardware-specific behavior**: Memory-mapped I/O timing, DMA races, cache coherency
 - **Undocumented behavior**: If the plan doesn't describe a transition, the model can't either
 - **Real concurrency**: The model is single-threaded; true preemptive multitasking bugs are out of scope
-- **Entry/exit actions**: State entry/exit side effects (e.g., `lock()` on enter, `unlock()` on exit) are not modeled as events. A4 Pair Symmetry may miss unbalanced pairs that exist only in entry/exit actions. If the plan describes these, manually extract them as pseudo-events (`ENTER_state`, `EXIT_state`) before running verification.
+- **Entry/exit actions**: State entry/exit side effects (e.g., `lock()` on enter, `unlock()` on exit) are not modeled as events. A4 Pair Symmetry may miss unbalanced pairs that exist only in entry/exit actions. If the plan describes these, manually extract them as pseudo-events (`ENTER_state`, `EXIT_state`) before running verification. In DSH (`logicprobe_verify`), state `onEntry`/`onExit` declarations are modeled natively and A4 treats them as implicit acquire/release events — no manual pseudo-events needed.
+- **Execution cost is modeler-annotated**: transition `cost` (absent = 1) and `budget` invariants are static labels; A12 verifies the model against them. Real execution time/WCET needs binary-level timing analysis (e.g. aiT, RapiTime).
+- **Unverified semantic dimensions**: when model or document vocabulary references hard real time, preemptive concurrency, hybrid control stability, or probability/reliability, logicprobe reports informational notes / routes to dedicated tools — it never verifies those claims itself. See `references/gap-routing-guide.md`.
 - **Guard variable scope**: The model treats guard variables as global to the machine. If a guard variable's lifetime is state-scoped (reset on entry) but the model assumes it accumulates globally, boundary-blast results will be wrong. Verify guard variable scope during extraction.
 - **Nested/hierarchical states (Harel statecharts)**: The model only supports flat state machines. Parent/child state nesting, history pseudostates, and orthogonal regions are not supported — flatten them manually before verification.
 - **Cross-machine protocols**: Two interacting state machines are verified independently. Composition bugs (e.g., Machine A sends event E to Machine B, but B is in a state that doesn't handle E) are invisible to single-machine verification. If the plan describes multi-machine interaction, document the protocol contract separately.
 
 ### Model Fidelity Warning
 
-The Python model is an APPROXIMATION. It models state transitions, not execution semantics. A model that passes all 14 checks means the plan's LOGIC is consistent — NOT that the implementation will work. Always follow logic verification with code-level review.
+The Python model is an APPROXIMATION. It models state transitions, not execution semantics. A model that passes all 20 checks (S1-S8 structural, A1-A12 adversarial) means the plan's LOGIC is consistent — NOT that the implementation will work. Always follow logic verification with code-level review.
 
 ## Refactoring Verification
 
@@ -485,8 +506,8 @@ Manual verification takes longer but produces identical-quality findings. The ke
 6a. Python ≥ 3.6 → load verification-harness.py → fill in MODEL → run
 6b. No Python → use Manual Verification Mode (see above) — execute each check step by step
 7. Extract model → show transition table → GET USER CONFIRMATION
-8. Run Phase 2a (7 structural primitives) → log results
-9. Run Phase 2b (7 adversarial probes) → log results
+8. Run Phase 2a (8 structural primitives) → log results
+9. Run Phase 2b (12 adversarial probes) → log results
 10. Classify counter-examples (true positive / model error / acceptable risk)
 11. Feed confirmed findings into Phase 3 (gap analysis)
 12. Include in Phase 5 (structured output)

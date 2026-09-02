@@ -52,3 +52,5 @@ Manual checklist:
 - Java: JCStress, Java PathFinder
 - General: TLA+, SPIN, Alloy
 - Rust: loom, Shuttle
+
+Other semantic dimensions (hard real time, hybrid control, probability/reliability, execution cost) route through the same pattern — see `references/gap-routing-guide.md`.

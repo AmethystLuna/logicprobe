@@ -1,6 +1,6 @@
 # DSH Model Schema v1 — logicprobe_verify
 
-The dsh-native `logicprobe_verify` tool accepts a structured JSON model. The engine runs 19 checks (S1-S8 structural, A1-A11 adversarial) and returns a JSON report. When `beforeModel` is supplied, it also runs D1-D4 before/after regression checks. Guards and updates are structured data — no code strings, no arbitrary execution.
+The dsh-native `logicprobe_verify` tool accepts a structured JSON model. The engine runs 20 checks (S1-S8 structural, A1-A12 adversarial) and returns a JSON report. When `beforeModel` is supplied, it also runs D1-D4 before/after regression checks. Guards and updates are structured data — no code strings, no arbitrary execution.
 
 ## Top-level model
 
@@ -25,8 +25,8 @@ The dsh-native `logicprobe_verify` tool accepts a structured JSON model. The eng
 |---|---|---|
 | `schemaVersion` | yes | Must be `1` |
 | `init` | yes | Initial state id |
-| `states` | yes | `{ id, terminal? }`; `terminal` exempts S2/S3/S5/A1 |
-| `transitions` | yes | `{ from, event, to, guard?, updates? }` |
+| `states` | yes | `{ id, terminal?, onEntry?, onExit? }`; `terminal` exempts S2/S3/S5/A1; `onEntry`/`onExit` are action-name lists fired on entry/exit and treated by A4 as implicit acquire/release |
+| `transitions` | yes | `{ from, event, to, guard?, updates?, cost? }`; `cost` (non-negative) is the execution cost of firing the transition, absent = 1, checked by A12 against `budget` invariants |
 | `variables` | no | `{ name, kind: integer\|boolean, init, min?, max?, monotonic? }` |
 | `invariants` | no | See invariant kinds below |
 | `concurrentPairs` | no | `["eventA", "eventB"]` pairs for A2 |
@@ -128,6 +128,7 @@ A guard is exactly one of:
 | `leads-to` | `{ from: "MIGRATING", to: "DONE" }` | Every path from `from` must eventually reach `to` |
 | `sequence` | `{ events: ["backup", "modify", "commit"] }` | Events must occur in the given order |
 | `atomicity` | `{ events: ["write"], commit: "commit", rollback?: "rollback" }` | Atomic group must end with commit/rollback before leaving scope |
+| `budget` | `{ budget: n }` | No reachable path may accumulate transition cost greater than n (A12). Costs are non-negative; a transition without `cost` counts 1, so legacy machines keep step-count semantics |
 
 A7 reports the shortest violating path for each failed invariant. An empty path means the initial state already violates it.
 
@@ -140,6 +141,31 @@ A7 reports the shortest violating path for each failed invariant. An empty path 
 | custom | any | any | The session folds the last `sandbox/mode` and `approval/policy` events; interaction follows approval only |
 
 In `interaction=auto`, do NOT call `ask_user_question` for model confirmation. Round-trip the extracted model into a transition table, compare it against the source extraction, and mark the report `UNCONFIRMED`.
+
+## Cost and budget (A12)
+
+Transitions may carry a non-negative execution cost (`cost`, default 1 per transition — e.g. cycles or microseconds spent in the handler). A `budget` invariant bounds the worst-case accumulated cost over every reachable path:
+
+```json
+{
+  "id": "dispatch-budget",
+  "description": "worst-case dispatch path stays within 100 cycles",
+  "kind": "budget",
+  "budget": 100
+}
+```
+
+A12 reports the shortest over-budget counterexample path. A reachable cycle whose cost is positive is reported as unbounded — under model event semantics it can repeat indefinitely, so no finite budget holds. Budgets on machines with repeatable loops must bound those loops with variables (e.g. a retry counter guard). If transitions declare `cost` but no `budget` invariant exists, A12 emits the advisory `A12_COST_WITHOUT_BUDGET`.
+
+## State entry/exit actions (onEntry / onExit)
+
+States may declare ordered action-name lists that fire automatically:
+
+```json
+{ "id": "ACTIVE", "onEntry": ["sync_lock"], "onExit": ["sync_unlock"] }
+```
+
+Actions never change state or variables. Checks that care about resource discipline see them as implicit events: A4 Pair Symmetry treats an action equal to a pair acquireEvent/releaseEvent as an acquire/release that fires on every entry (resp. exit) of the state, so lock/unlock hidden inside entry/exit actions is verified without hand-written ENTER_x/EXIT_x pseudo-events.
 
 ## Minimal example
 
@@ -190,15 +216,18 @@ The report's `comparison` object includes both model hashes, state/transition co
 
 List events that must be idempotent in `idempotentEvents`. For every reachable state, applying the event twice must produce the same state as applying it once. This is useful for retries, webhook redelivery, and migration replay.
 
-## Advanced constraints (S8, A9-A11)
+## Advanced constraints (S8, A9-A12)
 
 - **S8 Monotonic Variables**: declare `monotonic: "inc"|"dec"` on a variable; updates must not move in the opposite direction.
 - **A9 Leads-To**: `{ kind: "leads-to", from, to }` — every path from `from` must eventually reach `to`.
 - **A10 Sequence**: `{ kind: "sequence", events }` — events must appear in order.
 - **A11 Atomicity**: `{ kind: "atomicity", events, commit, rollback? }` — once an atomic event starts, the machine must reach commit/rollback before leaving the atomic scope or terminating.
+- **A12 Budget**: `{ kind: "budget", budget }` — no reachable path may accumulate transition cost above the budget; reports the shortest over-budget path and flags reachable positive-cost cycles as unbounded.
 
 ## Limits
 
 - State-space exploration caps at `maxStates` (default 10000); larger guards/domains may report truncation instead of a false pass.
 - A3 samples the first `maxPermutationEvents` events (default 5).
 - The engine is a finite-state model checker. It cannot prove properties of the real implementation; follow with code-level review.
+- `cost` values are modeler-provided static labels — A12 verifies against them; real execution time/WCET needs binary-level timing analysis.
+- When the model state/event/action names reference semantics the engine does not verify (timing, preemption, hybrid control, probability), the report carries informational `coverageNotes` that route such claims to dedicated tools. These notes are vocabulary-based heuristics, never a substitute for the checks.
