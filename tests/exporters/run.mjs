@@ -22,7 +22,7 @@ test('source model still verifies (sanity)', () => { const r = runVerification(m
 
 test('uppaal export shape', () => {
   const out = exportModel(model, 'uppaal')
-  for (const needle of ['template LogicProbe', 'state A, B', 'init A', 'sync go!', 'guard retry < 2', 'assign retry := retry + 1', 'system LogicProbe']) {
+  for (const needle of ['<?xml version=', '<nta>', '<template>', '<name x=', '<init ref=', '<transition id=', 'kind=\"synchronisation\"', 'kind=\"guard\"', 'kind=\"assignment\"', 'system LogicProbe;']) {
     if (!out.primary.includes(needle)) throw new Error('missing ' + needle)
   }
   const q = out.extras?.queries ?? ''
