@@ -13,12 +13,12 @@ Design documents are not truth — code is. A claim-verification skill that chec
 | Phase | What |
 |-------|------|
 | Phase 1-2 | Enumerate every verifiable claim (API names, file paths, enum values, counts, mechanism feasibility) → verify each against the codebase with evidence |
-| Phase 2a | **8 structural checks** on extracted state-machine models: reachability, deadlock, liveness, determinism, event/guard completeness, invariant validity, monotonic variables |
-| Phase 2b | **14 adversarial probes**: unexpected events, race interleaving, order permutation, pair symmetry (lock/unlock), boundary blast, resource injection, minimal counter-example, idempotent replay, leads-to, sequence, atomicity, budget (worst-case path cost, A12), probability reachability (A13), deadline (maxTicks + tickEvents, A14) |
+| Phase 2a | **8 structural checks (S1-S8)** on extracted state-machine models: S1 reachability, S2 deadlock, S3 liveness, S4 determinism, S5 event completeness, S6 guard completeness, S7 invariant validity, S8 monotonic variables |
+| Phase 2b | **14 adversarial probes (A1-A14)**: unexpected events, race interleaving, order permutation, pair symmetry (lock/unlock, incl. implicit onEntry/onExit pairing), boundary blast, resource injection, minimal counter-example, idempotent replay, leads-to, sequence, atomicity, budget (A12 worst-case path cost, incl. positive-cost-cycle detection), probability reachability (A13, P(hit) meets a lower bound), deadline (A14, maxTicks + tickEvents) |
 | Refactoring | Before/after model comparison — behavioral preservation, invariant continuity, deadlock regression, complexity claims |
 | Data models | DataModelV1 verification — DS/DA/DD checks, migration coverage, copy consistency, before/after breaking-change regression |
 | Concurrency risk mining | Scans documents/plans for concurrency safety claims (thread-safe, lock-free, race condition, interrupt safety, etc.) and flags them for dedicated verification |
-| Output | Structured findings with exact file:line evidence, severity classification, correction direction — never inline fixes |
+| Output | Structured findings with exact file:line evidence, severity classification, correction direction — never inline fixes; the report carries `coverageNotes` (timing/preemption/hybrid/probability vocabulary routed to UPPAAL / TSan / CBMC / TLA+ / SpaceEx / PRISM, see `skills/logicprobe/references/gap-routing-guide.md`), and the model may carry a natural-language `narrative` (state/event/scenario annotations) echoed verbatim in the report |
 
 The model is always shown as a transition table and **confirmed with the user before running** — extraction errors are the dominant failure mode.
 
@@ -70,7 +70,9 @@ Native dsh support ships as a cordis plugin bundle at the repository root (the r
 - `logicprobe_concurrency_scan` mines documents/plans for concurrency risk claims (thread-safe, lock-free, race condition, mutex, etc.), flags them for dedicated verification, and attaches tool-routing `suggestions` to absolute claims.
 - `logicprobe_verify` also supports transition `cost` (default 1) with `budget` invariants (A12 worst-case path-cost check incl. positive-cost-cycle detection), and transition `weight` (default 1) with `probability` invariants (A13 probability reachability).
 - State `onEntry`/`onExit` actions are treated by A4 Pair Symmetry as implicit acquire/release; `maxTicks` + `tickEvents` deadlines (A14); report `coverageNotes` routes timing/preemption/hybrid/probability vocabulary to dedicated tools (UPPAAL, TSan/CBMC/TLA+, SpaceEx, PRISM, ...).
+- The engine runs **22 checks (S1-S8 structural + A1-A14 adversarial)**; the model may carry a natural-language `narrative` (state/event/scenario annotations) echoed verbatim in the report.
 - `logicprobe_compose_verify`: composition verification of two or more state machines (rendezvous handshake semantics) reporting C1 composition deadlock / C2 rendezvous never fires.
+- `logicprobe_export`: exports a LogicModelV1 as native input for external tools — UPPAAL (XML `.xta` + queries), TLA+ (TLC module), PRISM (DTMC `.pm` + `.pctl`), SPIN (Promela + ltl) — matching the dimensions covered by `coverageNotes`/gap-routing; exports follow each tool's official syntax so the generated files can be handed straight to the checker (SPIN is verified end-to-end for real).
 - Together with the embedded-workbench bundle's Plan Verification Gate, this closes the claim-verification loop in dsh.
 
 Install: see [`.dsh/INSTALL.md`](.dsh/INSTALL.md) (four options, from plain skill copy to `dsh plugin add`).
@@ -224,11 +226,12 @@ npm run typecheck
 npm run build
 ```
 
-Trigger tests are under `tests/skill-triggering/`; run them with:
+Test chain:
 
-```bash
-bash tests/skill-triggering/run-all.sh
-```
+- `npm run test:engine` — state-machine / data-model engine regression (`tests/engine`, `tests/data-engine`, `tests/concurrency`, `tests/apply-smoke`, `tests/exporters`, `tests/external`) plus byte-for-byte Python parity (`tests/python/run.mjs`: the same fixtures are compared between the TS engine and `skills/logicprobe/references/logicprobe-engine.py` across reports / composition / exporter output; auto-SKIP when Python is absent)
+- `npm run test:full` — `tests/full-suite.mjs` combined end-to-end suite
+- `npm run test:python` — Python parity only (build + `tests/python/run.mjs`)
+- Trigger tests are under `tests/skill-triggering/`: `bash tests/skill-triggering/run-all.sh`
 
 ## License & Security
 

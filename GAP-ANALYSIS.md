@@ -3,9 +3,9 @@
 > 本文盘点 logicprobe 目前 **不覆盖** 的状态机类别与声称域，按「缺失的语义维度」分类，
 > 每个维度给出：现状证据、缺口机理、代表性场景、外部专用工具、以及对本插件的扩展切口。
 
-- 核查基线：仓库 `main@7ce1fdf` 起，v0.5.6 → 本地提交 `52151ee`（P0-a/P0-b/P2 主体）、`7a9af54`（coverageNotes 扩到混合/概率）
+- 核查基线：仓库 `main@7ce1fdf` 起，v0.5.6 → 本周期提交（A12/A13/A14/C1-C2/导出器主体）→ **v0.6.0 已发布**
 - 依据文件：`src/engine.ts`、`src/data-engine.ts`、`src/concurrency.ts`、`skills/logicprobe/`、`skills/logicprobe-datamodel/`
-- 落地状态：P0-a（cost/budget + A12）、P0-b（onEntry/onExit + A4 动作感知）、P2 部分（报告 `coverageNotes`、并发扫描 `suggestions`、`gap-routing-guide.md`）已在本地实现并全绿，**未发布**。
+- 落地状态：P0-a（cost/budget + A12）、P0-b（onEntry/onExit + A4 动作感知）、P2 部分（报告 `coverageNotes`、并发扫描 `suggestions`、`gap-routing-guide.md`）已实现并全绿，随 **v0.6.0**（含 A13 概率可达 / A14 期限 / C1-C2 组合 / 四导出器）发布；Python 独立引擎与模板 harness 同步补齐（tests/python/run.mjs 逐字节对照）。
 
 ---
 
@@ -144,12 +144,12 @@
 
 | 方向 | 动作 | 状态 |
 |---|---|---|
-| A. 沉淀 | GAP-ANALYSIS.md + en-US 版；与上游/issue 对齐 | 本文件已入库（未发布）；en-US 未写 |
+| A. 沉淀 | GAP-ANALYSIS.md + en-US 版；与上游/issue 对齐 | 本文件已入库；en-US 未写 |
 | B. P0-a cost 预算检查 | schema/引擎/报告/测试 | ✅ 完成 |
 | C. P0-b entry/exit 声明 | 展开 + A4/A6 覆盖 + 回归 | ✅ 完成（A6 注入仍以事件/状态名为准） |
 | D. 实证 | 真实控制系统/性能敏感状态机入 examples | ⏳ 未做 |
 | E. 路由表/技能参考 | gap-routing-guide + 文档同步 | ✅ 完成 |
-| F. 发布前 | markdownlint、README 双语核对、`npm run test:*` 全绿、重新安装 profile bundle | ⏳ 未发布（用户要求暂缓） |
+| F. 发布前 | markdownlint、README 双语核对、`npm run test:*` 全绿、重新安装 profile bundle | ✅ v0.6.0 已发布（push + tag + npm）；DSH 0.1.2-alpha.5 / rc.1 兼容矩阵通过 |
 
 ---
 

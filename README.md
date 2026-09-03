@@ -11,12 +11,12 @@
 | 阶段 | 内容 |
 |------|------|
 | Phase 1-2 | 枚举每个可验证声称（API 名、文件路径、枚举值、数量、机制可行性）→ 逐条对照代码库给出证据 |
-| Phase 2a | 对提取的状态机模型执行 **8 项结构检查**：可达性、死锁、活性、确定性、事件/守卫完备性、不变量有效性、单调变量 |
-| Phase 2b | **14 种对抗探针**：意外事件、竞态交错、顺序置换、配对对称（lock/unlock）、边界轰炸、资源注入、最小反例、幂等重放、必达、顺序、原子性、预算（最坏路径代价 A12）、概率可达（P(击中)≥p，A13）、期限（maxTicks+tickEvents，A14） |
+| Phase 2a | 对提取的状态机模型执行 **8 项结构检查（S1-S8）**：S1 可达性、S2 死锁、S3 活性、S4 确定性、S5 事件完备性、S6 守卫完备性、S7 不变量有效性、S8 单调变量 |
+| Phase 2b | **14 项对抗探针（A1-A14）**：意外事件、竞态交错、顺序置换、配对对称（lock/unlock，含 onEntry/onExit 隐式配对）、边界轰炸、资源注入、最小反例、幂等重放、必达、顺序、原子性、预算（A12 最坏路径代价，含正成本环检测）、概率可达（A13，P(击中) 满足下界）、期限（A14，maxTicks + tickEvents） |
 | 重构模式 | 前后模型对比——行为保持、不变量连续性、死锁回归、复杂度声称 |
 | 数据模型模式 | DataModelV1 数据模型验证——DS/DA/DD 检查，迁移覆盖、copy 一致性、before/after 破坏性变更回归 |
 | 并发风险挖掘 | 扫描文档/计划中的并发安全声称（thread-safe、lock-free、race condition、中断安全等），标记需要专用验证 |
-| 输出 | 结构化发现：精确 file:line 证据、严重性分级、修正方向——绝不在核查中直接改代码 |
+| 输出 | 结构化发现：精确 file:line 证据、严重性分级、修正方向——绝不在核查中直接改代码；报告含 `coverageNotes`（时序/抢占/混合/概率词汇 → UPPAAL/TSan/CBMC/TLA+/SpaceEx/PRISM 等外部工具路由，见 `skills/logicprobe/references/gap-routing-guide.md`），模型可携带自然语言 `narrative`（状态/事件/场景注释）并被报告原样回显 |
 
 模型永远先以转换表形式展示并**经用户确认后才运行**——模型提取错误是验证的头号失败模式。
 
@@ -67,7 +67,9 @@ git clone https://github.com/AmethystLuna/logicprobe.git ~/.claude/plugins/dev/l
 - `logicprobe_verify` 支持 `beforeModel` + `stateMapping` 的 BEFORE/AFTER 对比（D1-D4），可直接验证重构/迁移的行为保持、不变量连续性、回归增量和死锁/活性回归。
 - `logicprobe_verify` 还支持：迁移/处理器代价 `cost`（缺省 1）与 `budget` 不变量（A12 最坏路径代价检查，含正成本环检测）、迁移权重 `weight` 与 `probability` 不变量（A13 概率可达）。
 - 状态 `onEntry`/`onExit` 动作（A4 自动纳入配对检查）；`maxTicks`+`tickEvents` 期限（A14）；报告 `coverageNotes`（时序/抢占/混合/概率词汇 → UPPAAL/TSan/CBMC/TLA+/SpaceEx/PRISM 等外部工具路由）。
+- 引擎共运行 **22 项检查（S1-S8 结构 + A1-A14 对抗）**；模型可带自然语言 `narrative`（状态/事件/场景注释），报告原样回显。
 - `logicprobe_compose_verify`：两台及以上状态机组合验证（握手 rendezvous 语义），报 C1 组合死锁 / C2 握手永不触发。
+- `logicprobe_export`：把 LogicModelV1 导出为外部工具原生输入——UPPAAL（XML `.xta` + queries）、TLA+（TLC 模块）、PRISM（DTMC `.pm` + `.pctl`）、SPIN（Promela + ltl）——与 `coverageNotes`/gap-routing 的维度对应；导出严格遵循各工具官方语法，生成文件可直接提交给对应检查器（SPIN 已做真实端到端验证）。
 - `logicprobe_datamodel_verify` 新增数据模型验证：DataModelV1、迁移覆盖、copy 一致性、DD1-DD4 before/after 数据回归。
 - `logicprobe_concurrency_scan` 扫描文档/计划中的并发风险声称（thread-safe、lock-free、race condition、mutex 等），标记需要专用并发验证。
 - 与 embedded-workbench bundle 的 Plan Verification Gate 配合，在 dsh 中闭环了 claim 验证链路。
@@ -222,11 +224,12 @@ npm run typecheck
 npm run build
 ```
 
-触发测试位于 `tests/skill-triggering/`：
+测试链：
 
-```bash
-bash tests/skill-triggering/run-all.sh
-```
+- `npm run test:engine` — 状态机/数据模型引擎回归（`tests/engine`、`tests/data-engine`、`tests/concurrency`、`tests/apply-smoke`、`tests/exporters`、`tests/external`）+ Python 逐字节一致性对照（`tests/python/run.mjs`：同一批 fixture 在 TS 引擎与 `skills/logicprobe/references/logicprobe-engine.py` 之间比对报告/组合/导出产物；无 Python 时自动 SKIP）
+- `npm run test:full` — `tests/full-suite.mjs` 端到端合并套件
+- `npm run test:python` — 仅 Python parity（构建 + `tests/python/run.mjs`）
+- 触发测试位于 `tests/skill-triggering/`：`bash tests/skill-triggering/run-all.sh`
 
 ## 许可证与安全
 
