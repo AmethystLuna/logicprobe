@@ -129,7 +129,7 @@ A guard is exactly one of:
 | `sequence` | `{ events: ["backup", "modify", "commit"] }` | Events must occur in the given order |
 | `atomicity` | `{ events: ["write"], commit: "commit", rollback?: "rollback" }` | Atomic group must end with commit/rollback before leaving scope |
 | `budget` | `{ budget: n }` | No reachable path may accumulate transition cost greater than n (A12). Costs are non-negative; a transition without `cost` counts 1, so legacy machines keep step-count semantics |
-| `probability` | `{ target, op: '>=' | '<=' | '>' | '<', p }` | P(ever hitting target) must satisfy the bound (A13, DTMC from transition `weight`, default 1; value iteration) |
+| `probability` | `{ target, op: one of >= <= > <, p }` | P(ever hitting target) must satisfy the bound (A13, DTMC from transition `weight`, default 1; value iteration) |
 
 A7 reports the shortest violating path for each failed invariant. An empty path means the initial state already violates it.
 
