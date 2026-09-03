@@ -13,6 +13,7 @@ This plugin's claim-verification methodology (claim enumeration, logic primitive
 - Skill content must remain **domain-neutral** — this plugin is not embedded-specific. Do not hardcode project-specific details (file paths, version numbers, product names).
 - Chinese content should have English equivalents and vice versa (README, session-start content).
 - The verification harness (`references/verification-harness.py`) must remain generic — it is a template filled in per model, never hardcoded to one project.
+- The standalone JSON engine (`references/logicprobe-engine.py`) is the non-DSH mirror of the TypeScript engine and exporters: any change to `src/engine.ts` or `src/exporters.ts` semantics must be reflected there, and `tests/python/run.mjs` (byte-for-byte parity across fixtures, exporters, composition, and before/after regression) must stay green — skip only when Python is absent from PATH.
 - Model extraction must require user confirmation before running the harness (the #1 failure mode of verification) — except when the runtime reports `logicprobe interaction=auto`; in auto mode require evidence-cited extraction plus round-trip validation and an `UNCONFIRMED` label.
 
 ## Before Submitting

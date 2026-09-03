@@ -131,7 +131,8 @@ When Phase 2 triggers escalation, do NOT proceed to Phase 3 until the verificati
 ```text
 Document claims → Extract model → Runtime check:
   ├── DSH + `logicprobe_verify` tool available → build Model schema v1 (references/dsh-model-schema.md) → call the tool → structured report
-  ├── Python available → fill in references/verification-harness.py → run → report
+  ├── Python available + LogicModelV1 JSON at hand → references/logicprobe-engine.py verify model.json (S1-S8/A1-A14/D1-D4; subcommands compose / export add C1-C2 and UPPAAL/TLA+/PRISM/SPIN output)
+  ├── Python available + model only as extracted dicts → fill in references/verification-harness.py → run → report
   └── No Python → Manual Verification Mode (see references/logic-verification-guide.md#manual-verification-mode)
 
 Refactoring variant:
@@ -171,7 +172,7 @@ When the document under review is a refactoring plan (modifying existing state m
 
 Do NOT attempt to install Python — the user's embedded development machine may be air-gapped or locked down.
 
-In DSH, prefer the native `logicprobe_verify` tool (model JSON, structured guard DSL, path-aware invariants) — see `references/dsh-model-schema.md`. For non-DSH hosts, the reusable Python harness is `references/verification-harness.py`. For detailed probe patterns, model extraction methodology, and manual verification procedures, load `references/logic-verification-guide.md`.
+In DSH, prefer the native `logicprobe_verify` tool (model JSON, structured guard DSL, path-aware invariants) — see `references/dsh-model-schema.md`. For non-DSH hosts: when the model is already a LogicModelV1 JSON, run the standalone JSON engine `references/logicprobe-engine.py` (verify | compose | export — an exact Python mirror of the DSH tools, cross-checked byte-for-byte by tests/python/run.mjs); when the model exists only as extracted dicts, fill in the reusable template `references/verification-harness.py`. For detailed probe patterns, model extraction methodology, and manual verification procedures, load `references/logic-verification-guide.md`.
 
 ### Phase 2a: Structural Primitives (8 Checks)
 

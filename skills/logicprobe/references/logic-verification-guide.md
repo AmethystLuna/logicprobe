@@ -338,6 +338,37 @@ Probe: find the shortest path from init whose accumulated cost exceeds the budge
 
 In DSH (`logicprobe_verify`), `cost` is an optional field on transitions (absent = 1) and `budget` is an invariant kind; A12 runs automatically. Cost values are modeler-provided static labels — they verify the model against the declared budget, not the real WCET, which needs binary-level timing analysis.
 
+### A13: Probability Reachability (DTMC)
+
+For claims with a reliability/probability flavor ("at least 90% of runs reach SAFE", "P(broke first) ≥ 0.75"), attach a relative weight to each branch and declare the bound. Absent weight = 1; weight 0 means the branch never fires probabilistically.
+
+```python
+TRANSITION_WEIGHTS = {  # (from_state, event): weight; absent entries count as 1
+    ("RUN", "ok"): 9,
+    ("RUN", "bad"): 1,
+}
+PROBABILITY_INVARIANTS = [
+    {"id": "reliability", "target": "SAFE", "op": ">=", "p": 0.9},
+]
+```
+
+Probe: solve P(ever reaching `target`) from INIT by value iteration over the reachable absorbing chain; compare against the bound. In DSH (`logicprobe_verify`), `weight` on transitions plus a `probability` invariant runs A13 automatically. This is a qualitative DTMC check of the modeler's weights — real MTBF/failure-rate numbers need PRISM/Storm or fault-tree analysis.
+
+### A14: Deadline (Discrete Tick Clock)
+
+For real-time-sounding claims ("must leave BUSY within 3 ticks", "watchdog resets before deadline"), declare which events advance the clock and cap per-state residency:
+
+```python
+TICK_EVENTS = {"tick"}
+STATE_MAX_TICKS = {"BUSY": 3}
+```
+
+Probe: explore residency — a `tick` step that keeps the machine resident past `maxTicks` is a deadline miss; report the over-residency path. In DSH (`logicprobe_verify`), state `maxTicks` plus top-level `tickEvents` run A14 automatically. This checks the model's declared deadlines, not real execution time (see Known Limitations below; hard real-time semantics route to UPPAAL).
+
+### Standalone engine (non-DSH, JSON models)
+
+`references/logicprobe-engine.py` is an exact Python mirror of the DSH tools: `verify model.json` runs all 22 checks + D1-D4 with a `--before-model`/optional `--state-mapping`; `compose m1.json m2.json ... --rendezvous a,b` runs C1/C2 composition; `export model.json --format uppaal|tla|prism|spin` reproduces the four exporters byte-for-byte. It reads the same LogicModelV1 JSON as DSH, so a model verified in one host verifies identically in the other (checked by tests/python/run.mjs).
+
 ## Counter-Example Interpretation
 
 When a probe finds a counter-example, classify it:

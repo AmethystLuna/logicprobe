@@ -87,7 +87,7 @@ git clone https://github.com/AmethystLuna/logicprobe.git ~/.claude/plugins/dev/l
 
 技能在 Phase 0 依据计划特征自动分级（LIGHTWEIGHT / STANDARD / ESCALATED），并在计划文件追加 `## Plan Verification` 摘要块作为审计痕迹。
 
-Python 可选：状态机验证使用 `skills/logicprobe/references/verification-harness.py`，数据模型验证使用 `skills/logicprobe-datamodel/references/data-model-harness.py`；不可用（如离线开发机）时，对应 guide 提供手动验证模式。
+Python 可选：已有 LogicModelV1 JSON 时可直接运行独立引擎 `skills/logicprobe/references/logicprobe-engine.py`（`verify` 跑 S1-S8/A1-A14/D1-D4，`compose` 跑 C1/C2 组合，`export` 生成 UPPAAL/TLA+/PRISM/SPIN 输入——与 dsh 工具逐字节一致，见 tests/python/run.mjs）；模型仅为抽取出的状态表时，填充模板 `skills/logicprobe/references/verification-harness.py`；数据模型验证使用 `skills/logicprobe-datamodel/references/data-model-harness.py`；不可用（如离线开发机）时，对应 guide 提供手动验证模式。
 
 示例模型见 [`examples/`](examples/README.md)：订单状态机 before/after、电商数据模型、User 字段迁移。
 

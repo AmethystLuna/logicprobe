@@ -88,7 +88,7 @@ The plugin auto-injects a capability notification into the first model step. The
 
 The skill auto-classifies depth (LIGHTWEIGHT / STANDARD / ESCALATED) from plan features in Phase 0, and appends a `## Plan Verification` summary block as the audit trail.
 
-In DSH, prefer the native `logicprobe_verify` tool for state machines and `logicprobe_datamodel_verify` for data models (see the schema references under each skill). Python remains optional for non-DSH hosts: state-machine checks use `skills/logicprobe/references/verification-harness.py`; data-model checks use `skills/logicprobe-datamodel/references/data-model-harness.py`. When Python is unavailable, the corresponding guide provides a manual verification mode.
+In DSH, prefer the native `logicprobe_verify` tool for state machines and `logicprobe_datamodel_verify` for data models (see the schema references under each skill). Python remains optional for non-DSH hosts: when a LogicModelV1 JSON already exists, run the standalone engine `skills/logicprobe/references/logicprobe-engine.py` (`verify` runs S1-S8/A1-A14/D1-D4, `compose` runs C1/C2 composition, `export` emits UPPAAL/TLA+/PRISM/SPIN input — byte-identical to the dsh tools, cross-checked by tests/python/run.mjs); when the model only exists as extracted tables, fill in `skills/logicprobe/references/verification-harness.py`; data-model checks use `skills/logicprobe-datamodel/references/data-model-harness.py`. When Python is unavailable, the corresponding guide provides a manual verification mode.
 
 Sample models are available under [`examples/`](examples/README.md): order state-machine before/after, e-commerce data model, and User field migration.
 

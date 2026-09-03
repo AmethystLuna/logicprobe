@@ -4,6 +4,15 @@
 Fill in the MODEL section below with states, transitions, invariants extracted from the plan.
 Run: python3 verification-harness.py
 Output: structured verification report for Phase 3 gap analysis.
+
+Covers all 22 checks: S1-S8 (structural), A1-A14 (adversarial), plus D1-D4
+(before/after regression) when BEFORE_STATES is filled in. A12 (budget),
+A13 (probability reachability) and A14 (deadline) use the optional config
+lists below; leave them empty to skip the corresponding probe.
+
+For multi-machine composition (C1/C2) and external-tool export (UPPAAL/TLA+/
+PRISM/SPIN), use the standalone JSON-driven engine instead:
+  references/logicprobe-engine.py  (verify | compose | export)
 """
 import sys
 from collections import deque
@@ -60,6 +69,24 @@ SEQUENCES: list[list[str]] = []
 
 # Atomic groups (for A11): {"events": [...], "commit": "...", "rollback": "..."}
 ATOMIC_GROUPS: list[dict] = []
+
+# Transition costs for A12 budget (optional): {(from_state, event): cost}; absent entries count as 1
+TRANSITION_COSTS: dict[tuple[str, str], int] = {}
+
+# Budget invariants for A12 (optional): {"id": "...", "description": "...", "budget": N}
+BUDGETS: list[dict] = []
+
+# Probability weights for A13 DTMC (optional): {(from_state, event): weight}; absent = 1, weight 0 never fires
+TRANSITION_WEIGHTS: dict[tuple[str, str], int] = {}
+
+# Probability reachability claims for A13 (optional): {"id": "...", "description": "...", "target": "STATE", "op": ">=", "p": 0.9}
+PROBABILITY_INVARIANTS: list[dict] = []
+
+# Events that advance the discrete clock for A14 (optional): {"tick"}
+TICK_EVENTS: set[str] = set()
+
+# Per-state residency deadlines for A14 (optional): {"BUSY": 2} means BUSY must be left within 2 ticks of entry
+STATE_MAX_TICKS: dict[str, int] = {}
 
 # Before model for D1-D4 comparison (optional)
 BEFORE_STATES: dict[str, dict[str, str]] = {}
@@ -646,6 +673,129 @@ def A11_atomicity():
     return {'pass': len(findings) == 0, 'findings': findings, 'detail': 'Atomicity invariants hold' if not findings else f'{len(findings)} atomicity violations'}
 
 
+def A12_budget():
+    """A12: worst-case path cost vs declared budgets."""
+    if not BUDGETS:
+        return {'pass': True, 'findings': [], 'detail': 'No budgets declared — skipped'}
+    findings = []
+    for budget in BUDGETS:
+        budget_val = budget.get('budget', 0)
+        # BFS over accumulated cost; first over-budget path is a witness.
+        queue = deque([(INIT, 0, [])])
+        best_cost = {INIT: 0}
+        violation = None
+        while queue and violation is None:
+            state, cost, path = queue.popleft()
+            for event, nxt in STATES.get(state, {}).items():
+                edge_cost = TRANSITION_COSTS.get((state, event), 1)
+                total = cost + edge_cost
+                new_path = path + [(state, event, nxt)]
+                if total > budget_val:
+                    violation = (new_path, total)
+                    break
+                if best_cost.get(nxt) is None or total < best_cost[nxt]:
+                    best_cost[nxt] = total
+                    queue.append((nxt, total, new_path))
+        if violation is not None:
+            findings.append({'code': 'A12_BUDGET_OVER', 'severity': 'error',
+                             'message': f"Budget '{budget.get('id')}' exceeded: path cost {violation[1]} over budget {budget_val}",
+                             'evidence': {'budget': budget, 'path': violation[0], 'totalCost': violation[1]}})
+    return {'pass': len(findings) == 0, 'findings': findings,
+            'detail': 'All budgets respected' if not findings else f'{len(findings)} budget violations'}
+
+
+def A13_probability():
+    """A13: P(ever reaching target) from INIT under the DTMC induced by weights."""
+    if not PROBABILITY_INVARIANTS:
+        return {'pass': True, 'findings': [], 'detail': 'No probability invariants — skipped'}
+    reachable = set()
+    queue = deque([INIT])
+    while queue:
+        state = queue.popleft()
+        if state in reachable:
+            continue
+        reachable.add(state)
+        for nxt in STATES.get(state, {}).values():
+            if nxt not in reachable:
+                queue.append(nxt)
+    states = sorted(reachable)
+    findings = []
+    eps = 1e-9
+    for inv in PROBABILITY_INVARIANTS:
+        target = inv.get('target')
+        # value iteration over the reachable absorbing chain
+        prob = {s: 0.0 for s in states}
+        for s in states:
+            if s == target:
+                prob[s] = 1.0
+        for _ in range(20000):
+            delta = 0.0
+            for s in states:
+                if s == target:
+                    continue
+                total_w = 0
+                acc = 0.0
+                for event, nxt in STATES.get(s, {}).items():
+                    w = TRANSITION_WEIGHTS.get((s, event), 1)
+                    if w <= 0:
+                        continue
+                    total_w += w
+                    acc += w * prob[nxt]
+                newp = acc / total_w if total_w > 0 else 0.0
+                delta = max(delta, abs(newp - prob[s]))
+                prob[s] = newp
+            if delta < eps:
+                break
+        p_hit = prob.get(INIT, 0.0)
+        op = inv.get('op', '>=')
+        bound = inv.get('p', 0.0)
+        violated = (op == '>=' and p_hit < bound - eps) or (op == '>' and p_hit <= bound + eps)             or (op == '<=' and p_hit > bound + eps) or (op == '<' and p_hit >= bound - eps)
+        if violated:
+            findings.append({'code': 'A13_PROBABILITY_VIOLATION', 'severity': 'error',
+                             'message': f"P(hit {target}) = {p_hit:.6f} does not satisfy {op} {bound}",
+                             'evidence': {'invariant': inv, 'computed': p_hit}})
+    return {'pass': len(findings) == 0, 'findings': findings,
+            'detail': 'Probability invariants hold' if not findings else f'{len(findings)} probability violations'}
+
+
+def A14_deadline():
+    """A14: a state with a maxTicks deadline may not be kept resident past it by tick events."""
+    if not STATE_MAX_TICKS:
+        return {'pass': True, 'findings': [], 'detail': 'No state deadlines declared — skipped'}
+    findings = []
+    if not TICK_EVENTS:
+        return {'pass': False, 'findings': [{'code': 'A14_NO_TICK_EVENTS', 'severity': 'warning',
+                                             'message': 'maxTicks declared but no tick events — cannot verify'}],
+                'detail': 'Missing tick events'}
+    # Residency ticks, mirroring logicprobe A14: entering a state resets to 0;
+    # a tick that stays in the state advances the count; a tick that leaves or any
+    # non-tick transition to another state resets; a non-tick self-loop keeps it.
+    visited = set()
+    queue = deque([(INIT, 0, [])])
+    while queue:
+        state, ticks, path = queue.popleft()
+        key = (state, ticks)
+        if key in visited:
+            continue
+        visited.add(key)
+        limit = STATE_MAX_TICKS.get(state)
+        if limit is not None and ticks > limit:
+            findings.append({'code': 'A14_DEADLINE_MISS', 'severity': 'error',
+                             'message': f'State {state} resident for {ticks} ticks, limit {limit}',
+                             'evidence': {'state': state, 'maxTicks': limit, 'ticks': ticks, 'path': path}})
+            continue
+        for event, nxt in STATES.get(state, {}).items():
+            if event in TICK_EVENTS:
+                nxt_ticks = ticks + 1 if nxt == state else 0
+            elif nxt == state:
+                nxt_ticks = ticks
+            else:
+                nxt_ticks = 0
+            queue.append((nxt, nxt_ticks, path + [(state, event, nxt)]))
+    return {'pass': len(findings) == 0, 'findings': findings,
+            'detail': 'All deadlines respected' if not findings else f'{len(findings)} deadline misses'}
+
+
 def D1_behavioral_preservation():
     findings = []
     if not BEFORE_STATES:
@@ -752,6 +902,9 @@ def run_all():
         ("A9 Leads-To", A9_leads_to),
         ("A10 Sequence Order", A10_sequence_order),
         ("A11 Atomicity", A11_atomicity),
+        ("A12 Budget", A12_budget),
+        ("A13 Probability Reachability", A13_probability),
+        ("A14 Deadline", A14_deadline),
     ]
 
     for name, probe_fn in probes_2b:
