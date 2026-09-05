@@ -78,7 +78,7 @@
     "@deepseek-ai/dsh-timeout": "^0.1.0-rc.6",
     "@deepseek-ai/dsh-tools": "^0.1.0-rc.6",
     "@deepseek-ai/schemastery": "^3.18.2",
-    "@types/node": "^26.4.0",
+    "@types/node": "^26.4.1",
     "typescript": "^7.0.2"
   },
   "author": {
