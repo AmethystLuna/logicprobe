@@ -24,9 +24,9 @@ The model is always shown as a transition table and **confirmed with the user be
 
 ## Installation
 
-### Marketplace install (recommended)
+### Claude Code install (recommended)
 
-Add the marketplace to `~/.claude/settings.json`:
+Add the marketplace to **Claude Code**'s `~/.claude/settings.json`:
 
 ```json
 {
@@ -44,7 +44,7 @@ Then install from CLI:
 claude plugin install logicprobe@logicprobe
 ```
 
-### Manual install
+### Claude Code manual install
 
 ```bash
 git clone https://github.com/AmethystLuna/logicprobe.git ~/.claude/plugins/dev/logicprobe
@@ -75,7 +75,18 @@ Native dsh support ships as a cordis plugin bundle at the repository root (the r
 - `logicprobe_export`: exports a LogicModelV1 as native input for external tools — UPPAAL (XML `.xta` + queries), TLA+ (TLC module), PRISM (DTMC `.pm` + `.pctl`), SPIN (Promela + ltl) — matching the dimensions covered by `coverageNotes`/gap-routing; exports follow each tool's official syntax so the generated files can be handed straight to the checker (SPIN is verified end-to-end for real).
 - Together with the embedded-workbench bundle's Plan Verification Gate, this closes the claim-verification loop in dsh.
 
-Install: see [`.dsh/INSTALL.md`](.dsh/INSTALL.md) (four options, from plain skill copy to `dsh plugin add`).
+Install (native bundle, recommended):
+
+```bash
+# from npm (package name: dsh-logicprobe)
+dsh plugin --profile web add dsh-logicprobe
+# or from GitHub source
+dsh plugin --profile web add "github:AmethystLuna/logicprobe"
+# when dsh is not installed globally
+npx -p @deepseek-ai/dsh dsh plugin --profile web add dsh-logicprobe
+```
+
+Restart the profile, then run `dsh --profile web --dump-config`: the `id: logicprobe` row must appear with `enabled: true`. More options (plain skill copy, project-level, ...) are in [`.dsh/INSTALL.md`](.dsh/INSTALL.md).
 
 > DSH install note: the package name is `dsh-logicprobe`. In the web profile's `package.json`, both the dependency key and the `dsh.profile.bundles` entry must use the same name; a mismatch causes the dsh loader to fail with `ERR_MODULE_NOT_FOUND`.
 

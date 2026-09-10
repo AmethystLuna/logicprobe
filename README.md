@@ -22,9 +22,9 @@
 
 ## 安装
 
-### Marketplace 安装（推荐）
+### Claude Code 安装（推荐）
 
-在 `~/.claude/settings.json` 中添加 marketplace：
+在 **Claude Code** 的 `~/.claude/settings.json` 中添加 marketplace：
 
 ```json
 {
@@ -42,7 +42,7 @@
 claude plugin install logicprobe@logicprobe
 ```
 
-### 手动安装
+### Claude Code 手动安装
 
 ```bash
 git clone https://github.com/AmethystLuna/logicprobe.git ~/.claude/plugins/dev/logicprobe
@@ -74,7 +74,18 @@ git clone https://github.com/AmethystLuna/logicprobe.git ~/.claude/plugins/dev/l
 - `logicprobe_concurrency_scan` 扫描文档/计划中的并发风险声称（thread-safe、lock-free、race condition、mutex 等），标记需要专用并发验证。
 - 与 embedded-workbench bundle 的 Plan Verification Gate 配合，在 dsh 中闭环了 claim 验证链路。
 
-安装：参见 [`.dsh/INSTALL.md`](.dsh/INSTALL.md)（四种方式，从纯技能拷贝到 `dsh plugin add`）。
+安装（原生 bundle，推荐）：
+
+```bash
+# 从 npm 安装（包名 dsh-logicprobe）
+dsh plugin --profile web add dsh-logicprobe
+# 或从 GitHub 源码安装
+dsh plugin --profile web add "github:AmethystLuna/logicprobe"
+# 未全局安装 dsh 时可用 npx
+npx -p @deepseek-ai/dsh dsh plugin --profile web add dsh-logicprobe
+```
+
+安装后重启 profile，运行 `dsh --profile web --dump-config` 应看到 `id: logicprobe` 且 `enabled: true`。更多方式（纯技能拷贝、项目级等）见 [`.dsh/INSTALL.md`](.dsh/INSTALL.md)。
 
 > DSH 安装注意：npm 包名为 `dsh-logicprobe`（无 scope）。在 web profile 的 `package.json` 中，依赖键与 `dsh.profile.bundles` 必须写 `dsh-logicprobe`；否则 dsh 加载器会因找不到 `node_modules/dsh-logicprobe` 而启动失败。
 
