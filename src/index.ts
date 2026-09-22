@@ -29,6 +29,7 @@ import { fileURLToPath } from 'node:url'
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
+import type { ContextFormed } from '@deepseek-ai/dsh-llm'
 import type { Session, UserMessage } from '@deepseek-ai/dsh-session'
 import type { HostCordisInspectProviderRegistration } from '@deepseek-ai/dsh-cordis-host-runner'
 import type { AssembleContext, PromptContext } from '@deepseek-ai/dsh-system-prompt'
@@ -39,6 +40,18 @@ import { logicProbeConcurrencyScanTool } from './concurrency-tool.js'
 import { logicProbeComposeTool } from './compose-tool.js'
 import { logicProbeExportTool } from './export-tool.js'
 import { ENGINE_SCHEMA_VERSION } from './engine.js'
+
+// DSH 0.1.7-alpha.1 (session format v4) retires the shared
+// `{ kind: 'plugin', plugin }` wrapper: native admission rejects it in every
+// declared durable message slot, and the official v3-to-v4 migration rewrites
+// those historical rows to `plugin:<name>`. Declaring the producer-owned kind
+// here keeps the write path and the history guard on one identity, and still
+// compiles against the earlier releases that only declare `plugin`.
+declare module '@deepseek-ai/dsh-llm' {
+  interface MessageSourceMap {
+    'plugin:logicprobe': { kind: 'plugin:logicprobe' } & ContextFormed
+  }
+}
 
 export const name = 'logicprobe'
 
@@ -52,6 +65,9 @@ export const inject = ['skills']
 const SKILLS_DIR = fileURLToPath(new URL('../skills', import.meta.url))
 
 const GATE_PLUGIN_ID = 'logicprobe'
+
+/** Producer-owned message source kind declared in `MessageSourceMap` above. */
+const GATE_SOURCE_KIND: 'plugin:logicprobe' = 'plugin:logicprobe'
 
 export type InteractionMode = 'ask' | 'auto' | 'follow-approval'
 
@@ -90,7 +106,7 @@ function gateMessage(text: string): UserMessage {
   return createUserMessage({
     content: [{ type: 'text', text }],
     // `form` omitted — an undeclared context is the documented default.
-    source: { kind: 'plugin', plugin: GATE_PLUGIN_ID },
+    source: { kind: GATE_SOURCE_KIND },
   })
 }
 
@@ -344,6 +360,10 @@ function gateInHistory(session: Session): boolean {
   return readSessionEvents(session).some((event) => {
     if (event.type !== 'user/message') return false
     const source = event.data?.source as { kind?: string; plugin?: string } | undefined
-    return source?.kind === 'plugin' && source.plugin === GATE_PLUGIN_ID
+    if (source === undefined) return false
+    // The v4 producer-owned kind, plus the pre-v4 wrapper this bundle wrote
+    // before DSH 0.1.7-alpha.1 retired it.
+    return source.kind === GATE_SOURCE_KIND
+      || (source.kind === 'plugin' && source.plugin === GATE_PLUGIN_ID)
   })
 }
