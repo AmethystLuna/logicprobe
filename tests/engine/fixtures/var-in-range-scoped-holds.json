@@ -1,0 +1,45 @@
+{
+  "schemaVersion": 1,
+  "init": "A",
+  "states": [
+    {
+      "id": "A"
+    },
+    {
+      "id": "B",
+      "terminal": true
+    }
+  ],
+  "transitions": [
+    {
+      "from": "A",
+      "event": "go",
+      "to": "B",
+      "updates": [
+        {
+          "variable": "counter",
+          "op": "inc"
+        }
+      ]
+    }
+  ],
+  "variables": [
+    {
+      "name": "counter",
+      "kind": "integer",
+      "init": 5
+    }
+  ],
+  "invariants": [
+    {
+      "id": "counter-large-in-b",
+      "description": "counter stays >= 5 while the machine is in B",
+      "kind": "var-in-range",
+      "variable": "counter",
+      "min": 5,
+      "when": {
+        "state": "B"
+      }
+    }
+  ]
+}

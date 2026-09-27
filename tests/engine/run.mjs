@@ -1,6 +1,6 @@
 import { readFile } from 'node:fs/promises'
 import { readFileSync } from 'node:fs'
-import { runVerification, runCompositionVerification } from '../../lib/engine.js'
+import { runVerification, runCompositionVerification, modelHash } from '../../lib/engine.js'
 
 const root = new URL('./fixtures/', import.meta.url)
 
@@ -62,6 +62,73 @@ const cases = [
       const path = finding?.path
       if (path === undefined || path.length !== 1 || path[0].from !== 'INIT' || path[0].event !== 'go' || path[0].to !== 'ACTIVE') {
         throw new Error('event-before-state violation must report INIT -go-> ACTIVE, got ' + JSON.stringify(path))
+      }
+    },
+  },
+  {
+    name: 'var-in-range-scoped-violation.json',
+    errors: 1,
+    findings: [
+      { check: 'S7', code: 'S7_INVARIANT_VIOLATION' },
+      { check: 'A7', code: 'A7_SHORTEST_COUNTEREXAMPLE' },
+    ],
+    assert(report) {
+      const a7 = report.checks.find((check) => check.id === 'A7')
+      const finding = a7?.findings.find((entry) => entry.code === 'A7_SHORTEST_COUNTEREXAMPLE')
+      const path = finding?.path
+      // counter leaves [0,1] inside A itself: A -bump-> A -bump-> A (counter 2)
+      if (path === undefined || path.length !== 2 || path[0].from !== 'A' || path.some((step) => step.to !== 'A')) {
+        throw new Error('counter must be caught leaving the range inside the scoped state A, got ' + JSON.stringify(path))
+      }
+    },
+  },
+  {
+    // Control for the case above: the same range, but the scope names A while the
+    // counter only leaves [0,1] after the machine has moved to B. Ignoring `when`
+    // would flag this identically to the fixture above; honoring it still flags it,
+    // but the counterexample points at B (the scoped state A is never violated).
+    name: 'var-in-range-scoped-other-state.json',
+    errors: 1,
+    findings: [
+      { check: 'S7', code: 'S7_INVARIANT_VIOLATION' },
+      { check: 'A7', code: 'A7_SHORTEST_COUNTEREXAMPLE' },
+    ],
+    assert(report) {
+      const a7 = report.checks.find((check) => check.id === 'A7')
+      const finding = a7?.findings.find((entry) => entry.code === 'A7_SHORTEST_COUNTEREXAMPLE')
+      const path = finding?.path
+      // A itself is in range; the counter only leaves it in B, which this scope names.
+      if (path === undefined || path.length !== 1 || path[0].from !== 'A' || path[0].to !== 'B') {
+        throw new Error('the violation must be located in scoped post-state B, got ' + JSON.stringify(path))
+      }
+      const s7 = report.checks.find((check) => check.id === 'S7')
+      const s7Finding = s7?.findings.find((entry) => entry.code === 'S7_INVARIANT_VIOLATION')
+      if (s7Finding?.evidence?.invariant?.when?.state !== 'B') {
+        throw new Error('the echoed invariant must retain its scope, got ' + JSON.stringify(s7Finding?.evidence))
+      }
+    },
+  },
+  {
+    name: 'var-in-range-scoped-holds.json',
+    errors: 0,
+    findings: [],
+    assert(report) {
+      const s7 = report.checks.find((check) => check.id === 'S7')
+      if (s7?.status !== 'pass') throw new Error('a satisfied scoped range must pass S7, got ' + String(s7?.status))
+    },
+  },
+  {
+    name: 'var-in-range-scoped-init-violation.json',
+    errors: 1,
+    findings: [
+      { check: 'S7', code: 'S7_INVARIANT_VIOLATION' },
+      { check: 'A7', code: 'A7_SHORTEST_COUNTEREXAMPLE' },
+    ],
+    assert(report) {
+      const a7 = report.checks.find((check) => check.id === 'A7')
+      const finding = a7?.findings.find((entry) => entry.code === 'A7_SHORTEST_COUNTEREXAMPLE')
+      if (finding?.path === undefined || finding.path.length !== 0) {
+        throw new Error('an initial-state violation must carry an empty path even when `when` selects it, got ' + JSON.stringify(finding?.path))
       }
     },
   },
@@ -1142,6 +1209,137 @@ async function runNarrativeValidationTests() {
   for (const bad of [bad1, bad2, bad3, bad4]) assertNoUndefinedValues(bad)
   console.log('PASS narrative-validation')
 }
+
+async function runInvariantScopeValidationTests() {
+  // Closed invariant schema: a key the selected kind does not declare must be
+  // reported, never silently accepted. Accepting it is what let a `when` scope
+  // read as if it took effect while the engine ignored it.
+  const base = {
+    schemaVersion: 1,
+    init: 'A',
+    states: [{ id: 'A' }, { id: 'B', terminal: true }],
+    transitions: [{ from: 'A', event: 'go', to: 'B' }],
+    variables: [{ name: 'counter', kind: 'integer', init: 0 }],
+  }
+  const withInvariant = (invariant) => ({ ...JSON.parse(JSON.stringify(base)), invariants: [invariant] })
+  const invariantError = (model, expected) => {
+    const report = runVerification(model)
+    if (report.ok) throw new Error('expected validation failure containing ' + JSON.stringify(expected))
+    const messages = report.checks[0].findings.map((entry) => entry.message)
+    if (!messages.some((message) => message.includes(expected))) {
+      throw new Error('expected ' + JSON.stringify(expected) + ', got ' + JSON.stringify(messages))
+    }
+    return report
+  }
+
+  const rejects = [
+    // unknown fields, including `when` on a kind that cannot honor it
+    [withInvariant({ id: 'a', description: 'a', kind: 'sequence', events: ['go'], when: { state: 'A' } }), 'unknown field for kind sequence'],
+    [withInvariant({ id: 'a', description: 'a', kind: 'leads-to', from: 'A', to: 'B', when: { state: 'A' } }), 'unknown field for kind leads-to'],
+    [withInvariant({ id: 'a', description: 'a', kind: 'never-states', states: ['B'], when: { state: 'A' } }), 'unknown field for kind never-states'],
+    [withInvariant({ id: 'a', description: 'a', kind: 'var-in-range', variable: 'counter', max: 1, scope: 'A' }), 'unknown field for kind var-in-range'],
+    // a range with neither bound is vacuous
+    [withInvariant({ id: 'a', description: 'a', kind: 'var-in-range', variable: 'counter' }), 'requires min or max'],
+    // scope must name a declared state
+    [withInvariant({ id: 'a', description: 'a', kind: 'var-in-range', variable: 'counter', max: 1, when: { state: 'GHOST' } }), 'references unknown state GHOST'],
+    // state scopes are closed too
+    [withInvariant({ id: 'a', description: 'a', kind: 'var-in-range', variable: 'counter', max: 1, when: { state: 'A', event: 'go' } }), 'unknown field for a state scope'],
+    // a guard scope must be a well-formed guard and must not reference the constrained variable
+    [withInvariant({ id: 'a', description: 'a', kind: 'var-in-range', variable: 'counter', max: 1, when: { bogus: 1 } }), 'must be a leaf'],
+    [withInvariant({ id: 'a', description: 'a', kind: 'var-in-range', variable: 'counter', max: 1, when: { variable: 'counter', op: '<', value: 3 } }), 'must not reference the constrained variable counter'],
+    [withInvariant({ id: 'a', description: 'a', kind: 'var-in-range', variable: 'counter', max: 1, when: { variable: 'ghost', op: '<', value: 3 } }), 'references unknown variable ghost'],
+  ]
+  for (const [model, expected] of rejects) assertNoUndefinedValues(invariantError(model, expected))
+
+  // a guard scope over an independent control variable is accepted and enforced
+  const guarded = withInvariant({ id: 'a', description: 'a', kind: 'var-in-range', variable: 'counter', max: 0, when: { variable: 'counter2', op: '==', value: 1 } })
+  guarded.variables = [{ name: 'counter', kind: 'integer', init: 0 }, { name: 'counter2', kind: 'integer', init: 0 }]
+  guarded.transitions = [{ from: 'A', event: 'go', to: 'B', updates: [{ variable: 'counter', op: 'inc' }, { variable: 'counter2', op: 'set', value: 1 }] }]
+  const guardedReport = runVerification(guarded)
+  if (!guardedReport.ok) throw new Error('guard scope over an independent variable must validate: ' + JSON.stringify(guardedReport.checks[0]?.findings ?? []))
+  // post-state B has counter2 == 1 and counter == 1 > max 0 -> guard is satisfied, range is violated
+  if (!guardedReport.checks.find((check) => check.id === 'S7')?.findings.some((finding) => finding.code === 'S7_INVARIANT_VIOLATION')) {
+    throw new Error('a satisfied guard scope must enforce the range')
+  }
+  assertNoUndefinedValues(guardedReport)
+
+  // A `when` clause is part of the model's identity: two models that differ only in
+  // scope must not hash equal (a dropped field would otherwise pass unnoticed).
+  const scoped = withInvariant({ id: 'a', description: 'a', kind: 'var-in-range', variable: 'counter', max: 0, when: { state: 'A' } })
+  const unscoped = withInvariant({ id: 'a', description: 'a', kind: 'var-in-range', variable: 'counter', max: 0 })
+  if (modelHash(scoped) === modelHash(unscoped)) throw new Error('a `when` scope must affect the model hash')
+  console.log('PASS invariant-scope-validation')
+}
+
+await runInvariantScopeValidationTests()
+
+async function runClosedModelValidationTests() {
+  // Every part of the model is a closed schema: an undeclared key is a typo or an
+  // unsupported feature, and a verifier that ignores it can report a property the
+  // model does not have. The regression this guards is concrete — on the open schema
+  // `{"kind":"var-in-range","maximum":0}` validated fine, reported errors=0 and S7=pass,
+  // silently turning a range that must fail into a vacuously true invariant.
+  const base = {
+    schemaVersion: 1,
+    init: 'A',
+    states: [{ id: 'A' }, { id: 'B', terminal: true }],
+    transitions: [{ from: 'A', event: 'go', to: 'B' }],
+  }
+  const mutate = (patch) => ({ ...JSON.parse(JSON.stringify(base)), ...patch })
+  const expectRejected = (model, expected) => {
+    const report = runVerification(model)
+    if (report.ok) throw new Error('expected rejection containing ' + JSON.stringify(expected) + ', but the model validated')
+    const messages = report.checks[0].findings.map((entry) => entry.message)
+    if (!messages.some((message) => message.includes(expected))) {
+      throw new Error('expected ' + JSON.stringify(expected) + ', got ' + JSON.stringify(messages))
+    }
+    return report
+  }
+
+  const rejections = [
+    // the false-negative hazard, exactly as it was observed
+    [mutate({ variables: [{ name: 'c', kind: 'integer', init: 0 }], transitions: [{ from: 'A', event: 'go', to: 'B', updates: [{ variable: 'c', op: 'inc' }] }], invariants: [{ id: 'c-zero', description: 'c stays 0', kind: 'var-in-range', variable: 'c', maximum: 0 }] }), 'invariants[0].maximum: unknown field for kind var-in-range'],
+    // a typo that would replace an intended bound with a vacuous one
+    [mutate({ variables: [{ name: 'c', kind: 'integer', init: 0 }], invariants: [{ id: 'c-zero', description: 'c stays 0', kind: 'var-in-range', variable: 'c' }] }), 'invariants[0]: requires min or max'],
+    // unknown keys on every model part
+    [mutate({ entites: [] }), 'model.entites: unknown field'],
+    [mutate({ states: [{ id: 'A', stat: 'x' }, { id: 'B', terminal: true }] }), 'states[0].stat: unknown field'],
+    [mutate({ transitions: [{ from: 'A', event: 'go', to: 'B', guard2: 1 }] }), 'transitions[0].guard2: unknown field'],
+    [mutate({ variables: [{ name: 'c', kind: 'integer', init: 0 }], transitions: [{ from: 'A', event: 'go', to: 'B', updates: [{ variable: 'c', op: 'inc', value2: 1 }] }] }), 'transitions[0].updates[0].value2: unknown field'],
+    [mutate({ variables: [{ name: 'c', kind: 'integer', init: 0, monotonic2: 'inc' }] }), 'variables[0].monotonic2: unknown field'],
+    [mutate({ variables: [{ name: 'c', kind: 'integer', init: 0 }], boundaryChecks: [{ variable: 'c', values: [0], entity: 'E' }] }), 'boundaryChecks[0].entity: unknown field'],
+    [mutate({ resourcePairs: [{ resource: 'm', acquireEvent: 'lock', releaseEvent: 'unlock', failEv: 'x' }] }), 'resourcePairs[0].failEv: unknown field'],
+    [mutate({ narrative: { states: { A: 'a', B: 'b' }, events: { go: 'g' }, scenarios: [{ from: 'A', event: 'go', scenario: 's' }], extra: 1 } }), 'narrative.extra: unknown field'],
+    [mutate({ narrative: { states: { A: 'a', B: 'b' }, events: { go: 'g' }, scenarios: [{ from: 'A', event: 'go', scenario: 's', note: 'n' }] } }), 'narrative.scenarios[0].note: unknown field'],
+    // misspelled values that used to be ignored outright
+    [mutate({ variables: [{ name: 'c', kind: 'integer', init: 0 }], transitions: [{ from: 'A', event: 'go', to: 'B', guard: { variable: 'c', op: '===', value: 0 } }] }), 'transitions[0].guard.op: must be a comparison operator'],
+    [mutate({ variables: [{ name: 'c', kind: 'integer', init: 0 }], transitions: [{ from: 'A', event: 'go', to: 'B', updates: [{ variable: 'c', op: 'increment' }] }] }), "transitions[0].updates[0].op: must be 'set', 'inc', or 'dec'"],
+    [mutate({ states: [{ id: 'A', terminal: 'yes' }, { id: 'B', terminal: true }] }), 'states[0].terminal: must be a boolean'],
+    [mutate({ variables: [{ name: 'c', init: 0 }] }), "variables[0].kind: must be 'integer' or 'boolean'"],
+    // invariant targets must resolve, or the check silently becomes vacuous
+    [mutate({ invariants: [{ id: 'n', description: 'd', kind: 'never-states', states: ['C'] }] }), 'invariants[0].states[0]: references unknown state C'],
+    [mutate({ invariants: [{ id: 'l', description: 'd', kind: 'leads-to', from: 'A', to: 'C' }] }), 'invariants[0].to: references unknown state C'],
+    [mutate({ invariants: [{ id: 'l', description: 'd', kind: 'leads-to', from: 'C', to: 'B' }] }), 'invariants[0].from: references unknown state C'],
+    [mutate({ invariants: [{ id: 'p', description: 'd', kind: 'probability', target: 'C', op: '>=', p: 0.5 }] }), 'invariants[0].target: references unknown state C'],
+    [mutate({ invariants: [{ id: 'e', description: 'd', kind: 'event-before-state', event: 'go', state: 'C' }] }), 'invariants[0].state: references unknown state C'],
+    [mutate({ invariants: [{ id: 'e', description: 'd', kind: 'event-before-state', event: 'launch', state: 'B' }] }), 'invariants[0].event: references unknown event launch'],
+  ]
+  for (const [model, expected] of rejections) assertNoUndefinedValues(expectRejected(model, expected))
+
+  // The data model has its own (entity, field) boundary checks and its own validator;
+  // tightening the logic model must not have leaked into it.
+  const { runDataVerification } = await import('../../lib/data-engine.js')
+  const dataModel = {
+    schemaVersion: 1,
+    entities: [{ name: 'User', fields: [{ name: 'age', type: 'integer', required: true, min: 0, max: 120 }] }],
+    boundaryChecks: [{ entity: 'User', field: 'age', values: [0, 120] }],
+  }
+  const dataReport = runDataVerification(dataModel)
+  if (!dataReport.ok) throw new Error('the (entity, field) boundary-check shape must stay valid for data models: ' + JSON.stringify(dataReport.checks[0]?.findings ?? []))
+  console.log('PASS closed-model-validation')
+}
+
+await runClosedModelValidationTests()
 
 await runNarrativeValidationTests()
 if (failures > 0) {

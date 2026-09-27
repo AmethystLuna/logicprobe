@@ -65,6 +65,18 @@ export interface VariableSpec {
     max?: number;
     monotonic?: 'inc' | 'dec';
 }
+/**
+ * Scope filter for a state-predicate invariant (see `InvariantSpec`): the range is
+ * only required to hold in runtime states that satisfy the filter. Exactly one of
+ * `state` / guard-node form must be present.
+ */
+export interface StateGuard {
+    /** Only runtime states whose id is this state are checked. */
+    state: string;
+}
+/** A `when` filter: either a single-state scope or the ordinary guard language. */
+export type InvariantWhen = StateGuard | GuardNode;
+export declare function isStateGuard(when: InvariantWhen): when is StateGuard;
 export type InvariantSpec = {
     id: string;
     description: string;
@@ -77,6 +89,16 @@ export type InvariantSpec = {
     variable: string;
     min?: number;
     max?: number;
+    /**
+     * Optional scope. `when` is evaluated against the POST-state of every transition
+     * (and, for the `{ state }` form, against the initial state regardless), so a
+     * `{ state }` scope is sound: for every reachable runtime state inside the scope
+     * the variable is in range. A guard-node scope that references the constrained
+     * variable can mask its own violation — prefer `{ state }` or an independent
+     * control variable. Not offered on trace-property kinds (leads-to, sequence, ...),
+     * whose scope over a path would be ambiguous.
+     */
+    when?: InvariantWhen;
 } | {
     id: string;
     description: string;

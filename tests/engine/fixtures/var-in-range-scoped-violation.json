@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 1,
+  "init": "A",
+  "states": [
+    {
+      "id": "A"
+    },
+    {
+      "id": "B",
+      "terminal": true
+    }
+  ],
+  "transitions": [
+    {
+      "from": "A",
+      "event": "bump",
+      "to": "A",
+      "updates": [
+        {
+          "variable": "counter",
+          "op": "inc"
+        }
+      ]
+    },
+    {
+      "from": "A",
+      "event": "go",
+      "to": "B"
+    }
+  ],
+  "variables": [
+    {
+      "name": "counter",
+      "kind": "integer",
+      "init": 0
+    }
+  ],
+  "invariants": [
+    {
+      "id": "counter-small-in-a",
+      "description": "counter stays <= 1 while the machine is in A",
+      "kind": "var-in-range",
+      "variable": "counter",
+      "min": 0,
+      "max": 1,
+      "when": {
+        "state": "A"
+      }
+    }
+  ]
+}

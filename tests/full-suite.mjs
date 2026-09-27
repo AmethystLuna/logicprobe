@@ -24,6 +24,7 @@ const orderBefore = {
   transitions: [
     { from: 'NEW', event: 'pay', to: 'PAID' }, { from: 'PAID', event: 'ship', to: 'SHIPPED' }, { from: 'SHIPPED', event: 'deliver', to: 'DONE' },
     { from: 'NEW', event: 'cancel', to: 'CANCELLED' }, { from: 'PAID', event: 'cancel', to: 'CANCELLED' },
+    { from: 'DONE', event: 'refund', to: 'DONE' },
   ],
   invariants: [{ id: 'p', description: 'pay before shipped', kind: 'event-before-state', event: 'pay', state: 'SHIPPED' }],
 }
@@ -36,12 +37,17 @@ const orderAfterVerify = {
   ],
   invariants: [{ id: 'p', description: 'pay before shipped', kind: 'event-before-state', event: 'pay', state: 'SHIPPED' }],
 }
+// Regression model: the NEW --pay--> PAID transition is gone (the regression under test)
+// and the `refund` event disappears entirely. `pay` itself survives as an event so the
+// shared event-before-state invariant keeps a resolvable reference — it is asserted about
+// SHIPPED, and the surviving CANCELLED --pay--> CANCELLED can never satisfy it.
 const orderRegression = {
   schemaVersion: 1, init: 'NEW',
   states: [{ id: 'NEW' }, { id: 'PAID' }, { id: 'SHIPPED' }, { id: 'DONE', terminal: true }, { id: 'CANCELLED', terminal: true }],
   transitions: [
     { from: 'PAID', event: 'ship', to: 'SHIPPED' }, { from: 'SHIPPED', event: 'deliver', to: 'DONE' },
     { from: 'NEW', event: 'cancel', to: 'CANCELLED' }, { from: 'PAID', event: 'cancel', to: 'CANCELLED' },
+    { from: 'CANCELLED', event: 'pay', to: 'CANCELLED' },
   ],
   invariants: [{ id: 'p', description: 'pay before shipped', kind: 'event-before-state', event: 'pay', state: 'SHIPPED' }],
 }
@@ -54,7 +60,7 @@ const atomBad = { schemaVersion: 1, init: 'A', states: [{ id: 'A' }, { id: 'B', 
 
 check('SM D1-D4: added VERIFY detected as behavior delta', hasFinding(runVerification(orderAfterVerify, { beforeModel: orderBefore }), 'D1', 'D1_EVENT_DISABLED'))
 const regReport = runVerification(orderRegression, { beforeModel: orderBefore })
-check('SM D1-D4: removed pay detected as regression', hasFinding(regReport, 'D1', 'D1_EVENT_DISABLED') && hasFinding(regReport, 'D3', 'D3_REMOVED_EVENT'))
+check('SM D1-D4: removed pay transition + dropped refund event detected as regression', hasFinding(regReport, 'D1', 'D1_EVENT_DISABLED') && hasFinding(regReport, 'D3', 'D3_REMOVED_TRANSITION') && hasFinding(regReport, 'D3', 'D3_REMOVED_EVENT'))
 check('SM A8: non-idempotent tick detected', hasFinding(runVerification(idemBad), 'A8', 'A8_NOT_IDEMPOTENT'))
 check('SM A8: noop idempotent passes', runVerification(idemOk).checks.find((c) => c.id === 'A8')?.findings.length === 0)
 check('SM S8: monotonic decrease detected', hasFinding(runVerification(monoBad), 'S8', 'S8_MONOTONIC_DECREASE'))

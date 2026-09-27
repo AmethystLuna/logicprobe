@@ -92,9 +92,37 @@ def validate_model(input_value):
     def bad(path, message):
         errors.append(path + ': ' + message)
 
+    # Declared keys per model part. The model schema is closed: a key that is not
+    # declared is a typo or an unsupported feature, and silently ignoring it can make
+    # the engine report a property the model does not actually have (a mistyped guard
+    # variable reads as an always-false guard, which prunes real paths and can yield a
+    # false "no deadlock"). Rejecting is the only safe option for a verifier.
+    model_keys = {
+        'root': ('schemaVersion', 'init', 'states', 'transitions', 'variables', 'invariants',
+                 'concurrentPairs', 'boundaryChecks', 'resourcePairs', 'idempotentEvents',
+                 'tickEvents', 'narrative'),
+        'state': ('id', 'terminal', 'onEntry', 'onExit', 'maxTicks'),
+        'transition': ('from', 'event', 'to', 'guard', 'updates', 'cost', 'weight'),
+        'update': ('variable', 'op', 'value'),
+        'variable': ('name', 'kind', 'init', 'min', 'max', 'monotonic'),
+        # LogicModelV1 boundary checks are (variable, values). The data-model engine has
+        # its own (entity, field) shape and its own validator — the two must not be mixed.
+        'boundaryCheck': ('variable', 'values'),
+        'resourcePair': ('resource', 'acquireEvent', 'releaseEvent', 'failEvent'),
+        'narrative': ('states', 'events', 'scenarios'),
+        'scenario': ('from', 'event', 'scenario'),
+    }
+
+    def reject_unknown_keys(value, part, path):
+        allowed = model_keys[part]
+        unexpected = [k for k in value.keys() if k not in allowed]
+        if unexpected:
+            bad(path + '.' + unexpected[0], 'unknown field (allowed: ' + ', '.join(allowed) + ')')
+
     if not _is_plain_object(input_value):
         return (False, ['model: must be an object'])
     root = input_value
+    reject_unknown_keys(root, 'root', 'model')
     if root.get('schemaVersion') != 1:
         bad('schemaVersion', 'must be 1')
     init = root.get('init')
@@ -110,6 +138,7 @@ def validate_model(input_value):
                 bad('states[' + str(index) + ']', 'must be an object')
                 continue
             sid = entry.get('id')
+            reject_unknown_keys(entry, 'state', 'states[' + str(index) + ']')
             if not isinstance(sid, str) or len(sid) == 0:
                 bad('states[' + str(index) + '].id', 'must be a non-empty string')
             elif sid in seen:
@@ -147,6 +176,7 @@ def validate_model(input_value):
             if not _is_plain_object(entry):
                 bad(p, 'must be an object')
                 continue
+            reject_unknown_keys(entry, 'transition', p)
             tfrom = entry.get('from')
             if not isinstance(tfrom, str) or len(tfrom) == 0:
                 bad(p + '.from', 'must be a non-empty string')
@@ -172,6 +202,7 @@ def validate_model(input_value):
                         if not _is_plain_object(update):
                             bad(up, 'must be an object')
                             continue
+                        reject_unknown_keys(update, 'update', up)
                         variable = update.get('variable')
                         if not isinstance(variable, str) or len(variable) == 0:
                             bad(up + '.variable', 'must be a non-empty string')
@@ -206,6 +237,7 @@ def validate_model(input_value):
                     bad(p, 'must be an object')
                     continue
                 name = entry.get('name')
+                reject_unknown_keys(entry, 'variable', p)
                 if not isinstance(name, str) or len(name) == 0:
                     bad(p + '.name', 'must be a non-empty string')
                 elif name in variable_names:
@@ -247,6 +279,32 @@ def validate_model(input_value):
             bad(p, 'references unknown variable ' + str(name))
 
     invariants = root.get('invariants')
+    # Closed schema per kind: a key the selected kind does not declare is rejected
+    # rather than silently ignored, because an ignored field still appears in the
+    # echoed report and reads as if it took effect. Unknown kinds are skipped so
+    # they fail on .kind alone.
+    invariant_keys = {
+        'never-states': ('id', 'description', 'kind', 'states'),
+        'var-in-range': ('id', 'description', 'kind', 'variable', 'min', 'max', 'when'),
+        'event-before-state': ('id', 'description', 'kind', 'event', 'state'),
+        'leads-to': ('id', 'description', 'kind', 'from', 'to'),
+        'sequence': ('id', 'description', 'kind', 'events'),
+        'atomicity': ('id', 'description', 'kind', 'events', 'commit', 'rollback'),
+        'budget': ('id', 'description', 'kind', 'budget'),
+        'probability': ('id', 'description', 'kind', 'target', 'op', 'p'),
+    }
+    invariant_state_ids = set()
+    if isinstance(states, list):
+        for state in states:
+            if isinstance(state, dict) and isinstance(state.get('id'), str):
+                invariant_state_ids.add(state['id'])
+    # Reference sets for invariant targets: denormalising a kind's target into the
+    # report makes a mistyped id look authoritative, so every reference must resolve.
+    invariant_event_ids = set()
+    if isinstance(transitions, list):
+        for transition in transitions:
+            if isinstance(transition, dict) and isinstance(transition.get('event'), str):
+                invariant_event_ids.add(transition['event'])
     if invariants is not None:
         if not isinstance(invariants, list):
             bad('invariants', 'must be an array')
@@ -263,6 +321,11 @@ def validate_model(input_value):
                 if not isinstance(desc, str):
                     bad(p + '.description', 'must be a string')
                 kind = entry.get('kind')
+                if kind in invariant_keys:
+                    allowed_keys = invariant_keys[kind]
+                    unexpected = [k for k in entry.keys() if k not in allowed_keys]
+                    if unexpected:
+                        bad(p + '.' + unexpected[0], 'unknown field for kind ' + str(kind) + ' (allowed: ' + ', '.join(allowed_keys) + ')')
                 if kind == 'never-states':
                     s_list = entry.get('states')
                     if not isinstance(s_list, list) or len(s_list) == 0:
@@ -271,6 +334,8 @@ def validate_model(input_value):
                         for s_index, state in enumerate(s_list):
                             if not isinstance(state, str) or len(state) == 0:
                                 bad(p + '.states[' + str(s_index) + ']', 'must be a non-empty string')
+                            elif state not in invariant_state_ids:
+                                bad(p + '.states[' + str(s_index) + ']', 'references unknown state ' + state)
                 elif kind == 'var-in-range':
                     validate_variable_ref(entry.get('variable'), p + '.variable')
                     mn = entry.get('min')
@@ -279,20 +344,51 @@ def validate_model(input_value):
                         bad(p + '.min', 'must be a number')
                     if mx is not None and (not isinstance(mx, (int, float)) or isinstance(mx, bool)):
                         bad(p + '.max', 'must be a number')
+                    if mn is None and mx is None:
+                        bad(p, 'requires min or max (a range with neither bound is vacuous)')
+                    when = entry.get('when')
+                    if when is not None:
+                        if not _is_plain_object(when):
+                            bad(p + '.when', 'must be an object')
+                        elif 'state' in when:
+                            for key in when.keys():
+                                if key != 'state':
+                                    bad(p + '.when.' + key, 'unknown field for a state scope (allowed: state)')
+                            scope_state = when.get('state')
+                            if not isinstance(scope_state, str) or len(scope_state) == 0:
+                                bad(p + '.when.state', 'must be a non-empty string')
+                            elif scope_state not in invariant_state_ids:
+                                bad(p + '.when.state', 'references unknown state ' + scope_state)
+                        else:
+                            _validate_guard(when, p + '.when', errors, bad)
+                            constrained = entry.get('variable')
+                            for wv in _guard_variables(when):
+                                if wv == constrained:
+                                    bad(p + '.when', 'must not reference the constrained variable ' + str(constrained) + ' (it can mask its own violation)')
+                                else:
+                                    validate_variable_ref(wv, p + '.when')
                 elif kind == 'event-before-state':
                     ev = entry.get('event')
                     if not isinstance(ev, str) or len(ev) == 0:
                         bad(p + '.event', 'must be a non-empty string')
+                    elif ev not in invariant_event_ids:
+                        bad(p + '.event', 'references unknown event ' + ev)
                     st = entry.get('state')
                     if not isinstance(st, str) or len(st) == 0:
                         bad(p + '.state', 'must be a non-empty string')
+                    elif st not in invariant_state_ids:
+                        bad(p + '.state', 'references unknown state ' + st)
                 elif kind == 'leads-to':
                     lfrom = entry.get('from')
                     if not isinstance(lfrom, str) or len(lfrom) == 0:
                         bad(p + '.from', 'must be a non-empty string')
+                    elif lfrom not in invariant_state_ids:
+                        bad(p + '.from', 'references unknown state ' + lfrom)
                     lto = entry.get('to')
                     if not isinstance(lto, str) or len(lto) == 0:
                         bad(p + '.to', 'must be a non-empty string')
+                    elif lto not in invariant_state_ids:
+                        bad(p + '.to', 'references unknown state ' + lto)
                 elif kind == 'sequence':
                     evs = entry.get('events')
                     if not isinstance(evs, list) or len(evs) == 0:
@@ -323,6 +419,8 @@ def validate_model(input_value):
                     target = entry.get('target')
                     if not isinstance(target, str) or len(target) == 0:
                         bad(p + '.target', 'must be a non-empty string')
+                    elif target not in invariant_state_ids:
+                        bad(p + '.target', 'references unknown state ' + target)
                     op = entry.get('op')
                     if op not in ('>=', '<=', '>', '<'):
                         bad(p + '.op', "must be one of '>=', '<=', '>', '<'")
@@ -352,6 +450,7 @@ def validate_model(input_value):
                     bad(p, 'must be an object')
                     continue
                 validate_variable_ref(entry.get('variable'), p + '.variable')
+                reject_unknown_keys(entry, 'boundaryCheck', p)
                 values = entry.get('values')
                 if not isinstance(values, list) or any(not isinstance(v, (int, float)) or isinstance(v, bool) for v in values):
                     bad(p + '.values', 'must be an array of numbers')
@@ -382,6 +481,7 @@ def validate_model(input_value):
                     bad(p, 'must be an object')
                     continue
                 resource = entry.get('resource')
+                reject_unknown_keys(entry, 'resourcePair', p)
                 if not isinstance(resource, str) or len(resource) == 0:
                     bad(p + '.resource', 'must be a non-empty string')
                 aq = entry.get('acquireEvent')
@@ -399,6 +499,7 @@ def validate_model(input_value):
         if not _is_plain_object(narrative):
             bad(np_, 'must be an object')
         else:
+            reject_unknown_keys(narrative, 'narrative', np_)
             state_ids = set()
             if isinstance(states, list):
                 for state in states:
@@ -449,6 +550,7 @@ def validate_model(input_value):
                         bad(sp, 'must be an object')
                         continue
                     sfrom = entry.get('from')
+                    reject_unknown_keys(entry, 'scenario', sp)
                     if not isinstance(sfrom, str) or len(sfrom) == 0:
                         bad(sp + '.from', 'must be a non-empty string')
                     elif sfrom not in state_ids:
@@ -522,6 +624,27 @@ def _validate_guard(input_value, p, errors, bad):
         _validate_guard(guard.get('not'), p + '.not', errors, bad)
         return
     bad(p, 'must be a leaf ({ variable, op, value }), { all }, { any }, or { not }')
+
+
+def _guard_variables(guard):
+    """Mirror of the TypeScript guardVariables(): every variable a guard references."""
+    if guard is None:
+        return []
+    if 'variable' in guard:
+        return [guard['variable']]
+    if 'all' in guard:
+        out = []
+        for child in guard['all']:
+            out.extend(_guard_variables(child))
+        return out
+    if 'any' in guard:
+        out = []
+        for child in guard['any']:
+            out.extend(_guard_variables(child))
+        return out
+    if 'not' in guard:
+        return _guard_variables(guard['not'])
+    return []
 
 
 def _walk_guard_references(guard, variable_names, errors, bad):
@@ -973,11 +1096,23 @@ def S5_event_completeness(model):
                          'All states handle all relevant events' if not findings else str(len(findings)) + ' unhandled (state, event) pairs')
 
 
-def _invariant_holds(invariant, runtime):
+def _when_scope_holds(when, runtime):
+    """Whether a var-in-range `when` scope selects this runtime state."""
+    if 'state' in when:
+        return when['state'] == runtime['state']
+    return _eval_guard(when, runtime['vars'])
+
+
+def _invariant_holds(invariant, runtime, is_initial=False):
     kind = invariant['kind']
     if kind == 'never-states':
         return runtime['state'] not in invariant['states']
     if kind == 'var-in-range':
+        # The initial runtime state is checked unconditionally: a machine must never
+        # be able to escape the range simply by starting outside the scope.
+        when = invariant.get('when')
+        if not is_initial and when is not None and not _when_scope_holds(when, runtime):
+            return True
         value = runtime['vars'].get(invariant['variable'])
         if not isinstance(value, (int, float)) or isinstance(value, bool):
             return False
@@ -1023,7 +1158,7 @@ def _shortest_violation_for_invariant(model, max_states, invariant):
     if invariant['kind'] == 'event-before-state':
         return _shortest_event_before_state_violation(model, max_states, invariant)
     init = _initial_state(model)
-    if not _invariant_holds(invariant, init):
+    if not _invariant_holds(invariant, init, True):
         return {'invariant': invariant, 'path': [], 'reason': 'Initial state violates the invariant.'}
     visited = set([_runtime_key(init)])
     queue = deque([{'runtime': init, 'path': []}])
@@ -1499,6 +1634,12 @@ def _map_invariant_for_comparison(invariant, mapping):
         out['states'] = [_map_state_id(mapping, s) for s in invariant['states']]
     elif invariant['kind'] == 'event-before-state':
         out['state'] = _map_state_id(mapping, invariant['state'])
+    elif invariant['kind'] == 'var-in-range':
+        # A state scope must follow the state rename, otherwise D2 reports a spurious
+        # regression when the scope later refers to a state id that no longer exists.
+        when = invariant.get('when')
+        if when is not None and 'state' in when:
+            out['when'] = {'state': _map_state_id(mapping, when['state'])}
     return out
 
 

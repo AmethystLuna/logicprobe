@@ -81,9 +81,78 @@ export interface VariableSpec {
   monotonic?: 'inc' | 'dec'
 }
 
+/**
+ * Scope filter for a state-predicate invariant (see `InvariantSpec`): the range is
+ * only required to hold in runtime states that satisfy the filter. Exactly one of
+ * `state` / guard-node form must be present.
+ */
+export interface StateGuard {
+  /** Only runtime states whose id is this state are checked. */
+  state: string
+}
+
+/** A `when` filter: either a single-state scope or the ordinary guard language. */
+export type InvariantWhen = StateGuard | GuardNode
+
+export function isStateGuard(when: InvariantWhen): when is StateGuard {
+  return 'state' in when
+}
+
+/** Allowed keys per invariant kind — the schema is closed, so anything else is a typo or an unsupported feature. */
+const INVARIANT_KEYS: Record<string, Set<string>> = {
+  'never-states': new Set(['id', 'description', 'kind', 'states']),
+  'var-in-range': new Set(['id', 'description', 'kind', 'variable', 'min', 'max', 'when']),
+  'event-before-state': new Set(['id', 'description', 'kind', 'event', 'state']),
+  'leads-to': new Set(['id', 'description', 'kind', 'from', 'to']),
+  'sequence': new Set(['id', 'description', 'kind', 'events']),
+  'atomicity': new Set(['id', 'description', 'kind', 'events', 'commit', 'rollback']),
+  'budget': new Set(['id', 'description', 'kind', 'budget']),
+  'probability': new Set(['id', 'description', 'kind', 'target', 'op', 'p']),
+}
+
+const KNOWN_INVARIANT_KINDS = new Set(Object.keys(INVARIANT_KEYS))
+
+/**
+ * Declared keys per model part. The model schema is closed: a key that is not
+ * declared is a typo or an unsupported feature, and silently ignoring it can make
+ * the engine report a property that the model does not actually have (a mistyped
+ * guard variable reads as an always-false guard, which prunes real paths and can
+ * yield a false "no deadlock"). Rejecting is the only safe option for a verifier.
+ */
+const MODEL_KEYS = {
+  root: new Set(['schemaVersion', 'init', 'states', 'transitions', 'variables', 'invariants', 'concurrentPairs', 'boundaryChecks', 'resourcePairs', 'idempotentEvents', 'tickEvents', 'narrative']),
+  state: new Set(['id', 'terminal', 'onEntry', 'onExit', 'maxTicks']),
+  transition: new Set(['from', 'event', 'to', 'guard', 'updates', 'cost', 'weight']),
+  update: new Set(['variable', 'op', 'value']),
+  variable: new Set(['name', 'kind', 'init', 'min', 'max', 'monotonic']),
+  // LogicModelV1 boundary checks are (variable, values). The data-model engine has
+  // its own (entity, field) shape and its own validator — the two must not be mixed.
+  boundaryCheck: new Set(['variable', 'values']),
+  resourcePair: new Set(['resource', 'acquireEvent', 'releaseEvent', 'failEvent']),
+  narrative: new Set(['states', 'events', 'scenarios']),
+  scenario: new Set(['from', 'event', 'scenario']),
+}
+
 export type InvariantSpec =
   | { id: string; description: string; kind: 'never-states'; states: string[] }
-  | { id: string; description: string; kind: 'var-in-range'; variable: string; min?: number; max?: number }
+  | {
+      id: string
+      description: string
+      kind: 'var-in-range'
+      variable: string
+      min?: number
+      max?: number
+      /**
+       * Optional scope. `when` is evaluated against the POST-state of every transition
+       * (and, for the `{ state }` form, against the initial state regardless), so a
+       * `{ state }` scope is sound: for every reachable runtime state inside the scope
+       * the variable is in range. A guard-node scope that references the constrained
+       * variable can mask its own violation — prefer `{ state }` or an independent
+       * control variable. Not offered on trace-property kinds (leads-to, sequence, ...),
+       * whose scope over a path would be ambiguous.
+       */
+      when?: InvariantWhen
+    }
   | { id: string; description: string; kind: 'event-before-state'; event: string; state: string }
   | { id: string; description: string; kind: 'leads-to'; from: string; to: string }
   | { id: string; description: string; kind: 'sequence'; events: string[] }
@@ -216,6 +285,13 @@ export function validateModel(input: unknown): { ok: true; model: LogicModelV1 }
     return { ok: false, errors: ['model: must be an object'] }
   }
   const root = input as Record<string, unknown>
+  const rejectUnknownKeys = (value: Record<string, unknown>, allowed: Set<string>, path: string): void => {
+    const unexpected = Object.keys(value).filter((key) => !allowed.has(key))
+    if (unexpected.length > 0) {
+      bad(path + '.' + unexpected[0], 'unknown field (allowed: ' + [...allowed].join(', ') + ')')
+    }
+  }
+  rejectUnknownKeys(root, MODEL_KEYS.root, 'model')
   if (root.schemaVersion !== 1) bad('schemaVersion', 'must be 1')
   if (typeof root.init !== 'string' || root.init.length === 0) bad('init', 'must be a non-empty string')
   if (!Array.isArray(root.states) || root.states.length === 0) {
@@ -228,6 +304,7 @@ export function validateModel(input: unknown): { ok: true; model: LogicModelV1 }
         return
       }
       const state = entry as Record<string, unknown>
+      rejectUnknownKeys(state, MODEL_KEYS.state, 'states[' + index + ']')
       if (typeof state.id !== 'string' || state.id.length === 0) bad('states[' + index + '].id', 'must be a non-empty string')
       else if (seen.has(state.id)) bad('states[' + index + '].id', 'duplicate state id ' + state.id)
       else seen.add(state.id)
@@ -256,6 +333,7 @@ export function validateModel(input: unknown): { ok: true; model: LogicModelV1 }
         return
       }
       const transition = entry as Record<string, unknown>
+      rejectUnknownKeys(transition, MODEL_KEYS.transition, path)
       if (typeof transition.from !== 'string' || transition.from.length === 0) bad(path + '.from', 'must be a non-empty string')
       else if (!stateIds.has(transition.from)) bad(path + '.from', 'unknown state ' + transition.from)
       if (typeof transition.event !== 'string' || transition.event.length === 0) bad(path + '.event', 'must be a non-empty string')
@@ -271,6 +349,7 @@ export function validateModel(input: unknown): { ok: true; model: LogicModelV1 }
             return
           }
           const record = update as Record<string, unknown>
+          rejectUnknownKeys(record, MODEL_KEYS.update, updatePath)
           if (typeof record.variable !== 'string' || record.variable.length === 0) bad(updatePath + '.variable', 'must be a non-empty string')
           if (record.op !== 'set' && record.op !== 'inc' && record.op !== 'dec') bad(updatePath + '.op', "must be 'set', 'inc', or 'dec'")
           if (record.value !== undefined && typeof record.value !== 'number') bad(updatePath + '.value', 'must be a number')
@@ -301,6 +380,7 @@ export function validateModel(input: unknown): { ok: true; model: LogicModelV1 }
         return
       }
       const variable = entry as Record<string, unknown>
+      rejectUnknownKeys(variable, MODEL_KEYS.variable, path)
       if (typeof variable.name !== 'string' || variable.name.length === 0) bad(path + '.name', 'must be a non-empty string')
       else if (variableNames.has(variable.name)) bad(path + '.name', 'duplicate variable ' + variable.name)
       else variableNames.add(variable.name)
@@ -321,6 +401,10 @@ export function validateModel(input: unknown): { ok: true; model: LogicModelV1 }
     if (typeof name !== 'string' || name.length === 0) bad(path, 'must be a non-empty string')
     else if (!variableNames.has(name)) bad(path, 'references unknown variable ' + name)
   }
+  const invariantStateIds = new Set<string>(Array.isArray(root.states) ? (root.states as StateSpec[]).map((state) => state.id) : [])
+  // Reference sets for invariant targets: denormalising a kind's target into the
+  // report makes a mistyped id look authoritative, so every reference must resolve.
+  const invariantEventIds = new Set<string>(Array.isArray(root.transitions) ? (root.transitions as TransitionSpec[]).map((transition) => transition.event) : [])
   if (root.invariants !== undefined) {
     if (!Array.isArray(root.invariants)) bad('invariants', 'must be an array')
     else root.invariants.forEach((entry, index) => {
@@ -332,21 +416,61 @@ export function validateModel(input: unknown): { ok: true; model: LogicModelV1 }
       const invariant = entry as Record<string, unknown>
       if (typeof invariant.id !== 'string' || invariant.id.length === 0) bad(path + '.id', 'must be a non-empty string')
       if (typeof invariant.description !== 'string') bad(path + '.description', 'must be a string')
+      // Reject keys the selected kind does not declare instead of silently ignoring
+      // them: an ignored field (e.g. a `when` scope on a kind that cannot honor it)
+      // still shows up in the echoed report and reads as if it took effect. Kinds an
+      // older reader may not know are skipped so they still fail on `.kind` alone.
+      if (KNOWN_INVARIANT_KINDS.has(invariant.kind as string)) {
+        const allowed = INVARIANT_KEYS[invariant.kind as string]
+        const unexpected = Object.keys(invariant).filter((key) => !allowed.has(key))
+        if (unexpected.length > 0) {
+          bad(path + '.' + unexpected[0], 'unknown field for kind ' + String(invariant.kind) + ' (allowed: ' + [...allowed].join(', ') + ')')
+        }
+      }
       if (invariant.kind === 'never-states') {
         if (!Array.isArray(invariant.states) || invariant.states.length === 0) bad(path + '.states', 'must be a non-empty array')
         else invariant.states.forEach((state, stateIndex) => {
           if (typeof state !== 'string' || state.length === 0) bad(path + '.states[' + stateIndex + ']', 'must be a non-empty string')
+          else if (!invariantStateIds.has(state)) bad(path + '.states[' + stateIndex + ']', 'references unknown state ' + state)
         })
       } else if (invariant.kind === 'var-in-range') {
         validateVariableRef(invariant.variable, path + '.variable')
         if (invariant.min !== undefined && typeof invariant.min !== 'number') bad(path + '.min', 'must be a number')
         if (invariant.max !== undefined && typeof invariant.max !== 'number') bad(path + '.max', 'must be a number')
+        if (invariant.min === undefined && invariant.max === undefined) bad(path, 'requires min or max (a range with neither bound is vacuous)')
+        if (invariant.when !== undefined) {
+          const when = invariant.when
+          if (typeof when !== 'object' || when === null || Array.isArray(when)) {
+            bad(path + '.when', 'must be an object')
+          } else if ('state' in when) {
+            const scope = when as Record<string, unknown>
+            for (const key of Object.keys(scope)) {
+              if (key !== 'state') bad(path + '.when.' + key, 'unknown field for a state scope (allowed: state)')
+            }
+            const state = scope.state
+            if (typeof state !== 'string' || state.length === 0) bad(path + '.when.state', 'must be a non-empty string')
+            else if (!invariantStateIds.has(state)) bad(path + '.when.state', 'references unknown state ' + state)
+          } else {
+            validateGuard(when, path + '.when', errors, bad)
+            for (const variable of guardVariables(when as GuardNode)) {
+              if (variable === invariant.variable) {
+                bad(path + '.when', 'must not reference the constrained variable ' + invariant.variable + ' (it can mask its own violation)')
+              } else {
+                validateVariableRef(variable, path + '.when')
+              }
+            }
+          }
+        }
       } else if (invariant.kind === 'event-before-state') {
         if (typeof invariant.event !== 'string' || invariant.event.length === 0) bad(path + '.event', 'must be a non-empty string')
+        else if (!invariantEventIds.has(invariant.event)) bad(path + '.event', 'references unknown event ' + invariant.event)
         if (typeof invariant.state !== 'string' || invariant.state.length === 0) bad(path + '.state', 'must be a non-empty string')
+        else if (!invariantStateIds.has(invariant.state)) bad(path + '.state', 'references unknown state ' + invariant.state)
       } else if (invariant.kind === 'leads-to') {
         if (typeof invariant.from !== 'string' || invariant.from.length === 0) bad(path + '.from', 'must be a non-empty string')
+        else if (!invariantStateIds.has(invariant.from)) bad(path + '.from', 'references unknown state ' + invariant.from)
         if (typeof invariant.to !== 'string' || invariant.to.length === 0) bad(path + '.to', 'must be a non-empty string')
+        else if (!invariantStateIds.has(invariant.to)) bad(path + '.to', 'references unknown state ' + invariant.to)
       } else if (invariant.kind === 'sequence') {
         if (!Array.isArray(invariant.events) || invariant.events.length === 0) bad(path + '.events', 'must be a non-empty array')
         else invariant.events.forEach((event, eventIndex) => {
@@ -363,6 +487,7 @@ export function validateModel(input: unknown): { ok: true; model: LogicModelV1 }
         if (typeof invariant.budget !== 'number' || !Number.isFinite(invariant.budget) || invariant.budget < 0) bad(path + '.budget', 'must be a non-negative finite number')
       } else if (invariant.kind === 'probability') {
         if (typeof invariant.target !== 'string' || invariant.target.length === 0) bad(path + '.target', 'must be a non-empty string')
+        else if (!invariantStateIds.has(invariant.target)) bad(path + '.target', 'references unknown state ' + invariant.target)
         if (invariant.op !== '>=' && invariant.op !== '<=' && invariant.op !== '>' && invariant.op !== '<') bad(path + '.op', "must be one of '>=', '<=', '>', '<'")
         if (typeof invariant.p !== 'number' || !Number.isFinite(invariant.p) || invariant.p < 0 || invariant.p > 1) bad(path + '.p', 'must be a number in [0, 1]')
       } else {
@@ -388,6 +513,7 @@ export function validateModel(input: unknown): { ok: true; model: LogicModelV1 }
         return
       }
       const check = entry as Record<string, unknown>
+      rejectUnknownKeys(check, MODEL_KEYS.boundaryCheck, path)
       validateVariableRef(check.variable, path + '.variable')
       if (!Array.isArray(check.values) || check.values.some((value) => typeof value !== 'number')) bad(path + '.values', 'must be an array of numbers')
     })
@@ -413,6 +539,7 @@ export function validateModel(input: unknown): { ok: true; model: LogicModelV1 }
         return
       }
       const pair = entry as Record<string, unknown>
+      rejectUnknownKeys(pair, MODEL_KEYS.resourcePair, path)
       if (typeof pair.resource !== 'string' || pair.resource.length === 0) bad(path + '.resource', 'must be a non-empty string')
       if (typeof pair.acquireEvent !== 'string' || pair.acquireEvent.length === 0) bad(path + '.acquireEvent', 'must be a non-empty string')
       if (typeof pair.releaseEvent !== 'string' || pair.releaseEvent.length === 0) bad(path + '.releaseEvent', 'must be a non-empty string')
@@ -425,6 +552,7 @@ export function validateModel(input: unknown): { ok: true; model: LogicModelV1 }
       bad(narrativePath, 'must be an object')
     } else {
       const narrative = root.narrative as Record<string, unknown>
+      rejectUnknownKeys(narrative, MODEL_KEYS.narrative, narrativePath)
       const stateIds = new Set<string>(Array.isArray(root.states) ? (root.states as StateSpec[]).map((state) => state.id) : [])
       const eventIds = new Set<string>(Array.isArray(root.transitions) ? (root.transitions as TransitionSpec[]).map((transition) => transition.event) : [])
       const fromEventGroups = new Set<string>(Array.isArray(root.transitions) ? (root.transitions as TransitionSpec[]).map((transition) => transition.from + '|' + transition.event) : [])
@@ -461,6 +589,7 @@ export function validateModel(input: unknown): { ok: true; model: LogicModelV1 }
             return
           }
           const scenario = entry as Record<string, unknown>
+          rejectUnknownKeys(scenario, MODEL_KEYS.scenario, scenarioPath)
           if (typeof scenario.from !== 'string' || scenario.from.length === 0) bad(scenarioPath + '.from', 'must be a non-empty string')
           else if (!stateIds.has(scenario.from)) bad(scenarioPath + '.from', 'unknown state ' + scenario.from)
           if (typeof scenario.event !== 'string' || scenario.event.length === 0) bad(scenarioPath + '.event', 'must be a non-empty string')
@@ -929,9 +1058,17 @@ interface InvariantViolation {
   reason: string
 }
 
-function invariantHolds(invariant: InvariantSpec, runtime: RuntimeState): boolean {
+/** Whether a `var-in-range` `when` scope selects this runtime state. */
+function whenScopeHolds(when: InvariantWhen, runtime: RuntimeState): boolean {
+  return isStateGuard(when) ? when.state === runtime.state : evalGuard(when, runtime.vars)
+}
+
+function invariantHolds(invariant: InvariantSpec, runtime: RuntimeState, isInitial = false): boolean {
   if (invariant.kind === 'never-states') return !invariant.states.includes(runtime.state)
   if (invariant.kind === 'var-in-range') {
+    // The initial runtime state is checked unconditionally: a machine must never be
+    // able to escape the range simply by starting outside the scope.
+    if (!isInitial && invariant.when !== undefined && !whenScopeHolds(invariant.when, runtime)) return true
     const value = runtime.vars[invariant.variable]
     if (typeof value !== 'number') return false
     if (invariant.min !== undefined && value < invariant.min) return false
@@ -946,7 +1083,7 @@ function shortestViolationForInvariant(model: LogicModelV1, options: NormalizedO
     return shortestEventBeforeStateViolation(model, options, invariant)
   }
   const init = initialState(model)
-  if (!invariantHolds(invariant, init)) {
+  if (!invariantHolds(invariant, init, true)) {
     return { invariant, path: [], reason: 'Initial state violates the invariant.' }
   }
   const visited = new Set<string>([runtimeKey(init)])
@@ -1448,6 +1585,15 @@ function mapInvariantForComparison(invariant: InvariantSpec, mapping: Record<str
       description: invariant.description + ' (from BEFORE)',
       state: mapStateId(mapping, invariant.state),
     }
+  }
+  if (invariant.kind === 'var-in-range') {
+    const mapped = { ...invariant, id: invariant.id + ':before', description: invariant.description + ' (from BEFORE)' }
+    // A state scope must follow the state rename, otherwise D2 reports a spurious
+    // regression when the scope later refers to a state id that no longer exists.
+    if (mapped.when !== undefined && isStateGuard(mapped.when)) {
+      mapped.when = { state: mapStateId(mapping, mapped.when.state) }
+    }
+    return mapped
   }
   return { ...invariant, id: invariant.id + ':before', description: invariant.description + ' (from BEFORE)' }
 }

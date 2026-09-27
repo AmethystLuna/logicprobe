@@ -35,6 +35,43 @@ The dsh-native `logicprobe_verify` tool accepts a structured JSON model. The eng
 | `idempotentEvents` | no | Events that must be replay-safe; verified by A8 |
 | `narrative` | no | Natural-language descriptions of states, events, and (state, event) scenarios — echoed in the report |
 
+### The schema is closed
+
+Every object in the model declares a fixed key set, and **an undeclared key is a validation error, never silently ignored**. This is a correctness requirement, not strictness for its own sake: a mistyped field name used to be dropped while the reported result still looked authoritative. The concrete regression this prevents — `{"kind": "var-in-range", "variable": "c", "maximum": 0}` (note `maximum` for `max`) validated cleanly and reported `errors: 0, S7: pass`, turning a range that must fail into a vacuously true invariant. The same class of typo applies to `states` vs `state` on a `never-states` invariant, `guard` vs `gaurd` on a transition, `updates` vs `update`, and so on.
+
+Declared keys per part:
+
+| Part | Allowed keys |
+|---|---|
+| model | `schemaVersion, init, states, transitions, variables, invariants, concurrentPairs, boundaryChecks, resourcePairs, idempotentEvents, tickEvents, narrative` |
+| state | `id, terminal, onEntry, onExit, maxTicks` |
+| transition | `from, event, to, guard, updates, cost, weight` |
+| update | `variable, op, value` |
+| variable | `name, kind, init, min, max, monotonic` |
+| boundaryCheck | `variable, values` |
+| resourcePair | `resource, acquireEvent, releaseEvent, failEvent` |
+| narrative | `states, events, scenarios` |
+| scenario | `from, event, scenario` |
+| invariant | per kind — see [Invariants](#invariants) |
+
+`boundaryChecks` is the one place where two schemas share a field name: `logicprobe_verify` uses `{ variable, values }` (a variable's boundary values for A5), while `logicprobe_datamodel_verify` uses `{ entity, field, values }` (a field's boundary values for DA2). Each validator enforces its own shape, so an `(entity, field)` check passed to the state-machine engine is rejected rather than half-understood.
+
+### References must resolve
+
+The same reasoning applies to every id a check names. A reference to a state, event, or variable that the model does not declare cannot be satisfied, and because the engine copies each check's target into its findings (`"target": "DONE"`), an unresolvable id reads as authoritative in the report:
+
+| Reference | Must name |
+|---|---|
+| `states[].id`, `init` | a declared state (unique) |
+| `transitions[].from` / `.to` | a declared state |
+| `transitions[].updates[].variable`, `boundaryChecks[].variable` | a declared variable |
+| `transitions[].guard` variables | a declared variable |
+| `resourcePairs[].acquireEvent` / `.releaseEvent` / `.failEvent` | a declared event |
+| `invariants[].event` (`event-before-state`) | a declared event |
+| `invariants[].state` / `.states[]` / `.from` / `.to` / `.target` / `.when.state` | a declared state |
+
+A vacuous check is worse than a rejected one: a `leads-to` invariant whose `to` state is misspelled can never be violated, and a `never-states` list holding a nonexistent id can never be reached, so both report "pass" for a model that was never actually checked.
+
 ## Model narrative (natural-language context)
 
 The model may carry a `narrative` block explaining, in natural language, what
@@ -123,7 +160,7 @@ A guard is exactly one of:
 | Kind | Shape | Checks |
 |---|---|---|
 | `never-states` | `{ states: ["ERROR"] }` | No reachable runtime state may be in the forbidden set |
-| `var-in-range` | `{ variable, min?, max? }` | Every reachable runtime state keeps the variable in range |
+| `var-in-range` | `{ variable, min?, max?, when? }` | Every reachable runtime state selected by `when` keeps the variable in range (at least one of `min`/`max` is required) |
 | `event-before-state` | `{ event: "power_ready", state: "ACTIVE" }` | Every path entering `state` must have passed through `event` first |
 | `leads-to` | `{ from: "MIGRATING", to: "DONE" }` | Every path from `from` must eventually reach `to` |
 | `sequence` | `{ events: ["backup", "modify", "commit"] }` | Events must occur in the given order |
@@ -132,6 +169,25 @@ A guard is exactly one of:
 | `probability` | `{ target, op: one of >= <= > <, p }` | P(ever hitting target) must satisfy the bound (A13, DTMC from transition `weight`, default 1; value iteration) |
 
 A7 reports the shortest violating path for each failed invariant. An empty path means the initial state already violates it.
+
+### Scoping a range to a state (`when`)
+
+`var-in-range` is the only kind that accepts `when`, and only it needs to: the others either already constrain a state set (`never-states`) or assert a property of a whole path (`leads-to`, `sequence`, `atomicity`, `budget`, `probability`), where "the scope applies at which step of the path" has no single answer. A `when` on any other kind is a validation error rather than a silently ignored field.
+
+```json
+{ "id": "depth-in-probe", "description": "probe depth stays bounded while in PROBE",
+  "kind": "var-in-range", "variable": "depth", "min": 0, "max": 4,
+  "when": { "state": "PROBE" } }
+```
+
+Two scope shapes are accepted:
+
+- `{ "state": "PROBE" }` — the state-scoped form, for "this range applies only here".
+- a guard node (`{ variable, op, value }` / `{ all }` / `{ any }` / `{ not }`) — for "this range applies only while a mode variable says so". It must not reference the constrained variable itself: a scope that depends on the value it constrains can switch itself off exactly when the value drifts out of range, which masks its own violation.
+
+Semantics — `when` is evaluated against the **post-state** of every transition, and the **initial state is checked unconditionally** whatever the scope says. So a `{ state }` scope is exhaustive over that state: for every reachable runtime state whose id is in the scope, the variable is in range, including the case where the machine starts there. This is why scoping away from the state that actually violates the range is not a loophole — it simply produces a machine in which no reachable in-scope state is out of range, i.e. an invariant that holds.
+
+`when` participates in the model hash, so two models differing only in scope are never treated as the same model in before/after comparison; a `{ state }` scope also follows `stateMapping` during D2 continuity checks.
 
 ## Permission presets and interaction mode
 

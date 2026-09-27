@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "init": "A",
+  "states": [
+    {
+      "id": "A",
+      "terminal": true
+    }
+  ],
+  "transitions": [],
+  "variables": [
+    {
+      "name": "counter",
+      "kind": "integer",
+      "init": 5
+    }
+  ],
+  "invariants": [
+    {
+      "id": "counter-small-in-a",
+      "description": "counter stays <= 1 while the machine is in A",
+      "kind": "var-in-range",
+      "variable": "counter",
+      "min": 0,
+      "max": 1,
+      "when": {
+        "state": "A"
+      }
+    }
+  ]
+}
