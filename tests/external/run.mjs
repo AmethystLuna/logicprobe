@@ -13,10 +13,25 @@ const spin = process.env.LOGICPROBE_SPIN || 'spin'
 const gcc = process.env.LOGICPROBE_GCC || 'gcc'
 let failures = 0
 
-function available(bin) {
-  if (bin.includes('/') || bin.includes('\\')) { return existsSync(bin) }
-  const r = spawnSync(bin, ['--version'], { stdio: 'ignore' })
-  return r.status === 0
+/**
+ * Probe whether an external tool can be invoked.
+ *
+ * The probe argument is a per-tool default because not every tool accepts the same
+ * version flag — `spin` recognises `-V` but exits non-zero on `--version`, while `gcc`
+ * is the other way round. Probing both with `--version` made a present `spin` look
+ * absent, so the whole suite reported "spin not found" and silently skipped.
+ *
+ * @param bin  command name, or a path (then only existence is checked)
+ * @param flag argv used to ask for the version (defaults to `--version`)
+ */
+function resolve(bin, flag = '--version') {
+  if (bin.includes('/') || bin.includes('\\')) {
+    return existsSync(bin) ? { ok: true, how: 'path' } : { ok: false, how: 'path' }
+  }
+  const r = spawnSync(bin, [flag], { stdio: 'ignore' })
+  if (r.status === 0) return { ok: true, how: flag }
+  if (r.error === undefined) return { ok: false, how: flag, present: true }
+  return { ok: false, how: flag, present: false }
 }
 
 function run(bin, args, cwd) {
@@ -42,10 +57,30 @@ function check(name, model, wantErrors) {
   } catch (error) { failures += 1; console.log('FAIL', name, '-', error instanceof Error ? error.message : String(error)) }
 }
 
-if (!available(spin)) { console.log('SKIP external spin end-to-end (spin not found; set LOGICPROBE_SPIN or install spin on PATH)'); process.exit(0) }
-if (!available(gcc)) { console.log('SKIP external spin end-to-end (gcc not found; set LOGICPROBE_GCC or install gcc on PATH)'); process.exit(0) }
+const spinProbe = resolve(spin, '-V')
+const gccProbe = resolve(gcc, '--version')
 
-console.log('external spin detected:', spin, '| gcc:', gcc)
+/**
+ * Report whether a required external tool is unusable, distinguishing "not on PATH"
+ * from "present but not identifiable" — conflating the two is what produced a
+ * misleading "spin not found" while `spin` was installed the whole time.
+ *
+ * @returns true when the suite must skip
+ */
+function missing(label, bin, probe, envVar, hint) {
+  if (probe.ok) return false
+  if (probe.present === true) {
+    console.log(`SKIP external spin end-to-end (${label} found at '${bin}' but '${bin} ${probe.how}' did not succeed, so it could not be identified)`)
+  } else {
+    console.log(`SKIP external spin end-to-end (${label} not found on PATH; set ${envVar} or ${hint})`)
+  }
+  return true
+}
+
+if (missing('spin', spin, spinProbe, 'LOGICPROBE_SPIN', 'install spin on PATH')) process.exit(0)
+if (missing('gcc', gcc, gccProbe, 'LOGICPROBE_GCC', 'install gcc on PATH')) process.exit(0)
+
+console.log('external spin detected:', spin, '(probe', spinProbe.how + ')', '| gcc:', gcc, '(probe', gccProbe.how + ')')
 
 const violation = { schemaVersion: 1, init: 'A', states: [{ id: 'A' }, { id: 'B', terminal: true }], transitions: [{ from: 'A', event: 'go', to: 'B' }], invariants: [{ id: 'noA', kind: 'never-states', description: 'never A', states: ['A'] }] }
 check('spin: never-states violated (A is initial)', violation, 1)
