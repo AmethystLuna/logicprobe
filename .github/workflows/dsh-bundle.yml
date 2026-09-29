@@ -51,6 +51,18 @@ jobs:
         run: npm run build
       - name: Engine regression fixtures
         run: node tests/engine/run.mjs && node tests/apply-smoke.mjs
+      - name: Browser-half contract
+        # The client bundle is hand-authored, so `tsc` never type-checks or emits
+        # it: this is the only check on its module id, its cordis injects, and
+        # the settings field the Plugins page switch writes.
+        run: node tests/dsh-client-half.test.mjs
+      - name: schemastery fallback guard
+        # Runs the built artifact with `.volatile` stripped off the real prototype,
+        # i.e. as a schemastery 3.18.2 host (dsh 0.1.5-rc.2 / 0.1.5-rc.3) evaluates
+        # it. Without this the degradation branch would only run on a user's
+        # machine — and an unconditional `.volatile()` throws during import there,
+        # which takes the whole host's boot down.
+        run: node tests/dsh-volatile-fallback.test.mjs
       # The suites below ship in `npm run test:engine` but were never run here, so
       # exporter output, the data-model checks, and the byte-for-byte parity between
       # the TypeScript and Python engines were unexercised in CI.

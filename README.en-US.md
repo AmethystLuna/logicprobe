@@ -182,7 +182,8 @@ Skills are invoked with `$logicprobe`. See `.zcode/INSTALL.md` for details.
 ## Requirements
 
 - Claude Code v2.1+ / Codex CLI latest / Cursor 2.5+ / Kimi CLI latest / OpenCode latest / ZCode 3.0+
-- DeepSeek Harness (dsh): dev preview — verified on mainline 2026-08-14 (gate bundle loaded and injected in-session)
+- DeepSeek Harness (dsh): dev preview — supports `>= 0.1.0-rc.7` (the standing declaration; this round re-measured 0.1.5-rc.2 / 0.1.5-rc.3 / 0.1.6-alpha.2 / 0.1.7-alpha.1 / 0.1.7-alpha.2 / 0.1.7-rc.1 / 0.1.7-rc.2 / 0.2.0-rc.1 / 0.2.0-rc.2 — per-release evidence in [DSH-COMPATIBILITY.md](DSH-COMPATIBILITY.md))
+- The Web Plugins-page "Gate injection" switch requires **dsh ≥ 0.1.7-alpha.1** — its settings service must project live fields. On older dsh the plugin still loads and still injects, with the switch simply absent and **no error**: below schemastery 3.18.3 the field degrades to an ordinary boolean, and a settings service without `whileServed` makes the client half register nothing.
 - Python 3.6+ optional (only for the automated harness; manual fallback mode requires none)
 
 ## Configuration
@@ -194,6 +195,8 @@ In DeepSeek Harness, the bundle registers the `logicprobe_verify` tool (through 
 | `enabled` | boolean | `true` | Set to `false` to disable the session-start gate injection. |
 | `gateContent` | string | built-in gate text | Override the text injected into the first model step. |
 | `interaction` | `ask` \| `auto` \| `follow-approval` | `follow-approval` | Model-confirmation policy. `follow-approval` resolves to `auto` when the session approval policy is `never`. |
+
+The switch is editable live in the dsh Web GUI: sidebar **Plugins** → this plugin's card → "Gate injection". It takes effect without a profile restart and controls only the injected text — turning it off leaves the skills and the verification tools registered. The same card also carries a coarser row switch: turning that off unmounts the whole row (skills, tools, and this switch go with it). Persistent overrides still go through the profile patch below.
 
 To change it, override the row by id in your profile's `cordis.patch.yml`:
 
@@ -239,7 +242,7 @@ npm run build
 
 Test chain:
 
-- `npm run test:engine` — state-machine / data-model engine regression (`tests/engine`, `tests/data-engine`, `tests/concurrency`, `tests/apply-smoke`, `tests/exporters`, `tests/external`) plus byte-for-byte Python parity (`tests/python/run.mjs`: the same fixtures are compared between the TS engine and `skills/logicprobe/references/logicprobe-engine.py` across reports / composition / exporter output; auto-SKIP when Python is absent)
+- `npm run test:engine` — state-machine / data-model engine regression (`tests/engine`, `tests/data-engine`, `tests/concurrency`, `tests/apply-smoke`, `tests/dsh-client-half`, `tests/exporters`, `tests/external`) plus byte-for-byte Python parity (`tests/python/run.mjs`: the same fixtures are compared between the TS engine and `skills/logicprobe/references/logicprobe-engine.py` across reports / composition / exporter output; auto-SKIP when Python is absent)
 - `npm run test:full` — `tests/full-suite.mjs` combined end-to-end suite
 - `npm run test:python` — Python parity only (build + `tests/python/run.mjs`)
 - Trigger tests are under `tests/skill-triggering/`: `bash tests/skill-triggering/run-all.sh`

@@ -24,7 +24,7 @@
  *
  * @module logicprobe-dsh
  */
-import type { Context } from '@deepseek-ai/cordis';
+import type { Context, Volatile } from '@deepseek-ai/cordis';
 import z from '@deepseek-ai/schemastery';
 import type { ContextFormed } from '@deepseek-ai/dsh-llm';
 declare module '@deepseek-ai/dsh-llm' {
@@ -38,17 +38,23 @@ export declare const name = "logicprobe";
 export declare const inject: string[];
 export type InteractionMode = 'ask' | 'auto' | 'follow-approval';
 export interface Config {
-    enabled: boolean;
+    /**
+     * The injection switch the Web client's Plugins page edits live: a `Volatile`
+     * reference on a host whose schemastery supports one, an ordinary boolean on a
+     * host that predates `.volatile()`. Read it through {@link injectionEnabled},
+     * which accepts both shapes.
+     */
+    enabled: Volatile<boolean> | boolean;
     gateContent: string;
     interaction: InteractionMode;
 }
-export declare const Config: z<Schemastery.ObjectS<{
-    enabled: z<boolean, boolean>;
-    gateContent: z<string, string>;
-    interaction: z<"ask" | "auto" | "follow-approval", "ask" | "auto" | "follow-approval">;
-}>, Schemastery.ObjectT<{
-    enabled: z<boolean, boolean>;
-    gateContent: z<string, string>;
-    interaction: z<"ask" | "auto" | "follow-approval", "ask" | "auto" | "follow-approval">;
-}>>;
+export declare const Config: z<Schemastery.ObjectS<NoInfer<{
+    enabled: z<boolean, boolean, "defined">;
+    gateContent: z<string, string, "defined">;
+    interaction: z<"ask" | "auto" | "follow-approval", "ask" | "auto" | "follow-approval", "defined">;
+}>>, Schemastery.ObjectT<NoInfer<{
+    enabled: z<boolean, boolean, "defined">;
+    gateContent: z<string, string, "defined">;
+    interaction: z<"ask" | "auto" | "follow-approval", "ask" | "auto" | "follow-approval", "defined">;
+}>>, "plain">;
 export declare function apply(ctx: Context, config: Config): void;

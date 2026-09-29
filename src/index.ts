@@ -26,7 +26,7 @@
  */
 
 import { fileURLToPath } from 'node:url'
-import type { Context } from '@deepseek-ai/cordis'
+import type { Context, Volatile } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import type { ContextFormed } from '@deepseek-ai/dsh-llm'
@@ -90,17 +90,62 @@ Plugin logicprobe is active. Documents are not truth — code is. Verify every v
 **Proactive suggestion**: When a user asks code-level behavioral questions — "could this state machine deadlock", "is this retry limit safe", "check this timing sequence for bugs", "is this migration non-breaking", "does this copy cover all required fields" — suggest logicprobe as an optional verification pass (do not auto-escalate).
 </EXTREMELY_IMPORTANT>`
 
+/** A schemastery field that may or may not carry `.volatile()`. */
+interface LiveField {
+  volatile?: () => unknown
+}
+
+/**
+ * Declare a field as live where this host's schemastery can — `.volatile()`
+ * arrived in 3.18.3 — and leave it an ordinary field where it cannot.
+ *
+ * The fallback is load-bearing, not defensive padding. `Config` below is built
+ * while this module is still being evaluated, so an unconditional `.volatile()`
+ * on a host shipping schemastery 3.18.2 (measured: dsh 0.1.5-rc.2 and
+ * 0.1.5-rc.3) throws during import; the loader entry then fails and takes the
+ * WHOLE plugin tree — and the host's boot — down with it. Degrading costs only
+ * the Plugins-page switch, because the settings service projects nothing but
+ * fields under a `.volatile()` node; skills, tools and the gate injection are
+ * untouched. The returned schema keeps the plain field's static type; the
+ * `Config` interface below carries the union the host actually hands over.
+ */
+function live<T>(field: T): T {
+  const probe = field as T & LiveField
+  return typeof probe.volatile === 'function' ? (probe.volatile() as T) : field
+}
+
 export interface Config {
-  enabled: boolean
+  /**
+   * The injection switch the Web client's Plugins page edits live: a `Volatile`
+   * reference on a host whose schemastery supports one, an ordinary boolean on a
+   * host that predates `.volatile()`. Read it through {@link injectionEnabled},
+   * which accepts both shapes.
+   */
+  enabled: Volatile<boolean> | boolean
   gateContent: string
   interaction: InteractionMode
 }
 
 export const Config = z.object({
-  enabled: z.boolean().default(true),
+  // Live so the Web Plugins page can flip the gate injection inside a running
+  // session: dsh's settings service projects ONLY fields under a `.volatile()`
+  // node and rejects writes to every other path. The price is that the injection
+  // reads the reference per step instead of deciding once at mount, which is also
+  // what lets a toggle take effect without remounting the row.
+  enabled: live(z.boolean().default(true)),
   gateContent: z.string().default(DEFAULT_GATE_CONTENT),
   interaction: z.union(['ask', 'auto', 'follow-approval']).default('follow-approval'),
 })
+
+/**
+ * Read the injection switch as a boolean, whichever shape this host produced.
+ * @param config - the resolved plugin configuration.
+ * @returns whether the gate may be injected.
+ */
+function injectionEnabled(config: Config): boolean {
+  const value = config.enabled
+  return typeof value === 'boolean' ? value : value.get()
+}
 
 function gateMessage(text: string): UserMessage {
   return createUserMessage({
@@ -227,7 +272,7 @@ function inspectProvider(config: Config, isToolRegistered: () => boolean, isData
     query: async (method) => {
       if (method === 'status') {
         return {
-          enabled: config.enabled,
+          enabled: injectionEnabled(config),
           gateContentLength: config.gateContent.length,
           interaction: config.interaction,
           toolRegistered: isToolRegistered(),
@@ -324,7 +369,12 @@ export function apply(ctx: Context, config: Config): void {
       customSkillDirs: [SKILLS_DIR],
     })
   })
-  if (!config.enabled) return
+  // Injection listens unconditionally, including while the switch is off: the
+  // switch is volatile, so `apply` runs once and the value behind it can turn on
+  // later from the Web Plugins page. Returning early on a false value here would
+  // freeze that decision for the lifetime of the mount, and turning the switch
+  // back on could never take effect without a profile restart.
+  //
   // Inject the gate once per session on the FIRST model step that runs,
   // instead of at session-start: session-start injection lands in the agent's
   // inbox, which a blank-session preset switch (agentPreset.select ->
@@ -340,6 +390,7 @@ export function apply(ctx: Context, config: Config): void {
     const decision = await next()
     if (decision.kind === 'reject') return decision
     registerIntegrations()
+    if (!injectionEnabled(config)) return decision
     if (gateInHistory(agent.session)) return decision
     return {
       kind: 'enter',

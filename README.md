@@ -181,7 +181,8 @@ cp -r logicprobe/skills/* .zcode/skills/
 ## 环境要求
 
 - Claude Code v2.1+ / Codex CLI 最新 / Cursor 2.5+ / Kimi CLI 最新 / OpenCode 最新 / ZCode 3.0+
-- DeepSeek Harness (dsh): dev preview — 已实测 mainline 2026-08-14（gate bundle 加载并注入会话成功）
+- DeepSeek Harness (dsh): dev preview — 支持 `>= 0.1.0-rc.7`（沿用既有声明；本轮实测覆盖 0.1.5-rc.2 / 0.1.5-rc.3 / 0.1.6-alpha.2 / 0.1.7-alpha.1 / 0.1.7-alpha.2 / 0.1.7-rc.1 / 0.1.7-rc.2 / 0.2.0-rc.1 / 0.2.0-rc.2，逐版本证据见 [DSH-COMPATIBILITY.md](DSH-COMPATIBILITY.md)）
+- Web 端的「Gate 注入」开关需要 **dsh ≥ 0.1.7-alpha.1**（设置服务必须能投影即时字段）。更早的 dsh 上插件照常加载、照常注入，只是开关不出现、**也不报错**：schemastery 早于 3.18.3 时该字段退化为普通布尔值；设置服务没有 `whileServed` 时客户端半侧不注册任何东西。
 - Python 3.6+ 可选（仅自动验证工具需要；手动兜底模式无需任何依赖）
 
 ## 配置
@@ -193,6 +194,8 @@ cp -r logicprobe/skills/* .zcode/skills/
 | `enabled` | boolean | `true` | 设为 `false` 可关闭首步 Gate 注入。 |
 | `gateContent` | string | 内置 gate 文本 | 覆盖注入到首轮模型上下文中的文本。 |
 | `interaction` | `ask` \| `auto` \| `follow-approval` | `follow-approval` | 模型确认策略；`follow-approval` 在会话 approval policy 为 `never` 时解析为 `auto`。 |
+
+在 dsh Web GUI 里可以直接改这个开关：侧边栏 **插件** → 本插件卡片 → 「Gate 注入」。它实时生效，不必重启 profile，而且只管注入的那段文本——关掉后 skills 与验证工具照常注册。同一张卡片上还有一个更粗粒度的行开关：关掉它会整行卸载插件（技能、工具和这个开关一起消失）。要持久化覆盖，仍按下面的 profile patch 写。
 
 在 profile 的 `cordis.patch.yml` 中按 row id 覆盖：
 
@@ -237,7 +240,7 @@ npm run build
 
 测试链：
 
-- `npm run test:engine` — 状态机/数据模型引擎回归（`tests/engine`、`tests/data-engine`、`tests/concurrency`、`tests/apply-smoke`、`tests/exporters`、`tests/external`）+ Python 逐字节一致性对照（`tests/python/run.mjs`：同一批 fixture 在 TS 引擎与 `skills/logicprobe/references/logicprobe-engine.py` 之间比对报告/组合/导出产物；无 Python 时自动 SKIP）
+- `npm run test:engine` — 状态机/数据模型引擎回归（`tests/engine`、`tests/data-engine`、`tests/concurrency`、`tests/apply-smoke`、`tests/dsh-client-half`、`tests/exporters`、`tests/external`）+ Python 逐字节一致性对照（`tests/python/run.mjs`：同一批 fixture 在 TS 引擎与 `skills/logicprobe/references/logicprobe-engine.py` 之间比对报告/组合/导出产物；无 Python 时自动 SKIP）
 - `npm run test:full` — `tests/full-suite.mjs` 端到端合并套件
 - `npm run test:python` — 仅 Python parity（构建 + `tests/python/run.mjs`）
 - 触发测试位于 `tests/skill-triggering/`：`bash tests/skill-triggering/run-all.sh`
