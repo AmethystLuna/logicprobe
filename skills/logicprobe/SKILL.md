@@ -1,6 +1,6 @@
 ---
 name: logicprobe
-description: "Use when reviewing design documents, architecture specs, technical proposals, or refactoring plans that make claims about API names, file locations, enum values, or mechanism feasibility. When the document contains state machines, protocol logic, or behavioral claims (≥3 states, ACK/NACK/retry sequences, 'always'/'never'/'guaranteed' assertions, or refactoring that modifies state topology), escalate into logic-primitive verification — generate and run executable models to check mathematical completeness before trusting any claim. For refactoring specifically, the pipeline compares before/after models to verify behavioral preservation and regression freedom. ALSO proactively SUGGEST this skill (do not require) when a user asks code-level behavioral questions — 'check this timing for bugs', 'could this state machine deadlock', 'is this retry limit safe' — since plan-level verification has usually already been done."
+description: "Use when reviewing design documents, architecture specs, technical proposals, or refactoring plans that make claims about API names, file locations, enum values, or mechanism feasibility. When the document contains state machines, protocol logic, or behavioral claims (≥3 states, ACK/NACK/retry sequences, 'always'/'never'/'guaranteed' assertions, or refactoring that modifies state topology), escalate into logic-primitive verification — generate and run executable models to check mathematical completeness before trusting any claim. For refactoring specifically, the pipeline compares before/after models to verify behavioral preservation and regression freedom. ALSO use when the task is to model a code flow as UML — reverse-engineering a handler, documenting a protocol, or auditing a diagram somebody drew: render the model as a state/activity/sequence diagram, read a hand-drawn diagram back into a model, and review the modelling itself (unreachable states, dead ends, ambiguous branches, documentation gaps, diagram-versus-model round-trip fidelity). ALSO proactively SUGGEST this skill (do not require) when a user asks code-level behavioral questions — 'check this timing for bugs', 'could this state machine deadlock', 'is this retry limit safe' — since plan-level verification has usually already been done."
 ---
 
 # Logic Probe
@@ -140,6 +140,11 @@ Refactoring variant:
     → Run pipeline on AFTER model (22 checks)
     → Compare BEFORE vs AFTER: behavioral preservation, regression, complexity delta
     → Flag any invariant that held in BEFORE but fails in AFTER
+
+UML modelling variant (the task is to draw a flow, not to check a claim):
+  Code flow → model with a citation per element → logicprobe_uml action=render → diagram
+    → logicprobe_uml action=review → modelling findings + render/parse round-trip fidelity
+    → logicprobe_verify → the behavioural checks (S1-S8 / A1-A14)
 ```
 
 ### Refactoring Verification Mode
@@ -307,6 +312,31 @@ If the user says yes, extract the model from the existing code (not a plan docum
 
 This covers the gap where behavioral verification is useful even when no design document is being reviewed.
 
+## UML Modelling and Modelling Review
+
+Use this when the task is to **draw** a code flow rather than to check a claim: reverse-engineering a handler, documenting a protocol exchange, or auditing a diagram somebody else drew. A diagram is a model, and a model can be wrong — a tidy flow chart is not evidence about the code, and a diagram that disagrees with the model it came from is worse than no diagram, because a reader will believe it.
+
+Pipeline (DSH):
+
+```text
+code flow → model (citation per element) → logicprobe_uml action=render → diagram source
+          → logicprobe_uml action=review → modelling findings + round-trip fidelity
+          → logicprobe_verify           → behaviour (S1-S8 structural, A1-A14 adversarial)
+```
+
+- **render** — LogicModelV1 → Mermaid (`state` | `activity` | `sequence`) or PlantUML (`state` | `sequence`). Constructs the notation cannot carry verbatim become warnings, never silent drops; PlantUML activity is refused rather than approximated.
+- **parse** — Mermaid/PlantUML state or activity text → LogicModelV1, so a hand-drawn diagram can be verified like any other model. A sequence diagram is refused: a trace cannot reconstruct a machine.
+- **review** — three input shapes: a model (is it well-modelled? renders and re-parses it), a diagram (what does it say?), or both (does the diagram match the model?). Findings cover structural defects (unreachable states, dead ends, ambiguous or non-exhaustive branches, self-loops with no exit, duplicate transitions), documentation gaps (no narrative, unbounded variables, states the reader cannot map back to code, label drift), and the fidelity check — any structural difference between the diagram and its model is `UML017_ROUND_TRIP_MISMATCH`.
+
+Rules for this mode:
+
+1. **A diagram is not evidence.** Every state, event, guard and action needs a citation — `file:line` for code, section for a document. Present the citations with the diagram.
+2. **Review before you present.** Run `logicprobe_uml action=review` and fix the error findings first; an ambiguous or dead-ended diagram misleads every later reader.
+3. **The review never replaces verification.** It covers the modelling; S1-S8 / A1-A14 cover the behaviour, and each finding names the check that settles it.
+4. **Keep the narrative with the model** (`narrative.states` / `narrative.events` / `narrative.scenarios`) so the diagram stays readable against the code, and so label drift between the two surfaces as a finding instead of as a stale picture.
+
+Full checklist (code `UML001`-`UML019`), the directive format generated diagrams carry, a worked example and the limits of each view: `references/uml-modeling-guide.md`.
+
 ### When NOT to Escalate
 
 Skip logic-primitive verification when:
@@ -340,3 +370,4 @@ For routing claims in dimensions logicprobe does not verify — hard real time (
 5. **For behavioral claims: verify with code, not reasoning.** If a plan says "always", "never", or "guaranteed", generate and run a model. One counter-example is enough to refute a universal claim.
 6. **Confirm the model before running it** — unless the runtime reports `logicprobe interaction=auto`. Extraction errors are the dominant failure mode of formal verification. In auto mode, substitute evidence-cited extraction + round-trip validation and mark the report `UNCONFIRMED`.
 7. **Don't verify what the code already checks.** If the existing codebase has compile-time assertions, static analysis, or runtime checks for a property, cite those — don't re-verify in a Python model.
+8. **A diagram is a model, not evidence.** When modelling a code flow as UML, cite the source for every state, event, guard and action, and review the modelling (`logicprobe_uml` `action=review`) before showing the diagram — a diagram that does not read back as the model it was drawn from is mis-modelled, however tidy it looks.

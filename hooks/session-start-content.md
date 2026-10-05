@@ -7,6 +7,7 @@ Plugin logicprobe is active. Documents are not truth — code is. Verify every v
 - A plan makes claims about API names, file locations, enum values, or mechanism feasibility
 - A plan contains state machines, protocol logic, or behavioral claims ("always"/"never"/"guaranteed") — the skill escalates to logic-primitive verification: an executable model with 7 structural checks + 7 adversarial probes
 - A refactoring plan modifies state topology — the skill compares before/after models for behavioral regression detection
+- The task is to model a code flow as UML (reverse-engineering a handler, documenting a protocol) or to audit a diagram somebody drew — the skill renders it, reads hand-drawn diagrams back into a model, and reviews the modelling itself
 
 **1% Rule**: If there is even a 1% chance the skill applies to the task, invoke it before responding. The cost of loading is trivial compared to the cost of a false claim.
 

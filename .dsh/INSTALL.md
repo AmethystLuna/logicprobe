@@ -21,7 +21,7 @@ This installs under the package name `dsh-logicprobe`. If you manage the profile
 
 Restart the target profile. This mounts a native cordis plugin that registers the bundled skills through dsh's `ctx.skills` filesystem provider (so they appear in the session skill catalog with no manual copy step) and folds the gate text (claim-verification doctrine / 1% Rule / Red Flags / proactive suggestion) into the first model step — the dsh-native counterpart of the Claude Code `SessionStart` hook.
 
-The bundle also registers the `logicprobe_verify` tool (via `ctx.tools`) and a `logicprobe:mode` dynamic context (via `ctx.systemPrompt`). The context resolves `interaction` per session: `follow-approval` becomes `auto` when the last `approval/policy` event is `never`.
+The bundle also registers the native tools via `ctx.tools` (`logicprobe_verify`, `logicprobe_datamodel_verify`, `logicprobe_concurrency_scan`, `logicprobe_compose_verify`, `logicprobe_export`, `logicprobe_uml`) and a `logicprobe:mode` dynamic context (via `ctx.systemPrompt`). The context resolves `interaction` per session: `follow-approval` becomes `auto` when the last `approval/policy` event is `never`.
 
 To change the gate text, interaction mode, or disable injection, override the row by id in your profile's `cordis.patch.yml` (the row's `config` is replaced wholesale, not deep-merged):
 
@@ -64,8 +64,9 @@ If your `dsh` configuration supports `customSkillDirs` (rank 300), point it at t
 
 - `dsh --profile <scratch> --dump-config` shows the `logicprobe` row with `enabled: true` (create a scratch profile with `dsh plugin --profile <scratch> add ...` first).
 - Start a session and check the gate text appears in the model context of the first step.
-- `cordis_inspect_list` shows the `logicprobe` provider; `cordis_inspect_query` with method `status` returns `enabled: true`, `interaction: follow-approval`, `toolRegistered: true`, `dataToolRegistered: true`, `concurrencyToolRegistered: true`, `engineSchemaVersion: 1`, and `dataEngineSchemaVersion: 1`.
-- The model-visible `logicprobe_verify` tool accepts Model schema v1 (see `skills/logicprobe/references/dsh-model-schema.md`) and returns the S1-S7 + A1-A7 report; passing `beforeModel` (and optional `stateMapping`) adds D1-D4 before/after regression checks.
+- `cordis_inspect_list` shows the `logicprobe` provider; `cordis_inspect_query` with method `status` returns `enabled: true`, `interaction: follow-approval`, `toolRegistered: true`, `dataToolRegistered: true`, `concurrencyToolRegistered: true`, `composeToolRegistered: true`, `exportToolRegistered: true`, `umlToolRegistered: true`, `engineSchemaVersion: 1`, and `dataEngineSchemaVersion: 1`.
+- The model-visible `logicprobe_verify` tool accepts Model schema v1 (see `skills/logicprobe/references/dsh-model-schema.md`) and returns the S1-S8 + A1-A14 report; passing `beforeModel` (and optional `stateMapping`) adds D1-D4 before/after regression checks.
+- The model-visible `logicprobe_uml` tool models a code flow as UML and reviews the modelling (see `skills/logicprobe/references/uml-modeling-guide.md`): `action=render` (Mermaid state/activity/sequence, PlantUML state/sequence), `action=parse` (diagram → LogicModelV1), `action=review` (structural findings + diagram-versus-model round-trip fidelity).
 - The model-visible `logicprobe_datamodel_verify` tool accepts DataModelV1 (see `skills/logicprobe-datamodel/references/data-model-schema.md`) and returns DS/DA/DD checks; passing `beforeModel`/`fieldMapping`/`copyPairs`/`migrationMappings` adds migration coverage, copy consistency, rollback symmetry, and DD1-DD4 before/after data regression.
 - The model-visible `logicprobe_concurrency_scan` tool scans document/plan text for concurrency risk claims and flags absolute guarantees for dedicated verification.
 - Ask in a `dsh` session: "你有设计文档 / 计划 claim 核查相关的 skill 吗?"

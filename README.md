@@ -14,6 +14,7 @@
 | Phase 2a | 对提取的状态机模型执行 **8 项结构检查（S1-S8）**：S1 可达性、S2 死锁、S3 活性、S4 确定性、S5 事件完备性、S6 守卫完备性、S7 不变量有效性、S8 单调变量 |
 | Phase 2b | **14 项对抗探针（A1-A14）**：意外事件、竞态交错、顺序置换、配对对称（lock/unlock，含 onEntry/onExit 隐式配对）、边界轰炸、资源注入、最小反例、幂等重放、必达、顺序、原子性、预算（A12 最坏路径代价，含正成本环检测）、概率可达（A13，P(击中) 满足下界）、期限（A14，maxTicks + tickEvents） |
 | 重构模式 | 前后模型对比——行为保持、不变量连续性、死锁回归、复杂度声称 |
+| UML 建模与建模审查 | 用 UML（状态图 / 活动流程图 / 时序图）对代码流程建模，并审查建模本身：结构缺陷（不可达状态、死端、歧义分支、无出口自环）、文档缺口（无 narrative、无界变量、符号无法对应回代码）、图与模型的往返保真度 |
 | 数据模型模式 | DataModelV1 数据模型验证——DS/DA/DD 检查，迁移覆盖、copy 一致性、before/after 破坏性变更回归 |
 | 并发风险挖掘 | 扫描文档/计划中的并发安全声称（thread-safe、lock-free、race condition、中断安全等），标记需要专用验证 |
 | 输出 | 结构化发现：精确 file:line 证据、严重性分级、修正方向——绝不在核查中直接改代码；报告含 `coverageNotes`（时序/抢占/混合/概率词汇 → UPPAAL/TSan/CBMC/TLA+/SpaceEx/PRISM 等外部工具路由，见 `skills/logicprobe/references/gap-routing-guide.md`），模型可携带自然语言 `narrative`（状态/事件/场景注释）并被报告原样回显 |
@@ -70,6 +71,7 @@ git clone https://github.com/AmethystLuna/logicprobe.git ~/.claude/plugins/dev/l
 - 引擎共运行 **22 项检查（S1-S8 结构 + A1-A14 对抗）**；模型可带自然语言 `narrative`（状态/事件/场景注释），报告原样回显。
 - `logicprobe_compose_verify`：两台及以上状态机组合验证（握手 rendezvous 语义），报 C1 组合死锁 / C2 握手永不触发。
 - `logicprobe_export`：把 LogicModelV1 导出为外部工具原生输入——UPPAAL（XML `.xta` + queries）、TLA+（TLC 模块）、PRISM（DTMC `.pm` + `.pctl`）、SPIN（Promela + ltl）——与 `coverageNotes`/gap-routing 的维度对应；导出严格遵循各工具官方语法，生成文件可直接提交给对应检查器（SPIN 已做真实端到端验证）。
+- `logicprobe_uml`：用 UML 对代码流程建模并**审查建模本身**。`render` 把 LogicModelV1 画成 Mermaid（状态图 / 活动流程图 / 时序图）或 PlantUML（状态图 / 时序图）；`parse` 把 Mermaid/PlantUML 状态图或活动图读回 LogicModelV1（手绘的图也能送进 `logicprobe_verify` 验证；时序图是迹而非机，拒绝解析）；`review` 审查建模——结构缺陷（不可达状态、死端、歧义分支、无出口自环、重复迁移）、文档缺口（无 narrative、无界变量、读者无法对应回代码的符号、图与 narrative 标签漂移），以及保真度检查：图会被重新解析，任何结构性差异都报 `UML017_ROUND_TRIP_MISMATCH`。建模审查不替代行为验证，每条发现都指明该跑哪一项引擎检查。
 - `logicprobe_datamodel_verify` 新增数据模型验证：DataModelV1、迁移覆盖、copy 一致性、DD1-DD4 before/after 数据回归。
 - `logicprobe_concurrency_scan` 扫描文档/计划中的并发风险声称（thread-safe、lock-free、race condition、mutex 等），标记需要专用并发验证。
 - 与 embedded-workbench bundle 的 Plan Verification Gate 配合，在 dsh 中闭环了 claim 验证链路。
@@ -97,10 +99,11 @@ npx -p @deepseek-ai/dsh dsh plugin --profile web add dsh-logicprobe
 - **行为类问题** — "could this state machine deadlock"、"is this retry limit safe"、"check this timing for bugs" → 主动建议（不自动加载）作为可选验证
 - **重构计划** — 管线对比前后模型，标记计划未声明的行为变化
 - **数据模型/迁移审查** — "is this migration non-breaking"、"does this copy cover all required fields" → 使用 `logicprobe-datamodel` 技能
+- **代码流程建模** — "把这个状态机/流程画出来"、"这份 UML 图对吗" → `logicprobe_uml`：`render` 出图、`parse` 把手绘图读回模型、`review` 审查建模（结构缺陷 + 往返保真度），随后仍用 `logicprobe_verify` 做行为验证
 
 技能在 Phase 0 依据计划特征自动分级（LIGHTWEIGHT / STANDARD / ESCALATED），并在计划文件追加 `## Plan Verification` 摘要块作为审计痕迹。
 
-Python 可选：已有 LogicModelV1 JSON 时可直接运行独立引擎 `skills/logicprobe/references/logicprobe-engine.py`（`verify` 跑 S1-S8/A1-A14/D1-D4，`compose` 跑 C1/C2 组合，`export` 生成 UPPAAL/TLA+/PRISM/SPIN 输入——与 dsh 工具逐字节一致，见 tests/python/run.mjs）；模型仅为抽取出的状态表时，填充模板 `skills/logicprobe/references/verification-harness.py`；数据模型验证使用 `skills/logicprobe-datamodel/references/data-model-harness.py`；不可用（如离线开发机）时，对应 guide 提供手动验证模式。
+Python 可选：已有 LogicModelV1 JSON 时可直接运行独立引擎 `skills/logicprobe/references/logicprobe-engine.py`（`verify` 跑 S1-S8/A1-A14/D1-D4，`compose` 跑 C1/C2 组合，`export` 生成 UPPAAL/TLA+/PRISM/SPIN 输入，`uml-render`/`uml-parse`/`uml-review` 覆盖 UML 前端——与 dsh 工具逐字节一致，见 tests/python/run.mjs）；模型仅为抽取出的状态表时，填充模板 `skills/logicprobe/references/verification-harness.py`；数据模型验证使用 `skills/logicprobe-datamodel/references/data-model-harness.py`；不可用（如离线开发机）时，对应 guide 提供手动验证模式。
 
 示例模型见 [`examples/`](examples/README.md)：订单状态机 before/after、电商数据模型、User 字段迁移。
 
