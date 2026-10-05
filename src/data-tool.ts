@@ -1,4 +1,5 @@
-import { defineTool, type JsonValue } from '@deepseek-ai/dsh-tools'
+import { defineTool } from '@deepseek-ai/dsh-tools'
+import type { JsonValue } from './json-value.js'
 import { runDataVerification, DATA_ENGINE_SCHEMA_VERSION } from './data-engine.js'
 
 export const LOGICPROBE_DATAMODEL_VERIFY_TOOL_NAME = 'logicprobe_datamodel_verify'

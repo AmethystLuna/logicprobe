@@ -39,6 +39,7 @@ import { logicProbeDataModelVerifyTool, DATA_ENGINE_SCHEMA_VERSION } from './dat
 import { logicProbeConcurrencyScanTool } from './concurrency-tool.js'
 import { logicProbeComposeTool } from './compose-tool.js'
 import { logicProbeExportTool } from './export-tool.js'
+import { logicProbeUmlTool } from './uml-tool.js'
 import { ENGINE_SCHEMA_VERSION } from './engine.js'
 
 // DSH 0.1.7-alpha.1 (session format v4) retires the shared
@@ -85,7 +86,7 @@ Plugin logicprobe is active. Documents are not truth — code is. Verify every v
 | "I'll verify while implementing" | Verification happens before implementation, not during. |
 | "I can check this with reasoning alone" | Behavioral claims are verified with code/models, not intuition. One counter-example refutes a universal claim. |
 
-**Native verification path**: In dsh, prefer the \`logicprobe_verify\` tool for state-machine checks and \`logicprobe_datamodel_verify\` for data-model/schema migration checks. Both support before/after regression and common domain constraints (idempotency, monotonic, sequence, leads-to, atomicity). Python harnesses remain the fallback for non-dsh hosts.
+**Native verification path**: In dsh, prefer the \`logicprobe_verify\` tool for state-machine checks and \`logicprobe_datamodel_verify\` for data-model/schema migration checks. Both support before/after regression and common domain constraints (idempotency, monotonic, sequence, leads-to, atomicity). To model a code flow as UML, or to audit such a modelling, use \`logicprobe_uml\` (render | parse | review). Python harnesses remain the fallback for non-dsh hosts.
 
 **Proactive suggestion**: When a user asks code-level behavioral questions — "could this state machine deadlock", "is this retry limit safe", "check this timing sequence for bugs", "is this migration non-breaking", "does this copy cover all required fields" — suggest logicprobe as an optional verification pass (do not auto-escalate).
 </EXTREMELY_IMPORTANT>`
@@ -211,6 +212,7 @@ function modeContextText(config: Config, session: Session): string {
   const interaction = resolveInteraction(config, session)
   const lines = [
     'logicprobe: use `logicprobe_verify` for state machines and `logicprobe_datamodel_verify` for data models; both cover before/after regression and common domain constraints.',
+    'logicprobe: use `logicprobe_uml` to model a code flow as UML (render), to read a UML diagram back into a model (parse), or to audit the modelling (review: structural defects, documentation gaps, diagram-vs-model round-trip fidelity).',
     interaction === 'auto'
       ? 'logicprobe interaction=auto: do NOT call ask_user_question for model confirmation; run round-trip validation of the extracted transition table and mark the result UNCONFIRMED.'
       : 'logicprobe interaction=ask: show the extracted transition table and get user confirmation before running verification.',
@@ -234,7 +236,7 @@ interface SystemPromptLike {
  * lets the model read this plugin's runtime status without guessing. Mirrors
  * the registration pattern of the official dsh-tool-cordis host providers.
  */
-function inspectProvider(config: Config, isToolRegistered: () => boolean, isDataToolRegistered: () => boolean, isConcurrencyToolRegistered: () => boolean, isComposeToolRegistered: () => boolean, isExportToolRegistered: () => boolean): HostCordisInspectProviderRegistration {
+function inspectProvider(config: Config, isToolRegistered: () => boolean, isDataToolRegistered: () => boolean, isConcurrencyToolRegistered: () => boolean, isComposeToolRegistered: () => boolean, isExportToolRegistered: () => boolean, isUmlToolRegistered: () => boolean): HostCordisInspectProviderRegistration {
   return {
     manifest: {
       id: 'logicprobe',
@@ -260,10 +262,11 @@ function inspectProvider(config: Config, isToolRegistered: () => boolean, isData
               concurrencyToolRegistered: { type: 'boolean', description: 'Whether the logicprobe_concurrency_scan tool is registered on ctx.tools.' },
               composeToolRegistered: { type: 'boolean', description: 'Whether the logicprobe_compose_verify tool is registered on ctx.tools.' },
               exportToolRegistered: { type: 'boolean', description: 'Whether the logicprobe_export tool is registered on ctx.tools.' },
+              umlToolRegistered: { type: 'boolean', description: 'Whether the logicprobe_uml tool (UML modelling + modelling review) is registered on ctx.tools.' },
               engineSchemaVersion: { type: 'integer', description: 'Model schema version the bundled state-machine verification engine accepts.' },
               dataEngineSchemaVersion: { type: 'integer', description: 'Model schema version the bundled data-model verification engine accepts.' },
             },
-            required: ['enabled', 'gateContentLength', 'interaction', 'toolRegistered', 'dataToolRegistered', 'concurrencyToolRegistered', 'composeToolRegistered', 'exportToolRegistered', 'engineSchemaVersion', 'dataEngineSchemaVersion'],
+            required: ['enabled', 'gateContentLength', 'interaction', 'toolRegistered', 'dataToolRegistered', 'concurrencyToolRegistered', 'composeToolRegistered', 'exportToolRegistered', 'umlToolRegistered', 'engineSchemaVersion', 'dataEngineSchemaVersion'],
             additionalProperties: false,
           },
         },
@@ -280,6 +283,7 @@ function inspectProvider(config: Config, isToolRegistered: () => boolean, isData
           concurrencyToolRegistered: isConcurrencyToolRegistered(),
           composeToolRegistered: isComposeToolRegistered(),
           exportToolRegistered: isExportToolRegistered(),
+          umlToolRegistered: isUmlToolRegistered(),
           engineSchemaVersion: ENGINE_SCHEMA_VERSION,
           dataEngineSchemaVersion: DATA_ENGINE_SCHEMA_VERSION,
         }
@@ -299,13 +303,14 @@ export function apply(ctx: Context, config: Config): void {
   let concurrencyToolRegistered = false
   let composeToolRegistered = false
   let exportToolRegistered = false
+  let umlToolRegistered = false
   let modeContextRegistered = false
   const registerProvider = (): void => {
     if (providerRegistered) return
     const inspect = ctx.get('cordisInspect')
     if (inspect === undefined) return
     try {
-      ctx.effect(() => inspect.register(inspectProvider(config, () => toolRegistered, () => dataToolRegistered, () => concurrencyToolRegistered, () => composeToolRegistered, () => exportToolRegistered)), 'logicprobe: inspect provider')
+      ctx.effect(() => inspect.register(inspectProvider(config, () => toolRegistered, () => dataToolRegistered, () => concurrencyToolRegistered, () => composeToolRegistered, () => exportToolRegistered, () => umlToolRegistered)), 'logicprobe: inspect provider')
       providerRegistered = true
     } catch (err) {
       console.warn('[logicprobe] inspect provider registration failed', err)
@@ -321,11 +326,13 @@ export function apply(ctx: Context, config: Config): void {
       ctx.effect(() => tools.register(logicProbeConcurrencyScanTool), 'logicprobe: concurrency scan tool')
       ctx.effect(() => tools.register(logicProbeComposeTool), 'logicprobe: compose tool')
       ctx.effect(() => tools.register(logicProbeExportTool), 'logicprobe: export tool')
+      ctx.effect(() => tools.register(logicProbeUmlTool), 'logicprobe: uml tool')
       toolRegistered = true
       dataToolRegistered = true
       concurrencyToolRegistered = true
       composeToolRegistered = true
       exportToolRegistered = true
+      umlToolRegistered = true
     } catch (err) {
       console.warn('[logicprobe] logicprobe_verify/logicprobe_datamodel_verify tool registration failed', err)
     }

@@ -11,6 +11,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { runVerification, runCompositionVerification } from '../../lib/engine.js'
 import { exportModel } from '../../lib/exporters.js'
+import { renderUml, parseUml, reviewUml } from '../../lib/uml.js'
 
 const python = process.env.LOGICPROBE_PYTHON || 'python'
 const enginePath = fileURLToPath(new URL('../../skills/logicprobe/references/logicprobe-engine.py', import.meta.url))
@@ -174,6 +175,247 @@ check('invalid model parity', () => {
   if (!actual.out) throw new Error('python returned no JSON')
   const diffs = deepDiff(expected, actual.out)
   if (diffs.length) throw new Error(diffs.slice(0, 6).join(' | '))
+})
+
+// ---- UML parity: render / parse / review (mirrors tests/uml/run.mjs) ----
+// Every model that carries transitions is swept across both notations and all three
+// diagram kinds. A diagram is rendered by the TypeScript side, written to a temp file
+// (utf-8, so CJK narrative labels survive) and parsed back by python; the review runs
+// model-only, diagram-only, against a matching diagram and against a mismatching one.
+const umlTmpDir = join(tmpDir, 'uml')
+mkdirSync(umlTmpDir, { recursive: true })
+let umlSeq = 0
+function writeDiagram(text) {
+  umlSeq += 1
+  const file = join(umlTmpDir, 'd' + umlSeq + '.txt')
+  writeFileSync(file, text, 'utf8')
+  return file
+}
+
+/** Same shape as the exporter check: a TypeScript throw must be a python `ok: false` (same message). */
+function compareUml(tsProduce, pythonArgs) {
+  const actual = pythonRun(pythonArgs)
+  let expected
+  try { expected = tsProduce() } catch (error) {
+    if (!actual.out || actual.out.ok !== false) {
+      throw new Error('TS threw but python did not: ' + (error instanceof Error ? error.message : String(error)))
+    }
+    const message = error instanceof Error ? error.message : String(error)
+    if (actual.out.error !== message) {
+      throw new Error('refusal message differs: TS "' + message + '" vs python ' + JSON.stringify(actual.out.error))
+    }
+    return
+  }
+  if (!actual.out) throw new Error('python returned no JSON' + (actual.stderr ? ': ' + actual.stderr : ''))
+  const diffs = deepDiff(expected, actual.out)
+  if (diffs.length) throw new Error(diffs.slice(0, 6).join(' | '))
+}
+
+const umlCorpus = []
+for (const f of readdirSync(fixturesRoot).filter((n) => n.endsWith('.json')).sort()) {
+  const text = readFileSync(fixturesRoot + f, 'utf8')
+  if (!text.includes('"transitions"')) continue
+  umlCorpus.push({ label: f, file: fixturesRoot + f, model: JSON.parse(text) })
+}
+for (const f of readdirSync(examplesRoot).filter((n) => n.endsWith('.json')).sort()) {
+  const text = readFileSync(examplesRoot + f, 'utf8')
+  if (!text.includes('"transitions"')) continue
+  umlCorpus.push({ label: 'example ' + f, file: examplesRoot + f, model: JSON.parse(text) })
+}
+
+for (const entry of umlCorpus) {
+  for (const notation of ['mermaid', 'plantuml']) {
+    for (const kind of ['state', 'activity', 'sequence']) {
+      check('uml render ' + entry.label + ' ' + notation + '/' + kind, () => {
+        compareUml(() => renderUml(entry.model, notation, kind),
+          ['uml-render', entry.file, '--notation', notation, '--diagram', kind])
+      })
+    }
+    check('uml render ' + entry.label + ' ' + notation + '/sequence max-steps=2', () => {
+      compareUml(() => renderUml(entry.model, notation, 'sequence', 2),
+        ['uml-render', entry.file, '--notation', notation, '--diagram', 'sequence', '--max-steps', '2'])
+    })
+  }
+  for (const notation of ['mermaid', 'plantuml']) {
+    for (const kind of ['state', 'activity', 'sequence']) {
+      if (notation === 'plantuml' && kind === 'activity') continue // renderUml refuses it: nothing to parse
+      check('uml parse ' + entry.label + ' ' + notation + '/' + kind, () => {
+        const text = renderUml(entry.model, notation, kind).primary
+        compareUml(() => parseUml(text, notation), ['uml-parse', writeDiagram(text), '--notation', notation])
+      })
+    }
+    check('uml parse auto ' + entry.label + ' ' + notation + '/state', () => {
+      const text = renderUml(entry.model, notation, 'state').primary
+      compareUml(() => parseUml(text), ['uml-parse', writeDiagram(text)])
+    })
+  }
+  check('uml review ' + entry.label, () => {
+    compareUml(() => reviewUml({ model: entry.model }), ['uml-review', '--model', entry.file])
+  })
+  check('uml review ' + entry.label + ' --no-round-trip', () => {
+    compareUml(() => reviewUml({ model: entry.model, roundTrip: false }),
+      ['uml-review', '--model', entry.file, '--no-round-trip'])
+  })
+  check('uml review ' + entry.label + ' plantuml/state', () => {
+    compareUml(() => reviewUml({ model: entry.model, notation: 'plantuml', diagramKind: 'state' }),
+      ['uml-review', '--model', entry.file, '--notation', 'plantuml', '--diagram-kind', 'state'])
+  })
+  check('uml review ' + entry.label + ' + diagram', () => {
+    const text = renderUml(entry.model, 'mermaid', 'state').primary
+    compareUml(() => reviewUml({ model: entry.model, diagram: text }),
+      ['uml-review', '--model', entry.file, '--diagram', writeDiagram(text)])
+  })
+  check('uml review ' + entry.label + ' diagram only', () => {
+    const text = renderUml(entry.model, 'mermaid', 'state').primary
+    compareUml(() => reviewUml({ diagram: text }), ['uml-review', '--diagram', writeDiagram(text)])
+  })
+}
+
+// Mismatching pairs: a diagram rendered from one machine reviewed against another.
+for (let i = 0; i + 1 < umlCorpus.length && i < 2; i += 1) {
+  const a = umlCorpus[i]
+  const b = umlCorpus[i + 1]
+  for (const [left, right] of [[a, b], [b, a]]) {
+    check('uml review mismatch ' + left.label + ' vs diagram of ' + right.label, () => {
+      const text = renderUml(right.model, 'mermaid', 'state').primary
+      compareUml(() => reviewUml({ model: left.model, diagram: text }),
+        ['uml-review', '--model', left.file, '--diagram', writeDiagram(text)])
+    })
+  }
+}
+
+// A sequence view is a trace: the fidelity check does not apply to it, the trace is
+// still rendered (with its truncation warning when the max-steps cap bites) and
+// roundTrip stays null. plantuml/activity keeps the ordinary render-inside-round-trip
+// refusal path, and --max-steps now reaches the renderer on both sides.
+for (const entry of umlCorpus) {
+  check('uml review ' + entry.label + ' --diagram-kind sequence', () => {
+    compareUml(() => reviewUml({ model: entry.model, diagramKind: 'sequence' }),
+      ['uml-review', '--model', entry.file, '--diagram-kind', 'sequence'])
+  })
+  check('uml review ' + entry.label + ' --diagram-kind sequence --max-steps 1', () => {
+    compareUml(() => reviewUml({ model: entry.model, diagramKind: 'sequence', maxSteps: 1 }),
+      ['uml-review', '--model', entry.file, '--diagram-kind', 'sequence', '--max-steps', '1'])
+  })
+  check('uml review ' + entry.label + ' --diagram-kind sequence --no-round-trip', () => {
+    compareUml(() => reviewUml({ model: entry.model, diagramKind: 'sequence', roundTrip: false }),
+      ['uml-review', '--model', entry.file, '--diagram-kind', 'sequence', '--no-round-trip'])
+  })
+  check('uml review ' + entry.label + ' --max-steps 2', () => {
+    compareUml(() => reviewUml({ model: entry.model, maxSteps: 2 }),
+      ['uml-review', '--model', entry.file, '--max-steps', '2'])
+  })
+}
+for (const entry of umlCorpus.slice(0, 2)) {
+  check('uml review ' + entry.label + ' plantuml/activity refused', () => {
+    compareUml(() => reviewUml({ model: entry.model, notation: 'plantuml', diagramKind: 'activity' }),
+      ['uml-review', '--model', entry.file, '--notation', 'plantuml', '--diagram-kind', 'activity'])
+  })
+}
+
+// Hand-written diagrams exercise the parser paths a generated file never reaches:
+// inferred init, declared terminals, synthetic events, no-op/shim actions, `=` for
+// `==`, keyword operators, notes, descriptions, subgraphs and composites.
+const handWrittenDiagrams = [
+  ['inferred init and a named synthetic event', [
+    'stateDiagram-v2',
+    '  [*] --> IDLE',
+    '  IDLE --> BUSY : start',
+    '  IDLE --> IDLE : tick',
+    '  BUSY --> IDLE',
+    '  BUSY --> [*]',
+    '  IDLE : waiting for work',
+  ].join('\n')],
+  ['flowchart with init/terminal directives', [
+    '%%logicprobe:init START',
+    '%%logicprobe:terminal END',
+    'flowchart TD',
+    '  START["start"] --> WORK["work"]',
+    '  WORK --> END["end"]',
+    '  WORK --> WORK',
+  ].join('\n')],
+  ['several initial pseudostates', ['stateDiagram-v2', '  [*] --> A', '  [*] --> B', '  A --> B : go', '  B --> [*]'].join('\n')],
+  ['guard operators, booleans and actions', [
+    '%%logicprobe:uml v1 notation=mermaid diagram=state',
+    '%%logicprobe:init A',
+    '%%logicprobe:terminal C',
+    '%%logicprobe:variable k integer',
+    '%%logicprobe:variable armed boolean',
+    'stateDiagram-v2',
+    '  [*] --> A',
+    '  A --> B : go [k < 3 && armed == true] / k := k + 1, armed := false',
+    '  A --> C : go [not (k >= 3) or armed != false] / k++',
+    '  B --> C : done [k = 3] / retry--',
+  ].join('\n')],
+  ['notes, descriptions and an ignored line', [
+    'stateDiagram-v2',
+    '  [*] --> A',
+    '  state "Alpha" as A',
+    '  A --> B : go',
+    '  note right of A : documented state',
+    '  B : terminal-ish',
+    '  B --> [*]',
+    '  this line is not a statement',
+  ].join('\n')],
+  ['composite and concurrency regions', [
+    'stateDiagram-v2',
+    '  [*] --> REGION {',
+    '  state INNER {',
+    '  }',
+    '  --',
+    '  REGION --> [*]',
+  ].join('\n')],
+  ['plantuml state diagram with aliases', [
+    '@startuml',
+    "'logicprobe:uml v1 notation=plantuml diagram=state",
+    "'logicprobe:init has space",
+    "'logicprobe:terminal done!",
+    "'logicprobe:alias has_space has space",
+    "'logicprobe:alias done_ done!",
+    '[*] --> has_space',
+    'state "has space" as has_space',
+    'has_space --> done_ : finish [k <= 2]',
+    'done_ --> [*]',
+    '@enduml',
+  ].join('\n')],
+  ['sequenceDiagram is refused', ['sequenceDiagram', '  ENV->>M: go', '  Note over M: A -> B'].join('\n')],
+  ['subgraph flattening', [
+    '%%logicprobe:init A',
+    'flowchart TD',
+    '  subgraph one',
+    '    A["a"] --> B{"b"}',
+    '  end',
+    '  B --> C(["c"])',
+  ].join('\n')],
+  ['unparseable guard', ['stateDiagram-v2', '  [*] --> A', '  A --> B : go [retry ~~ 3]', '  B --> [*]'].join('\n')],
+]
+for (const [label, text] of handWrittenDiagrams) {
+  check('uml parse hand-written: ' + label, () => {
+    compareUml(() => parseUml(text), ['uml-parse', writeDiagram(text)])
+  })
+  check('uml review hand-written diagram only: ' + label, () => {
+    compareUml(() => reviewUml({ diagram: text }), ['uml-review', '--diagram', writeDiagram(text)])
+  })
+}
+
+// Asking for nothing is refused by both sides, with the same message.
+check('uml review with neither model nor diagram', () => {
+  const actual = pythonRun(['uml-review'])
+  if (!actual.out || actual.out.ok !== false || typeof actual.out.error !== 'string') {
+    throw new Error('python did not refuse an empty review: ' + JSON.stringify(actual.out))
+  }
+  let message = ''
+  try { reviewUml({}) } catch (error) { message = error instanceof Error ? error.message : String(error) }
+  if (message !== actual.out.error) {
+    throw new Error('refusal message differs: TS "' + message + '" vs python ' + JSON.stringify(actual.out.error))
+  }
+})
+
+// An invalid model is refused by both sides before anything is rendered.
+check('uml render refuses an invalid model', () => {
+  const bad = { schemaVersion: 1, init: 'A', states: [{ id: 'A' }], transitions: [{ from: 'A', event: 'e', to: 'NOPE' }] }
+  const [f] = writeTmp(bad)
+  compareUml(() => renderUml(bad, 'mermaid', 'state'), ['uml-render', f])
 })
 
 rmSync(tmpDir, { recursive: true, force: true })

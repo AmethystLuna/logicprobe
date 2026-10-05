@@ -1,4 +1,5 @@
-import { defineTool, type JsonValue } from '@deepseek-ai/dsh-tools'
+import { defineTool } from '@deepseek-ai/dsh-tools'
+import type { JsonValue } from './json-value.js'
 import { exportModel, type ExportFormat } from './exporters.js'
 
 export const LOGICPROBE_EXPORT_TOOL_NAME = 'logicprobe_export'

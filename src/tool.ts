@@ -1,4 +1,5 @@
-import { defineTool, type JsonValue } from '@deepseek-ai/dsh-tools'
+import { defineTool } from '@deepseek-ai/dsh-tools'
+import type { JsonValue } from './json-value.js'
 import { runVerification } from './engine.js'
 
 export const LOGICPROBE_VERIFY_TOOL_NAME = 'logicprobe_verify'

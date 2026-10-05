@@ -5,7 +5,8 @@ Reads the same LogicModelV1 JSON schema as the DSH `logicprobe_verify` /
 `logicprobe_compose_verify` / `logicprobe_export` tools and runs the same
 checks (S1-S8 structural, A1-A14 adversarial, D1-D4 before/after regression,
 C1/C2 composition) plus the four external-tool exporters (UPPAAL / TLA+ /
-PRISM / SPIN). Pure stdlib, no third-party imports.
+PRISM / SPIN) and the UML front end (render / parse / review, mirroring
+`src/uml.ts`). Pure stdlib, no third-party imports.
 
 Usage:
   python logicprobe-engine.py verify model.json [--before-model before.json]
@@ -13,9 +14,16 @@ Usage:
   python logicprobe-engine.py compose m1.json m2.json [m3.json ...]
       [--rendezvous ev1,ev2] [--max-states N]
   python logicprobe-engine.py export model.json --format uppaal|tla|prism|spin
+  python logicprobe-engine.py uml-render model.json [--notation mermaid|plantuml]
+      [--diagram state|activity|sequence] [--max-steps N]
+  python logicprobe-engine.py uml-parse diagram.txt [--notation auto|mermaid|plantuml]
+  python logicprobe-engine.py uml-review [--model model.json] [--diagram diagram.txt]
+      [--notation auto|mermaid|plantuml] [--diagram-kind state|activity|sequence]
+      [--no-round-trip] [--max-steps N]
 
 Output: JSON verification/composition report on stdout (same shape as the DSH
-tool result), or the export result JSON (format / primary / extras / warnings).
+tool result), or the export result JSON (format / primary / extras / warnings),
+or the UML render/parse/review JSON.
 """
 import argparse
 import hashlib
@@ -3088,6 +3096,1516 @@ def export_model(input_value, fmt):
 
 
 # ---------------------------------------------------------------------------
+# UML front end (mirror of src/uml.ts)
+# ---------------------------------------------------------------------------
+
+UML_NOTATIONS = ('mermaid', 'plantuml')
+UML_DIAGRAMS = ('state', 'activity', 'sequence')
+
+# Marker every generated diagram carries; renderers ignore it, the parser uses it.
+_DIRECTIVE_NAMESPACE = 'logicprobe:'
+
+# State id / event name characters that would break the generated label syntax.
+_UNSAFE_LABEL_RE = re.compile(r'[\[\]/\n\r\t]')
+
+# Mermaid flowchart keywords that cannot stand alone as a node id.
+_RESERVED_NODE_IDS = frozenset(['end', 'graph', 'subgraph', 'class', 'classDef', 'click', 'style',
+                                'linkStyle', 'direction'])
+
+# Ids the notation can spell without an alias (JS `$` is end-of-input, hence \Z).
+_PLAIN_ID_RE = re.compile(r'^[A-Za-z_][A-Za-z0-9_]*\Z')
+
+# JavaScript's \s / String.prototype.trim() character set, so guard tokenising and
+# label trimming treat exactly the same characters as whitespace as the TypeScript side.
+_JS_WHITESPACE = ('\t\n\x0b\x0c\r \xa0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007'
+                  '\u2008\u2009\u200a\u2028\u2029\u202f\u205f\u3000\ufeff')
+_JS_SPACE_RE = re.compile('[' + _JS_WHITESPACE + ']')
+
+
+def _js_trim(text):
+    return text.strip(_JS_WHITESPACE)
+
+
+def _js_string(value):
+    """JavaScript String(value) for the value kinds this module renders."""
+    if value is None:
+        return 'undefined'
+    if isinstance(value, bool):
+        return 'true' if value else 'false'
+    if isinstance(value, str):
+        return value
+    if isinstance(value, (int, float)):
+        return js_number(value)
+    return str(value)
+
+
+def _char_at(text, index):
+    """JavaScript `text[index]`: '' when out of range (undefined never equals a char)."""
+    return text[index] if 0 <= index < len(text) else ''
+
+
+def _is_digit(ch):
+    return len(ch) == 1 and '0' <= ch <= '9'
+
+
+def _is_ascii_letter(ch):
+    return len(ch) == 1 and (('a' <= ch <= 'z') or ('A' <= ch <= 'Z'))
+
+
+def _is_ident_char(ch):
+    return _is_ascii_letter(ch) or _is_digit(ch) or ch == '_' or ch == '.'
+
+
+def _number_from_token(text):
+    """JavaScript Number(literal): exact for integers inside the safe range."""
+    value = int(text)
+    if -9007199254740991 <= value <= 9007199254740991:
+        return value
+    return float(text)
+
+
+def _js_strict_equal(left, right):
+    """JavaScript === for guard literal values (booleans are never equal to numbers)."""
+    if isinstance(left, bool) or isinstance(right, bool):
+        return isinstance(left, bool) and isinstance(right, bool) and left == right
+    return left == right
+
+
+def _literal_text(value):
+    if isinstance(value, bool):
+        return 'true' if value else 'false'
+    return js_number(value)
+
+
+def guard_text(node):
+    """Canonical guard text; the inverse of parse_guard_text."""
+    if 'variable' in node:
+        return node['variable'] + ' ' + node['op'] + ' ' + _literal_text(node['value'])
+    if 'all' in node:
+        return '(' + ' && '.join(guard_text(child) for child in node['all']) + ')'
+    if 'any' in node:
+        return '(' + ' || '.join(guard_text(child) for child in node['any']) + ')'
+    return '!(' + guard_text(node['not']) + ')'
+
+
+def _updates_text(updates):
+    parts = []
+    for update in updates:
+        value = update['value'] if update.get('value') is not None else (0 if update['op'] == 'set' else 1)
+        if update['op'] == 'set':
+            parts.append(update['variable'] + ' := ' + _literal_text(value))
+        elif update['op'] == 'inc':
+            parts.append(update['variable'] + ' := ' + update['variable'] + ' + ' + _literal_text(value))
+        else:
+            parts.append(update['variable'] + ' := ' + update['variable'] + ' - ' + _literal_text(value))
+    return ', '.join(parts)
+
+
+def _transition_text(transition):
+    text = transition['event']
+    if transition.get('guard') is not None:
+        text += ' [' + guard_text(transition['guard']) + ']'
+    updates = transition.get('updates')
+    if updates is not None and len(updates) > 0:
+        text += ' / ' + _updates_text(updates)
+    return text
+
+
+def _display_text(text):
+    return _js_trim(re.sub(r'[\r\n\t]+', ' ', text).replace('"', "'"))
+
+
+# ---- rendering ------------------------------------------------------------
+
+def _prepare_render(input_value):
+    ok, model_or_errors = validate_model(input_value)
+    if not ok:
+        raise ValueError('model invalid: ' + '; '.join(model_or_errors))
+    model = model_or_errors
+    warnings = []
+    used = set()
+    alias = {}
+    display = {}
+    for state in model['states']:
+        sid = state['id']
+        candidate = sid
+        if _PLAIN_ID_RE.match(candidate) is None:
+            candidate = re.sub(r'[^A-Za-z0-9_]', '_', candidate)
+            if candidate == '' or _is_digit(candidate[0]):
+                candidate = 'S_' + candidate
+            warnings.append('UML_RENDER_ID_SANITIZED: state id "' + sid + '" is not a plain identifier; the diagram draws it as "'
+                            + candidate + '" and pins the original with a ' + _DIRECTIVE_NAMESPACE + 'alias directive.')
+        if candidate in _RESERVED_NODE_IDS:
+            warnings.append('UML_RENDER_RESERVED_ID: state alias "' + candidate + '" collides with a diagram keyword; Mermaid renders it, but a hand edit may not.')
+        unique = candidate
+        suffix = 2
+        while unique in used:
+            unique = candidate + '_' + str(suffix)
+            suffix += 1
+        if unique != candidate:
+            warnings.append('UML_RENDER_ALIAS_COLLISION: state id "' + sid + '" shares an alias with another state; the diagram uses "' + unique + '".')
+        used.add(unique)
+        alias[sid] = unique
+        meaning = None
+        narrative = model.get('narrative')
+        if narrative is not None and narrative.get('states') is not None:
+            meaning = narrative['states'].get(sid)
+        display[sid] = sid if meaning is None else _display_text(sid + '（' + meaning + '）')
+    for transition in model['transitions']:
+        if _UNSAFE_LABEL_RE.search(transition['event']):
+            warnings.append('UML_RENDER_LABEL_UNSAFE: event "' + transition['event'] + '" contains a character (one of [ ] / or a line break) '
+                            'that the diagram label syntax uses; the rendered diagram cannot be read back verbatim.')
+    terminal = set(state['id'] for state in model['states'] if state.get('terminal') is True)
+    return {'model': model, 'alias': alias, 'display': display, 'terminal': terminal, 'warnings': warnings}
+
+
+def _directive_lines(notation, diagram, context):
+    prefix = '%%' if notation == 'mermaid' else "'"
+    model = context['model']
+    lines = [prefix + _DIRECTIVE_NAMESPACE + 'uml v1 notation=' + notation + ' diagram=' + diagram]
+    lines.append(prefix + _DIRECTIVE_NAMESPACE + 'init ' + model['init'])
+    terminals = [state['id'] for state in model['states'] if state.get('terminal') is True]
+    if len(terminals) > 0:
+        lines.append(prefix + _DIRECTIVE_NAMESPACE + 'terminal ' + ','.join(terminals))
+    for state in model['states']:
+        if context['alias'].get(state['id']) != state['id']:
+            lines.append(prefix + _DIRECTIVE_NAMESPACE + 'alias ' + context['alias'][state['id']] + ' ' + state['id'])
+    # Variable kinds are not recoverable from the notation: `armed := 1` reads as an
+    # integer assignment whichever kind the model declared. Pinning them keeps the
+    # round trip exact instead of reporting a fidelity loss that is really a
+    # notation limit.
+    for variable in model.get('variables') or []:
+        lines.append(prefix + _DIRECTIVE_NAMESPACE + 'variable ' + variable['name'] + ' ' + variable['kind'])
+    return lines
+
+
+def _grouped_transitions(model):
+    order = []
+    groups = {}
+    for transition in model['transitions']:
+        frm = transition['from']
+        if frm not in groups:
+            groups[frm] = [transition]
+            order.append(frm)
+        else:
+            groups[frm].append(transition)
+    return [{'from': frm, 'transitions': groups[frm]} for frm in order]
+
+
+def _render_mermaid_state(context):
+    model = context['model']
+    alias = context['alias']
+    lines = _directive_lines('mermaid', 'state', context)
+    lines.append('stateDiagram-v2')
+    lines.append('  [*] --> ' + alias[model['init']])
+    for state in model['states']:
+        state_alias = alias[state['id']]
+        label = context['display'].get(state['id'], state['id'])
+        # Every state is declared, even when its label equals its alias. A state that
+        # no transition touches (an isolated terminal, a start state with no edge yet)
+        # would otherwise leave no trace in the text at all, and the round-trip check
+        # would have to report a loss the notation never caused.
+        lines.append('  state "' + label + '" as ' + state_alias)
+    for group in _grouped_transitions(model):
+        for transition in group['transitions']:
+            lines.append('  ' + alias[transition['from']] + ' --> ' + alias[transition['to']] + ' : ' + _transition_text(transition))
+    for state in model['states']:
+        if state.get('terminal') is True:
+            lines.append('  ' + alias[state['id']] + ' --> [*]')
+    return '\n'.join(lines) + '\n'
+
+
+def _render_plantuml_state(context):
+    model = context['model']
+    alias = context['alias']
+    lines = ['@startuml']
+    lines.extend(_directive_lines('plantuml', 'state', context))
+    lines.append('[*] --> ' + alias[model['init']])
+    for state in model['states']:
+        lines.append('state "' + context['display'].get(state['id'], state['id']) + '" as ' + alias[state['id']])
+    for group in _grouped_transitions(model):
+        for transition in group['transitions']:
+            lines.append(alias[transition['from']] + ' --> ' + alias[transition['to']] + ' : ' + _transition_text(transition))
+    for state in model['states']:
+        if state.get('terminal') is True:
+            lines.append(alias[state['id']] + ' --> [*]')
+    lines.append('@enduml')
+    return '\n'.join(lines) + '\n'
+
+
+def _render_mermaid_activity(context):
+    model = context['model']
+    alias = context['alias']
+    lines = _directive_lines('mermaid', 'activity', context)
+    lines.append('flowchart TD')
+    for state in model['states']:
+        state_alias = alias[state['id']]
+        text = context['display'].get(state['id'], state['id'])
+        lines.append('  ' + state_alias + ('(["' + text + '"])' if state.get('terminal') is True else '["' + text + '"]'))
+    for group in _grouped_transitions(model):
+        for transition in group['transitions']:
+            lines.append('  ' + alias[transition['from']] + ' -->|"' + _transition_text(transition) + '"| ' + alias[transition['to']])
+    return '\n'.join(lines) + '\n'
+
+
+def _render_sequence(context, notation, max_steps):
+    """One BFS trace of the machine, written as a sequence diagram."""
+    model = context['model']
+    alias = context['alias']
+    lines = []
+    if notation == 'mermaid':
+        lines.extend(_directive_lines('mermaid', 'sequence', context))
+        lines.append('sequenceDiagram')
+        lines.append('  participant ENV as Environment')
+        lines.append('  participant M as Machine')
+    else:
+        lines.append('@startuml')
+        lines.extend(_directive_lines('plantuml', 'sequence', context))
+        lines.append('participant ENV as Environment')
+        lines.append('participant M as Machine')
+    by_from = {}
+    for transition in model['transitions']:
+        by_from.setdefault(transition['from'], []).append(transition)
+    seen = set([model['init']])
+    queue = deque([model['init']])
+    arrow = 'ENV->>M: ' if notation == 'mermaid' else 'ENV -> M : '
+    note = '  Note over M: ' if notation == 'mermaid' else 'note over M : '
+    lines.append(('  ' if notation == 'mermaid' else '') + 'Note over M: init ' + model['init'])
+    steps = 0
+    truncated = False
+    while len(queue) > 0:
+        current = queue.popleft()
+        for transition in by_from.get(current, []):
+            if steps >= max_steps:
+                truncated = True
+                break
+            steps += 1
+            lines.append(('  ' if notation == 'mermaid' else '') + arrow + _transition_text(transition))
+            lines.append(note + alias[transition['from']] + ' -> ' + alias[transition['to']])
+            if transition['to'] not in seen:
+                seen.add(transition['to'])
+                queue.append(transition['to'])
+        if truncated:
+            break
+    if notation == 'plantuml':
+        lines.append('@enduml')
+    return {'text': '\n'.join(lines) + '\n', 'truncated': truncated}
+
+
+def render_uml(input_value, notation='mermaid', diagram='state', max_steps=60):
+    """Mirror of renderUml: a validated LogicModelV1 as Mermaid/PlantUML text."""
+    if notation not in UML_NOTATIONS:
+        raise ValueError('unknown notation "' + _js_string(notation) + '"; expected ' + ' | '.join(UML_NOTATIONS))
+    if diagram not in UML_DIAGRAMS:
+        raise ValueError('unknown diagram "' + _js_string(diagram) + '"; expected ' + ' | '.join(UML_DIAGRAMS))
+    if notation == 'plantuml' and diagram == 'activity':
+        raise ValueError('plantuml has no faithful activity view here (its activity syntax is a structured flowchart language; '
+                         'a graph with merges or cycles needs a while/if reconstruction logicprobe does not perform) — '
+                         'use notation "mermaid" for the activity view, or diagram "state"')
+    context = _prepare_render(input_value)
+    warnings = list(context['warnings'])
+    if diagram == 'state':
+        primary = _render_mermaid_state(context) if notation == 'mermaid' else _render_plantuml_state(context)
+    elif diagram == 'activity':
+        primary = _render_mermaid_activity(context)
+    else:
+        rendered = _render_sequence(context, notation, max_steps)
+        primary = rendered['text']
+        if rendered['truncated']:
+            warnings.append('UML_RENDER_SEQUENCE_TRUNCATED: the trace was capped at ' + str(max_steps) + ' steps; a sequence diagram is one trace, '
+                            'not the whole machine — use diagram "state" for the full topology.')
+        warnings.append('UML_RENDER_SEQUENCE_IS_TRACE: a sequence diagram shows one BFS trace; branches appear as separate guarded messages '
+                        'and unreachable branches are absent by construction.')
+    return {'notation': notation, 'diagram': diagram, 'primary': primary, 'warnings': warnings}
+
+
+# ---- parsing: guard expressions -------------------------------------------
+
+def _tokenize_guard(text):
+    tokens = []
+    index = 0
+    while index < len(text):
+        char = text[index]
+        if _JS_SPACE_RE.match(char):
+            index += 1
+            continue
+        if char == '(':
+            tokens.append(('lparen', char))
+            index += 1
+            continue
+        if char == ')':
+            tokens.append(('rparen', char))
+            index += 1
+            continue
+        if char == '&' and _char_at(text, index + 1) == '&':
+            tokens.append(('and', '&&'))
+            index += 2
+            continue
+        if char == '|' and _char_at(text, index + 1) == '|':
+            tokens.append(('or', '||'))
+            index += 2
+            continue
+        if char == '!':
+            if _char_at(text, index + 1) == '=':
+                tokens.append(('op', '!='))
+                index += 2
+                continue
+            tokens.append(('not', '!'))
+            index += 1
+            continue
+        two = text[index:index + 2]
+        if two == '==' or two == '<=' or two == '>=':
+            tokens.append(('op', two))
+            index += 2
+            continue
+        if char == '<' or char == '>':
+            tokens.append(('op', char))
+            index += 1
+            continue
+        if char == '=':
+            tokens.append(('op', '=='))
+            index += 1
+            continue
+        if _is_digit(char) or (char == '-' and _is_digit(_char_at(text, index + 1))):
+            end = index + 1
+            while end < len(text) and _is_digit(text[end]):
+                end += 1
+            tokens.append(('number', text[index:end]))
+            index = end
+            continue
+        if _is_ascii_letter(char) or char == '_':
+            end = index + 1
+            while end < len(text) and _is_ident_char(text[end]):
+                end += 1
+            word = text[index:end]
+            index = end
+            if word == 'and':
+                tokens.append(('and', word))
+            elif word == 'or':
+                tokens.append(('or', word))
+            elif word == 'not':
+                tokens.append(('not', word))
+            elif word == 'true' or word == 'false':
+                tokens.append(('boolean', word))
+            else:
+                tokens.append(('ident', word))
+            continue
+        raise ValueError('guard text not understood near "' + text[index:] + '"')
+    return tokens
+
+
+class _GuardReader:
+    def __init__(self, tokens, source):
+        self.tokens = tokens
+        self.source = source
+        self.position = 0
+
+    def parse(self):
+        node = self._parse_or()
+        if self.position != len(self.tokens):
+            raise ValueError('trailing tokens in guard "' + self.source + '"')
+        return node
+
+    def _peek(self):
+        return self.tokens[self.position] if self.position < len(self.tokens) else None
+
+    def _parse_or(self):
+        parts = [self._parse_and()]
+        while self._peek() is not None and self._peek()[0] == 'or':
+            self.position += 1
+            parts.append(self._parse_and())
+        return parts[0] if len(parts) == 1 else {'any': parts}
+
+    def _parse_and(self):
+        parts = [self._parse_unary()]
+        while self._peek() is not None and self._peek()[0] == 'and':
+            self.position += 1
+            parts.append(self._parse_unary())
+        return parts[0] if len(parts) == 1 else {'all': parts}
+
+    def _parse_unary(self):
+        token = self._peek()
+        if token is not None and token[0] == 'not':
+            self.position += 1
+            return {'not': self._parse_unary()}
+        return self._parse_primary()
+
+    def _parse_primary(self):
+        token = self._peek()
+        if token is not None and token[0] == 'lparen':
+            self.position += 1
+            inner = self._parse_or()
+            closing = self._peek()
+            if closing is None or closing[0] != 'rparen':
+                raise ValueError('unbalanced parentheses in guard "' + self.source + '"')
+            self.position += 1
+            return inner
+        if token is None or token[0] != 'ident':
+            raise ValueError('expected a variable name in guard "' + self.source + '"')
+        self.position += 1
+        op = self._peek()
+        if op is None or op[0] != 'op':
+            raise ValueError('expected a comparison operator after "' + token[1] + '" in guard "' + self.source + '"')
+        self.position += 1
+        value = self._peek()
+        if value is not None and value[0] == 'number':
+            self.position += 1
+            return {'variable': token[1], 'op': op[1], 'value': _number_from_token(value[1])}
+        if value is not None and value[0] == 'boolean':
+            if op[1] != '==' and op[1] != '!=':
+                raise ValueError('boolean variable "' + token[1] + '" only supports == / != (guard "' + self.source + '")')
+            self.position += 1
+            return {'variable': token[1], 'op': op[1], 'value': value[1] == 'true'}
+        raise ValueError('expected a literal value for "' + token[1] + '" in guard "' + self.source + '"')
+
+
+def parse_guard_text(text):
+    """Parse a guard expression such as `(retry < 3 && armed == true)`."""
+    return _GuardReader(_tokenize_guard(text), text).parse()
+
+
+_UPDATE_SHIM_RE = re.compile(r'^([A-Za-z_][A-Za-z0-9_]*)\s*(\+\+|--)\Z')
+_UPDATE_ASSIGN_RE = re.compile(r'^([A-Za-z_][A-Za-z0-9_]*)\s*:?=\s*(.+)\Z')
+_UPDATE_BOOL_RE = re.compile(r'^(true|false)\Z')
+_UPDATE_INT_RE = re.compile(r'^-?[0-9]+\Z')
+_UPDATE_ARITH_RE = re.compile(r'^([A-Za-z_][A-Za-z0-9_]*)\s*([+-])\s*([0-9]+)\Z')
+
+
+def parse_updates_text(text, warnings):
+    """Parse a UML action clause such as `retry := retry + 1, armed := true`."""
+    out = []
+    for raw in text.split(','):
+        clause = _js_trim(raw)
+        if clause == '':
+            continue
+        shim = _UPDATE_SHIM_RE.match(clause)
+        if shim is not None:
+            out.append({'variable': shim.group(1), 'op': 'inc' if shim.group(2) == '++' else 'dec', 'value': 1})
+            continue
+        assignment = _UPDATE_ASSIGN_RE.match(clause)
+        if assignment is None:
+            raise ValueError('action clause not understood: "' + clause + '" (expected "var := value")')
+        name = assignment.group(1)
+        value = _js_trim(assignment.group(2))
+        if value == name:
+            warnings.append('UML_PARSE_NOOP_UPDATE: action "' + clause + '" assigns the variable to itself; dropped.')
+            continue
+        if _UPDATE_BOOL_RE.match(value):
+            out.append({'variable': name, 'op': 'set', 'value': 1 if value == 'true' else 0})
+            continue
+        if _UPDATE_INT_RE.match(value):
+            out.append({'variable': name, 'op': 'set', 'value': _number_from_token(value)})
+            continue
+        arithmetic = _UPDATE_ARITH_RE.match(value)
+        if arithmetic is None:
+            raise ValueError('action value not understood: "' + value + '" (expected a literal, or "var + n" / "var - n")')
+        if arithmetic.group(1) != name:
+            raise ValueError('action "' + clause + '" reads a different variable; LogicModelV1 updates touch one variable')
+        out.append({'variable': name, 'op': 'inc' if arithmetic.group(2) == '+' else 'dec',
+                    'value': _number_from_token(arithmetic.group(3))})
+    return out
+
+
+# ---- parsing: diagram text ------------------------------------------------
+
+_STATE_EDGE_RE = re.compile(r'^(.+?)\s*-->\s*(.+?)(?:\s*:\s*(.*))?\Z')
+_STATE_NOTE_RE = re.compile(r'^note\s+(?:over|right of|left of)\s+([A-Za-z_][A-Za-z0-9_]*)\s*:\s*(.+)\Z', re.I)
+_NOTE_RE = re.compile(r'^note\b', re.I)
+_END_NOTE_RE = re.compile(r'^end\s*note\Z', re.I)
+_STATE_DECL_RE = re.compile(r'^state\s+"([^"]*)"\s+as\s+([A-Za-z_][A-Za-z0-9_]*)\Z')
+_BARE_STATE_RE = re.compile(r'^state\s+([A-Za-z_][A-Za-z0-9_]*)\s*\{?\Z')
+_CONCURRENCY_RE = re.compile(r'^\}\s*\Z|^--\s*\Z')
+_COMPOSITE_STATE_RE = re.compile(r'^state\s+(.+)\s*\{\Z')
+_DESCRIPTION_RE = re.compile(r'^([A-Za-z_][A-Za-z0-9_]*)\s*:\s*(.+)\Z')
+_MERMAID_STATE_SKIP_RE = re.compile(r'^(stateDiagram|stateDiagram-v2|direction\b|classDef\b|class\b|style\b|linkStyle\b|click\b|hide\b|scale\b|title\b|accTitle\b|accDescr\b|%%\{)')
+_PLANTUML_STATE_SKIP_RE = re.compile(r'^(@startuml|@enduml|scale\b|skinparam\b|title\b|hide\b|left to right direction|top to bottom direction|autonumber|!theme)')
+
+_ACTIVITY_SKIP_RE = re.compile(r'^(flowchart|graph)\b|^(classDef|class|style|linkStyle|click|direction)\b|^%%\{')
+_SUBGRAPH_RE = re.compile(r'^subgraph\b')
+_SHAPED_EDGE_RE = re.compile(r'^(.*?)\s*-->\s*\|(.*?)\|\s*(.+)\Z')
+_BARE_EDGE_RE = re.compile(r'^(.*?)\s*-->\s*(.+)\Z')
+_STRIP_NODE_RE = re.compile(r'^([A-Za-z_][A-Za-z0-9_.-]*)\s*(\(\[|\[\(|\{\{|\[|\(|\(\(|>)?\s*([\s\S]*?)\s*\Z')
+_QUOTED_ONLY_RE = re.compile(r'^"([^"]+)"\Z')
+_QUOTED_IN_RE = re.compile(r'"([^"]*)"')
+
+
+def _detect_notation(text):
+    if re.search(r'^\s*@start', text, re.M):
+        return 'plantuml'
+    if re.search(r'^\s*(stateDiagram|stateDiagram-v2|flowchart|graph|sequenceDiagram)\b', text, re.M):
+        return 'mermaid'
+    raise ValueError('cannot tell whether this is Mermaid or PlantUML text: '
+                     'expected `stateDiagram-v2` / `flowchart` / `sequenceDiagram`, or `@startuml`')
+
+
+def _detect_diagram(text):
+    if re.search(r'^\s*stateDiagram', text, re.M):
+        return 'state'
+    if re.search(r'^\s*(flowchart|graph)\b', text, re.M):
+        return 'activity'
+    if re.search(r'^\s*sequenceDiagram\b', text, re.M):
+        return 'sequence'
+    if re.search(r'^\s*@startuml', text, re.M):
+        # PlantUML declares the diagram kind by its body; the state keyword is the only
+        # structural one logicprobe emits, everything else in that family is a state diagram too.
+        if re.search(r'^\s*participant\b', text, re.M) or re.search(r'->>\s*', text):
+            return 'sequence'
+        return 'state'
+    raise ValueError('cannot tell which diagram kind this text declares')
+
+
+def _comment_prefix(notation):
+    return '%%' if notation == 'mermaid' else "'"
+
+
+def _directive_body(line, notation):
+    prefix = _comment_prefix(notation)
+    trimmed = _js_trim(line)
+    if not trimmed.startswith(prefix):
+        return None
+    body = _js_trim(trimmed[len(prefix):])
+    if not body.startswith(_DIRECTIVE_NAMESPACE):
+        return None
+    return body[len(_DIRECTIVE_NAMESPACE):]
+
+
+def _read_directives(lines, notation):
+    """Consume the `logicprobe:` directives; returns (directives, body_lines)."""
+    directives = {'terminals': [], 'aliases': {}, 'variables': {}}
+    body = []
+    for line in lines:
+        text = _directive_body(line, notation)
+        if text is None:
+            body.append(line)
+            continue
+        if text.startswith('uml '):
+            continue
+        if text.startswith('init '):
+            directives['init'] = _js_trim(text[5:])
+            continue
+        if text.startswith('terminal '):
+            for sid in text[9:].split(','):
+                trimmed = _js_trim(sid)
+                if trimmed != '':
+                    directives['terminals'].append(trimmed)
+            continue
+        if text.startswith('alias '):
+            rest = _js_trim(text[6:])
+            split = rest.find(' ')
+            if split > 0:
+                directives['aliases'][rest[:split]] = _js_trim(rest[split + 1:])
+            continue
+        if text.startswith('variable '):
+            rest = _js_trim(text[9:])
+            split = rest.rfind(' ')
+            if split > 0:
+                kind = _js_trim(rest[split + 1:])
+                if kind == 'integer' or kind == 'boolean':
+                    directives['variables'][_js_trim(rest[:split])] = kind
+            continue
+        body.append(line)
+    return directives, body
+
+
+def _parse_transition_label(label, warnings):
+    rest = _js_trim(label)
+    guard = None
+    bracket = rest.find('[')
+    if bracket >= 0:
+        close = rest.rfind(']')
+        if close < bracket:
+            raise ValueError('unbalanced guard brackets in transition label "' + label + '"')
+        guard = parse_guard_text(_js_trim(rest[bracket + 1:close]))
+        rest = _js_trim(rest[:bracket] + ' ' + rest[close + 1:])
+    updates = None
+    slash = rest.find('/')
+    if slash >= 0:
+        action_text = _js_trim(rest[slash + 1:])
+        updates = parse_updates_text(action_text, warnings)
+        if len(updates) == 0:
+            updates = None
+        rest = _js_trim(rest[:slash])
+    event = _js_trim(rest)
+    if event == '':
+        raise ValueError('transition label "' + label + '" carries no event name; label the arrow as `event [guard] / actions`')
+    parsed = {'event': event}
+    if guard is not None:
+        parsed['guard'] = guard
+    if updates is not None:
+        parsed['updates'] = updates
+    return parsed
+
+
+def _infer_variables(transitions, declared):
+    """Recover the variable list from the diagram; directives win, guards/actions are the fallback."""
+    kinds = dict(declared)
+
+    def note(name, kind):
+        if name in declared:
+            return
+        current = kinds.get(name)
+        if current is None:
+            kinds[name] = kind
+        elif current != kind:
+            kinds[name] = 'integer'
+
+    def walk(guard):
+        if guard is None:
+            return
+        if 'variable' in guard:
+            note(guard['variable'], 'boolean' if isinstance(guard['value'], bool) else 'integer')
+            return
+        if 'all' in guard:
+            for child in guard['all']:
+                walk(child)
+            return
+        if 'any' in guard:
+            for child in guard['any']:
+                walk(child)
+            return
+        walk(guard['not'])
+
+    for transition in transitions:
+        walk(transition.get('guard'))
+        for update in transition.get('updates') or []:
+            note(update['variable'], 'integer')
+    return [{'name': name, 'kind': kind, 'init': False if kind == 'boolean' else 0} for name, kind in kinds.items()]
+
+
+def _raw_to_model(raw, directives, warnings):
+    aliases = directives['aliases']
+
+    def id_of(name):
+        return aliases.get(name, name)
+
+    # Alias directives restore ids the notation cannot spell; they win over the alias itself.
+    names = []
+    seen_names = set()
+
+    def add_name(name):
+        if name is None or name in seen_names:
+            return
+        seen_names.add(name)
+        names.append(name)
+
+    for name in raw['states']:
+        add_name(name)
+    # A state can be known without ever being an edge endpoint: the initial
+    # pseudostate (`[*] --> X`) and the final mark (`Y --> [*]`) both name states a
+    # hand-written diagram never declares, and an isolated state has no edge at all.
+    add_name(raw['initialState'])
+    for name in raw['finalMarks']:
+        add_name(name)
+    for name in raw['terminals']:
+        add_name(name)
+    for edge in raw['edges']:
+        add_name(edge['from'])
+        add_name(edge['to'])
+    states = []
+    seen_states = set()
+    for name in names:
+        sid = id_of(name)
+        if sid in seen_states:
+            continue
+        seen_states.add(sid)
+        states.append({'id': sid})
+    transitions = []
+    synthetic = set()
+    for edge in raw['edges']:
+        frm = id_of(edge['from'])
+        to = id_of(edge['to'])
+        label = _js_trim(edge['label'])
+        guard = None
+        updates = None
+        if label == '':
+            candidate = 't_' + frm + '_' + to
+            suffix = 2
+            while candidate in synthetic:
+                candidate = 't_' + frm + '_' + to + '_' + str(suffix)
+                suffix += 1
+            synthetic.add(candidate)
+            event = candidate
+            warnings.append('UML_PARSE_SYNTHETIC_EVENT: arrow ' + frm + ' -> ' + to + ' carries no label; it was named "' + candidate
+                            + '". Label the arrow as `event [guard] / actions` so the model keeps the real event name.')
+        else:
+            parsed = _parse_transition_label(label, warnings)
+            event = parsed['event']
+            guard = parsed.get('guard')
+            updates = parsed.get('updates')
+        transition = {'from': frm, 'event': event, 'to': to}
+        if guard is not None:
+            transition['guard'] = guard
+        if updates is not None:
+            transition['updates'] = updates
+        transitions.append(transition)
+    # Init: an explicit `[*] --> X` wins; a directive is the fallback the activity
+    # view needs (a flowchart has no initial pseudostate).
+    init = None
+    if raw['initialState'] is not None:
+        init = id_of(raw['initialState'])
+    if init is None and directives.get('init') is not None:
+        init = id_of(directives['init'])
+    if raw['initialState'] is not None and directives.get('init') is not None and id_of(raw['initialState']) != directives['init']:
+        warnings.append('UML_PARSE_INIT_CONFLICT: the diagram enters ' + id_of(raw['initialState']) + ' from its initial pseudostate but declares init '
+                        + directives['init'] + '; the pseudostate wins.')
+    if init is None:
+        targeted = set(transition['to'] for transition in transitions)
+        roots = [state['id'] for state in states if state['id'] not in targeted]
+        if len(roots) == 1:
+            init = roots[0]
+            warnings.append('UML_PARSE_INIT_INFERRED: no initial state was declared; "' + init
+                            + '" is the only state nothing enters, so it is used as init.')
+        else:
+            raise ValueError('no initial state: add `[*] --> <state>` (or a `' + _DIRECTIVE_NAMESPACE
+                             + 'init <state>` directive); found ' + str(len(roots)) + ' entry states')
+    terminal_names = set(id_of(name) for name in raw['terminals'])
+    for name in directives['terminals']:
+        terminal_names.add(id_of(name))
+    for name in raw['finalMarks']:
+        terminal_names.add(id_of(name))
+    for state in states:
+        if state['id'] in terminal_names:
+            state['terminal'] = True
+    variables = _infer_variables(transitions, directives['variables'])
+    model = {'schemaVersion': 1, 'init': init, 'states': states, 'transitions': transitions}
+    if len(variables) > 0:
+        model['variables'] = variables
+    ok, model_or_errors = validate_model(model)
+    if not ok:
+        raise ValueError('the diagram parsed into an invalid model: ' + '; '.join(model_or_errors))
+    return model_or_errors
+
+
+def _parse_state_diagram(text, notation):
+    lines = re.split(r'\r?\n', text)
+    directives, body = _read_directives(lines, notation)
+    raw = {'states': [], 'display': {}, 'edges': [], 'initialState': None, 'terminals': [], 'finalMarks': [], 'warnings': []}
+    declared = set()
+
+    def declare(name):
+        if name not in declared:
+            declared.add(name)
+            raw['states'].append(name)
+
+    skip = _MERMAID_STATE_SKIP_RE if notation == 'mermaid' else _PLANTUML_STATE_SKIP_RE
+    for raw_line in body:
+        line = _js_trim(raw_line)
+        if line == '' or (line.startswith('--') and '-->' not in line):
+            continue
+        if skip.match(line):
+            continue
+        note = _STATE_NOTE_RE.match(line)
+        if note is not None:
+            declare(note.group(1))
+            if note.group(1) not in raw['display']:
+                raw['display'][note.group(1)] = _js_trim(note.group(2))
+            continue
+        if _NOTE_RE.match(line) or _END_NOTE_RE.match(line):
+            continue
+        state_decl = _STATE_DECL_RE.match(line)
+        if state_decl is not None:
+            declare(state_decl.group(2))
+            raw['display'][state_decl.group(2)] = state_decl.group(1)
+            continue
+        bare_state = _BARE_STATE_RE.match(line)
+        if bare_state is not None:
+            declare(bare_state.group(1))
+            continue
+        if _CONCURRENCY_RE.match(line):
+            raw['warnings'].append('UML_PARSE_CONCURRENCY_FLATTENED: a concurrency region or composite block was flattened; '
+                                   'LogicModelV1 has no region construct (use logicprobe_compose_verify for parallel machines).')
+            continue
+        composite = _COMPOSITE_STATE_RE.match(line)
+        if composite is not None:
+            raw['warnings'].append('UML_PARSE_COMPOSITE_FLATTENED: composite state "' + _js_trim(composite.group(1))
+                                   + '" was flattened into its members.')
+            continue
+        description = _DESCRIPTION_RE.match(line)
+        if description is not None:
+            declare(description.group(1))
+            if description.group(1) not in raw['display']:
+                raw['display'][description.group(1)] = _js_trim(description.group(2))
+            continue
+        edge = _STATE_EDGE_RE.match(line)
+        if edge is not None:
+            frm = _js_trim(edge.group(1))
+            to = _js_trim(edge.group(2))
+            label = _js_trim(edge.group(3) or '')
+            if frm == '[*]':
+                if raw['initialState'] is not None and raw['initialState'] != to:
+                    raw['warnings'].append('UML_PARSE_MULTIPLE_INIT: the diagram enters ' + raw['initialState'] + ' and ' + to
+                                           + ' from initial pseudostates; LogicModelV1 has one init, so ' + raw['initialState'] + ' is kept.')
+                else:
+                    raw['initialState'] = to
+                continue
+            if to == '[*]':
+                raw['finalMarks'].append(frm)
+                continue
+            declare(frm)
+            declare(to)
+            raw['edges'].append({'from': frm, 'to': to, 'label': label})
+            continue
+        raw['warnings'].append('UML_PARSE_IGNORED_LINE: "' + line + '" is not a state diagram statement; it was ignored.')
+    model = _raw_to_model(raw, directives, raw['warnings'])
+    labels = _map_labels(raw['display'], directives)
+    return {'notation': notation, 'diagram': 'state', 'model': model, 'labels': labels, 'warnings': raw['warnings']}
+
+
+def _strip_quotes(text):
+    return re.sub(r'^"|"$', '', text)
+
+
+def _strip_node(text, raw, declare):
+    """Read one node reference (`A`, `A["label"]`, `A(["label"])`) and its display label."""
+    trimmed = _js_trim(text)
+    if trimmed == '':
+        return None
+    match = _STRIP_NODE_RE.match(trimmed)
+    if match is None:
+        quoted_only = _QUOTED_ONLY_RE.match(trimmed)
+        if quoted_only is not None:
+            declare(quoted_only.group(1))
+            return quoted_only.group(1)
+        return None
+    name = match.group(1)
+    shape = match.group(2) or ''
+    rest = match.group(3) or ''
+    declare(name)
+    quoted = _QUOTED_IN_RE.search(rest)
+    if quoted is not None:
+        label = _js_trim(quoted.group(1))
+    else:
+        label = _js_trim(re.sub(r'[\[\](){}>]+$', '', re.sub(r'^[\[\](){}>]+', '', rest)))
+    if label != '' and name not in raw['display']:
+        raw['display'][name] = label
+    if shape == '([' or shape == '((' or rest.startswith('(['):
+        raw['terminals'].append(name)
+    return name
+
+
+def _parse_activity_diagram(text, notation):
+    lines = re.split(r'\r?\n', text)
+    directives, body = _read_directives(lines, notation)
+    raw = {'states': [], 'display': {}, 'edges': [], 'initialState': None, 'terminals': [], 'finalMarks': [], 'warnings': []}
+    declared = set()
+
+    def declare(name):
+        if name not in declared:
+            declared.add(name)
+            raw['states'].append(name)
+
+    in_subgraph = False
+    for raw_line in body:
+        line = _js_trim(raw_line)
+        if line == '' or _ACTIVITY_SKIP_RE.match(line):
+            continue
+        if _SUBGRAPH_RE.match(line):
+            if not in_subgraph:
+                in_subgraph = True
+                raw['warnings'].append('UML_PARSE_SUBGRAPH_FLATTENED: subgraph blocks were flattened; LogicModelV1 has no hierarchy.')
+            continue
+        if line == 'end':
+            in_subgraph = False
+            continue
+        shaped = _SHAPED_EDGE_RE.match(line)
+        bare = None if shaped is not None else _BARE_EDGE_RE.match(line)
+        if shaped is not None or bare is not None:
+            match = shaped if shaped is not None else bare
+            frm = _strip_node(_js_trim(match.group(1)), raw, declare)
+            # Flowchart labels live between bars; the state-diagram form `A --> B : label`
+            # is accepted too so a hand-written file that mixes the two still reads.
+            raw_to = _js_trim(match.group(3) if shaped is not None else match.group(2))
+            label = _js_trim(_strip_quotes(match.group(2))) if shaped is not None else ''
+            if shaped is None:
+                colon = raw_to.find(':')
+                if colon >= 0:
+                    label = _strip_quotes(_js_trim(raw_to[colon + 1:]))
+                    raw_to = _js_trim(raw_to[:colon])
+            to = _strip_node(raw_to, raw, declare)
+            if frm is None or to is None:
+                continue
+            raw['edges'].append({'from': frm, 'to': to, 'label': label})
+            continue
+        node = _strip_node(line, raw, declare)
+        if node is None:
+            raw['warnings'].append('UML_PARSE_IGNORED_LINE: "' + line + '" is not a flowchart statement; it was ignored.')
+    model = _raw_to_model(raw, directives, raw['warnings'])
+    labels = _map_labels(raw['display'], directives)
+    return {'notation': notation, 'diagram': 'activity', 'model': model, 'labels': labels, 'warnings': raw['warnings']}
+
+
+def _map_labels(display, directives):
+    out = {}
+    for name, label in display.items():
+        out[directives['aliases'].get(name, name)] = label
+    return out
+
+
+def parse_uml(text, notation='auto'):
+    """Parse a Mermaid or PlantUML diagram back into a LogicModelV1."""
+    resolved = _detect_notation(text) if notation == 'auto' else notation
+    kind = _detect_diagram(text)
+    if kind == 'sequence':
+        raise ValueError('a sequence diagram is a trace, not a machine: parsing it would drop every branch the trace did not walk. '
+                         'Render diagram "state" or "activity" and parse that instead.')
+    return _parse_state_diagram(text, resolved) if kind == 'state' else _parse_activity_diagram(text, resolved)
+
+
+# ---- review ---------------------------------------------------------------
+
+def _reachable_states(model):
+    adjacency = {}
+    for transition in model['transitions']:
+        adjacency.setdefault(transition['from'], []).append(transition['to'])
+    visited = set([model['init']])
+    queue = deque([model['init']])
+    while len(queue) > 0:
+        current = queue.popleft()
+        for nxt in adjacency.get(current, []):
+            if nxt not in visited:
+                visited.add(nxt)
+                queue.append(nxt)
+    return visited
+
+
+def _canonical_transition(transition):
+    guard = guard_text(transition['guard']) if transition.get('guard') is not None else ''
+    updates = _updates_text(transition['updates']) if transition.get('updates') is not None else ''
+    return transition['from'] + '|' + transition['event'] + '|' + transition['to'] + '|' + guard + '|' + updates
+
+
+def _documented_meaning(label, sid):
+    """The narrative meaning a diagram label carries, if it carries one beyond the bare id."""
+    if label is None:
+        return None
+    trimmed = _js_trim(label)
+    if trimmed == '' or trimmed == sid:
+        return None
+    for open_char, close_char in (('（', '）'), ('(', ')')):
+        prefix = sid + open_char
+        if trimmed.startswith(prefix) and trimmed.endswith(close_char):
+            return trimmed[len(prefix):len(trimmed) - len(close_char)]
+    return trimmed
+
+
+def _collect_guard_variables(guard, sink):
+    if 'variable' in guard:
+        sink.add(guard['variable'])
+        return
+    if 'all' in guard:
+        for child in guard['all']:
+            _collect_guard_variables(child, sink)
+        return
+    if 'any' in guard:
+        for child in guard['any']:
+            _collect_guard_variables(child, sink)
+        return
+    _collect_guard_variables(guard['not'], sink)
+
+
+def _positive_leaves(guard, sink):
+    """Positive, conjunctively-reached leaves — the only ones a complementarity witness may use."""
+    if 'variable' in guard:
+        sink.append(guard)
+        return
+    if 'all' in guard:
+        for child in guard['all']:
+            _positive_leaves(child, sink)
+        return
+    # `any` and `not` subtrees are skipped on purpose: a leaf under a disjunction is
+    # not implied by its branch, and `not (x < 3)` is `x >= 3` only for totally
+    # ordered integers — neither is a sound complementarity witness.
+
+
+_COMPLEMENTS = (('<', '>='), ('<=', '>'), ('==', '!='))
+
+
+def _complementary_variable(guards):
+    """Name a variable whose guards contain a complementary pair, or None when there is none."""
+    leaves = []
+    for guard in guards:
+        _positive_leaves(guard, leaves)
+    for i in range(len(leaves)):
+        for j in range(i + 1, len(leaves)):
+            left = leaves[i]
+            right = leaves[j]
+            if left['variable'] != right['variable']:
+                continue
+            if not _js_strict_equal(left['value'], right['value']):
+                continue
+            for one, other in _COMPLEMENTS:
+                if (left['op'] == one and right['op'] == other) or (left['op'] == other and right['op'] == one):
+                    return left['variable']
+    return None
+
+
+def _structural_findings(model, labels, warnings):
+    findings = []
+    reachable = _reachable_states(model)
+    outgoing = {}
+    for transition in model['transitions']:
+        outgoing.setdefault(transition['from'], []).append(transition)
+
+    unreachable = [state['id'] for state in model['states'] if state['id'] not in reachable]
+    if len(unreachable) > 0:
+        findings.append({
+            'code': 'UML002_UNREACHABLE_STATE',
+            'severity': 'error',
+            'message': str(len(unreachable)) + ' state(s) cannot be entered from init along any transition, so the diagram draws flow nobody can reach.',
+            'states': unreachable,
+            'detail': 'Structural reachability (guards ignored). Guard-aware reachability is S1 in logicprobe_verify.',
+        })
+
+    dead_ends = [state['id'] for state in model['states']
+                 if state.get('terminal') is not True and len(outgoing.get(state['id'], [])) == 0]
+    if len(dead_ends) > 0:
+        findings.append({
+            'code': 'UML003_DEAD_END_STATE',
+            'severity': 'error',
+            'message': str(len(dead_ends)) + ' non-terminal state(s) have no outgoing transition: the flow stops there without a modelled terminal.',
+            'states': dead_ends,
+            'detail': 'Either the state is terminal (add `X --> [*]`) or the outgoing flow is missing from the model. '
+                      'logicprobe_verify S2 reports the same shape at runtime granularity.',
+        })
+
+    groups = {}
+    for transition in model['transitions']:
+        key = transition['from'] + '\u0000' + transition['event']
+        groups.setdefault(key, []).append(transition)
+    ambiguous = []
+    overlapping = []
+    inexhaustive = []
+    probably_exhaustive = []
+    complementary = []
+    for group in groups.values():
+        unguarded = [transition for transition in group if transition.get('guard') is None]
+        guarded = [transition for transition in group if transition.get('guard') is not None]
+        if len(unguarded) > 1:
+            for transition in unguarded:
+                ambiguous.append({'from': transition['from'], 'event': transition['event'], 'to': transition['to']})
+        seen_guards = {}
+        for transition in guarded:
+            text = guard_text(transition['guard'])
+            if text in seen_guards:
+                overlapping.append({'from': transition['from'], 'event': transition['event'], 'to': transition['to']})
+            else:
+                seen_guards[text] = transition
+        if len(guarded) > 0 and len(unguarded) == 0:
+            row = {'from': group[0]['from'], 'event': group[0]['event'], 'to': group[0]['to']}
+            # A complementary pair on one variable (`x < 3` / `x >= 3`) is exhaustive for
+            # any valuation, so the structural warning would be a false alarm there. The
+            # pair test is deliberately narrow — it cannot prove exhaustiveness, only
+            # recognise the common shape, which is why the finding stays on the report at
+            # info severity and still routes to S6.
+            witness = _complementary_variable([transition['guard'] for transition in guarded])
+            if witness is None:
+                inexhaustive.append(row)
+            else:
+                probably_exhaustive.append(row)
+                complementary.append(witness)
+    if len(ambiguous) > 0:
+        findings.append({
+            'code': 'UML004_AMBIGUOUS_BRANCH',
+            'severity': 'error',
+            'message': str(len(ambiguous)) + ' branch(es) share a (state, event) with no guard at all: '
+                       'the diagram shows two unconditional arrows for one event, which no reader can resolve.',
+            'transitions': ambiguous,
+            'detail': 'Keep one unguarded branch per (state, event) as the else case, and guard the others. '
+                      'logicprobe_verify S4 is the authoritative determinism check.',
+        })
+    if len(overlapping) > 0:
+        findings.append({
+            'code': 'UML005_OVERLAPPING_GUARD',
+            'severity': 'warning',
+            'message': str(len(overlapping)) + ' transition(s) repeat a guard already used by another branch of the same (state, event).',
+            'transitions': overlapping,
+        })
+    if len(inexhaustive) > 0:
+        findings.append({
+            'code': 'UML006_INEXHAUSTIVE_BRANCH',
+            'severity': 'warning',
+            'message': str(len(inexhaustive)) + ' (state, event) group(s) have only guarded branches and no default: '
+                       'if every guard is false the flow vanishes, and the diagram still implies coverage.',
+            'transitions': inexhaustive,
+            'detail': 'Add an unguarded else branch, or confirm exhaustiveness with logicprobe_verify S6 (which evaluates guards over real valuations).',
+        })
+    if len(probably_exhaustive) > 0:
+        findings.append({
+            'code': 'UML006_INEXHAUSTIVE_BRANCH',
+            'severity': 'info',
+            'message': str(len(probably_exhaustive)) + ' (state, event) group(s) have guards that look complementary on '
+                       + ', '.join(dict.fromkeys(complementary))
+                       + ', so they are probably exhaustive — but no default branch exists and only logicprobe_verify S6 can settle it.',
+            'transitions': probably_exhaustive,
+        })
+
+    events_by_reachable = dict.fromkeys(transition['event'] for transition in model['transitions']
+                                        if transition['from'] in reachable)
+    events_anywhere = dict.fromkeys(transition['event'] for transition in model['transitions'])
+    dead_events = [event for event in events_anywhere if event not in events_by_reachable]
+    if len(dead_events) > 0:
+        findings.append({
+            'code': 'UML007_UNUSED_EVENT',
+            'severity': 'warning',
+            'message': str(len(dead_events)) + ' event(s) only fire from states nothing can reach, so the diagram shows messages that never arrive.',
+            'events': dead_events,
+        })
+
+    self_loops = [transition for transition in model['transitions']
+                  if transition['from'] == transition['to'] and transition.get('guard') is None
+                  and len(outgoing.get(transition['from'], [])) == 1]
+    if len(self_loops) > 0:
+        findings.append({
+            'code': 'UML008_SELF_LOOP_NO_EXIT',
+            'severity': 'warning',
+            'message': str(len(self_loops)) + ' state(s) have a single unguarded self-loop and no exit: '
+                       'the flow can never leave, which the diagram presents as activity.',
+            'states': list(dict.fromkeys(transition['from'] for transition in self_loops)),
+            'detail': 'logicprobe_verify S3 reports absorbing cycles (liveness).',
+        })
+
+    seen_transitions = {}
+    for transition in model['transitions']:
+        key = _canonical_transition(transition)
+        seen_transitions[key] = seen_transitions.get(key, 0) + 1
+    duplicates = [transition for transition in model['transitions']
+                  if seen_transitions.get(_canonical_transition(transition), 0) > 1]
+    if len(duplicates) > 0:
+        findings.append({
+            'code': 'UML009_DUPLICATE_TRANSITION',
+            'severity': 'warning',
+            'message': str(len(duplicates)) + ' transition(s) duplicate an identical (from, event, guard, actions, to) row; '
+                       'the diagram draws the same arrow twice.',
+            'transitions': [{'from': transition['from'], 'event': transition['event'], 'to': transition['to']} for transition in duplicates],
+        })
+
+    guard_variables = set()
+    for transition in model['transitions']:
+        if transition.get('guard') is not None:
+            _collect_guard_variables(transition['guard'], guard_variables)
+    updated_variables = set()
+    for transition in model['transitions']:
+        for update in transition.get('updates') or []:
+            updated_variables.add(update['variable'])
+    unused_variables = [variable['name'] for variable in (model.get('variables') or [])
+                        if variable['name'] not in guard_variables and variable['name'] not in updated_variables]
+    if len(unused_variables) > 0:
+        findings.append({
+            'code': 'UML010_UNUSED_VARIABLE',
+            'severity': 'warning',
+            'message': str(len(unused_variables)) + ' variable(s) are never read by a guard and never written: '
+                       'the diagram carries a symbol with no source.',
+            'events': unused_variables,
+        })
+    unbounded = [variable['name'] for variable in (model.get('variables') or [])
+                 if variable['kind'] == 'integer' and ('min' not in variable or 'max' not in variable)]
+    if len(unbounded) > 0:
+        findings.append({
+            'code': 'UML011_UNBOUNDED_VARIABLE',
+            'severity': 'info',
+            'message': str(len(unbounded)) + ' integer variable(s) declare no min/max, so no range invariant can be checked '
+                       'and A5 boundary probing has no declared domain.',
+            'detail': ', '.join(unbounded),
+        })
+
+    terminals = [state['id'] for state in model['states'] if state.get('terminal') is True]
+    if len(terminals) == 0:
+        findings.append({
+            'code': 'UML012_NO_TERMINAL',
+            'severity': 'warning',
+            'message': 'no state is terminal: the diagram has no `--> [*]`, so completion, failure and a stuck flow look the same.',
+            'detail': 'Mark absorbing states terminal, or state explicitly that the machine is non-terminating.',
+        })
+
+    if 'narrative' not in model:
+        findings.append({
+            'code': 'UML013_NO_NARRATIVE',
+            'severity': 'info',
+            'message': 'the model carries no narrative block: no state, event or scenario has a natural-language meaning, '
+                       'so a reader must re-derive every symbol from the source.',
+            'detail': 'Add narrative.states / narrative.events / narrative.scenarios — the schema requires all three and full coverage once the block is present.',
+        })
+
+    documented = None
+    if labels is not None:
+        documented = [sid for sid in labels if _documented_meaning(labels[sid], sid) is not None]
+    if documented is not None:
+        undocumented = [state['id'] for state in model['states']
+                        if _documented_meaning(labels.get(state['id']), state['id']) is None]
+        if len(undocumented) > 0:
+            findings.append({
+                'code': 'UML014_UNDOCUMENTED_STATE',
+                'severity': 'info',
+                'message': str(len(undocumented)) + ' of ' + str(len(model['states']))
+                           + ' states carry no meaning in the diagram (they render as their bare id).',
+                'states': undocumented,
+                'detail': 'Give each state a `state "meaning" as ID` label or `ID : meaning` description so the diagram can be read against the code.',
+            })
+        narrative = model.get('narrative')
+        if narrative is not None and narrative.get('states') is not None:
+            drift = []
+            for state in model['states']:
+                meaning = _documented_meaning(labels.get(state['id']), state['id'])
+                declared = narrative['states'].get(state['id'])
+                if meaning is not None and declared is not None and meaning != declared:
+                    drift.append(state['id'] + ': diagram "' + meaning + '" vs narrative "' + declared + '"')
+            if len(drift) > 0:
+                findings.append({
+                    'code': 'UML015_LABEL_DRIFT',
+                    'severity': 'warning',
+                    'message': str(len(drift)) + ' state label(s) disagree with the model narrative: one of the two is stale, '
+                               'and the review cannot tell which.',
+                    'detail': ' | '.join(drift),
+                })
+
+    if len(warnings) > 0:
+        findings.append({
+            'code': 'UML016_DIAGRAM_PARSE_NOTES',
+            'severity': 'info',
+            'message': str(len(warnings)) + ' note(s) were produced while rendering or reading the diagram; '
+                       'they mark information the notation could not carry.',
+            'detail': ' | '.join(warnings),
+        })
+
+    return findings
+
+
+def _compiled_model(input_value):
+    ok, model_or_errors = validate_model(input_value)
+    if not ok:
+        raise ValueError('model invalid: ' + '; '.join(model_or_errors))
+    return model_or_errors
+
+
+def _round_trip_of(model, notation, diagram, max_steps):
+    rendered = render_uml(model, notation, diagram, max_steps)
+    parsed = parse_uml(rendered['primary'], notation)
+    diffs = diff_models(model, parsed['model'])
+    report = {
+        'notation': notation,
+        'diagram': diagram,
+        'ok': len(diffs) == 0,
+        'modelHash': model_hash(model),
+        'parsedHash': model_hash(parsed['model']),
+        'diffs': diffs,
+        'warnings': list(rendered['warnings']) + list(parsed['warnings']),
+    }
+    return {'report': report, 'primary': rendered['primary']}
+
+
+def diff_models(left, right):
+    """Compare two machines by structure — the fidelity measure behind the round-trip check."""
+    diffs = []
+    if left['init'] != right['init']:
+        diffs.append('init: ' + left['init'] + ' vs ' + right['init'])
+    left_states = [state['id'] for state in left['states']]
+    right_states = [state['id'] for state in right['states']]
+    for sid in left_states:
+        if sid not in right_states:
+            diffs.append('state missing after parse: ' + sid)
+    for sid in right_states:
+        if sid not in left_states:
+            diffs.append('state invented by the diagram: ' + sid)
+    left_terminal = sorted(state['id'] for state in left['states'] if state.get('terminal') is True)
+    right_terminal = sorted(state['id'] for state in right['states'] if state.get('terminal') is True)
+    if ', '.join(left_terminal) != ', '.join(right_terminal):
+        diffs.append('terminal states: [' + ', '.join(left_terminal) + '] vs [' + ', '.join(right_terminal) + ']')
+    left_transitions = sorted(_canonical_transition(transition) for transition in left['transitions'])
+    right_transitions = sorted(_canonical_transition(transition) for transition in right['transitions'])
+    left_count = {}
+    for key in left_transitions:
+        left_count[key] = left_count.get(key, 0) + 1
+    right_count = {}
+    for key in right_transitions:
+        right_count[key] = right_count.get(key, 0) + 1
+    for key, count in left_count.items():
+        other = right_count.get(key, 0)
+        if other < count:
+            diffs.append('transition lost in the diagram (' + str(count - other) + 'x): ' + key.replace('|', ' '))
+    for key, count in right_count.items():
+        other = left_count.get(key, 0)
+        if other < count:
+            diffs.append('transition invented by the diagram (' + str(count - other) + 'x): ' + key.replace('|', ' '))
+    left_variables = sorted(variable['name'] + ':' + variable['kind'] for variable in (left.get('variables') or []))
+    right_variables = sorted(variable['name'] + ':' + variable['kind'] for variable in (right.get('variables') or []))
+    for name in left_variables:
+        if name not in right_variables:
+            diffs.append('variable missing after parse: ' + name)
+    for name in right_variables:
+        if name not in left_variables:
+            diffs.append('variable invented by the diagram: ' + name)
+    return diffs
+
+
+def review_uml(options):
+    """Mirror of reviewUml: review a machine, a diagram, or the match between the two."""
+    warnings = []
+    findings = []
+    has_model = 'model' in options
+    has_diagram = isinstance(options.get('diagram'), str) and _js_trim(options['diagram']) != ''
+    if not has_model and not has_diagram:
+        raise ValueError('review needs `model`, `diagram`, or both')
+
+    notation = 'mermaid'
+    if options.get('notation') is not None and options['notation'] != 'auto':
+        notation = options['notation']
+    kind = options['diagramKind'] if options.get('diagramKind') is not None else 'state'
+    model = None
+    labels = None
+    primary = None
+    round_trip = None
+
+    if has_diagram:
+        try:
+            parsed = parse_uml(options['diagram'], options['notation'] if options.get('notation') is not None else 'auto')
+        except ValueError as exc:
+            return {
+                'ok': False,
+                'source': 'model+diagram' if has_model else 'diagram',
+                'summary': {'errors': 1, 'warnings': 0, 'info': 0, 'states': 0, 'events': 0, 'transitions': 0,
+                            'terminalStates': 0, 'reachableStates': 0, 'documentedStates': 0},
+                'findings': [{'code': 'UML001_DIAGRAM_UNREADABLE', 'severity': 'error', 'message': str(exc),
+                              'detail': 'The diagram could not be read as a Mermaid/PlantUML state or activity diagram.'}],
+                'roundTrip': None,
+                'warnings': warnings,
+                'nextSteps': ['Fix the diagram syntax (or render one from a model with logicprobe_uml action=render) and review again.'],
+            }
+        notation = parsed['notation']
+        labels = parsed['labels']
+        warnings.extend(parsed['warnings'])
+        if has_model:
+            model = _compiled_model(options['model'])
+            diffs = diff_models(model, parsed['model'])
+            round_trip = {
+                'notation': parsed['notation'],
+                'diagram': parsed['diagram'],
+                'ok': len(diffs) == 0,
+                'modelHash': model_hash(model),
+                'parsedHash': model_hash(parsed['model']),
+                'diffs': diffs,
+                'warnings': list(parsed['warnings']),
+            }
+            if len(diffs) > 0:
+                detail = ' | '.join(diffs[:12])
+                if len(diffs) > 12:
+                    detail += ' | … ' + str(len(diffs) - 12) + ' more'
+                findings.append({
+                    'code': 'UML017_ROUND_TRIP_MISMATCH',
+                    'severity': 'error',
+                    'message': 'the diagram does not carry the model it is presented with: ' + str(len(diffs)) + ' structural difference(s).',
+                    'detail': detail,
+                })
+            if len(diffs) == 0 and labels is not None and 'narrative' not in model:
+                warnings.append('UML_REVIEW_DIAGRAM_LABELS_IGNORED_BY_MODEL: the diagram carries state labels but the model has no narrative block, '
+                                'so the labels live only in the diagram.')
+        else:
+            model = parsed['model']
+            findings.append({
+                'code': 'UML018_FIDELITY_UNCHECKED',
+                'severity': 'info',
+                'message': 'only a diagram was supplied, so the review reads the diagram as the model: nothing here proves the diagram matches the code it claims to describe.',
+                'detail': 'Compare the parsed model against the code (each state/event/guard needs a source citation), '
+                          'or pass the machine alongside the diagram to check the two against each other.',
+            })
+    else:
+        model = _compiled_model(options['model'])
+        max_steps = options['maxSteps'] if options.get('maxSteps') is not None else 60
+        # A sequence view is a trace, so parsing it back would drop every branch the
+        # walk never took: the fidelity check cannot apply to it, and pretending it did
+        # would either fail spuriously or hide the difference. Render it anyway (the
+        # caller asked for that view) and say the check does not apply.
+        if kind == 'sequence':
+            try:
+                rendered = render_uml(model, notation, kind, max_steps)
+                primary = rendered['primary']
+                warnings.extend(rendered['warnings'])
+            except ValueError as exc:
+                warnings.append('UML_REVIEW_RENDER_SKIPPED: ' + str(exc))
+            findings.append({
+                'code': 'UML019_ROUND_TRIP_SKIPPED',
+                'severity': 'warning',
+                'message': 'a sequence view is one trace, not a restatement of the machine, so the render/parse fidelity check does not apply to it; '
+                           'render diagram "state" or "activity" to have the diagram checked against the model.',
+            })
+        elif options.get('roundTrip') is not False:
+            try:
+                rendered = _round_trip_of(model, notation, kind, max_steps)
+                primary = rendered['primary']
+                round_trip = rendered['report']
+                warnings.extend(rendered['report']['warnings'])
+                if not rendered['report']['ok']:
+                    findings.append({
+                        'code': 'UML017_ROUND_TRIP_MISMATCH',
+                        'severity': 'error',
+                        'message': 'the rendered diagram does not read back as the model: ' + str(len(rendered['report']['diffs']))
+                                   + ' structural difference(s).',
+                        'detail': ' | '.join(rendered['report']['diffs'][:12]),
+                    })
+            except ValueError as exc:
+                message = str(exc)
+                warnings.append('UML_REVIEW_ROUND_TRIP_SKIPPED: ' + message)
+                findings.append({
+                    'code': 'UML019_ROUND_TRIP_SKIPPED',
+                    'severity': 'warning',
+                    'message': 'the fidelity check could not run for ' + notation + '/' + kind + ': ' + message,
+                })
+        else:
+            findings.append({
+                'code': 'UML019_ROUND_TRIP_SKIPPED',
+                'severity': 'warning',
+                'message': 'the fidelity check was switched off (roundTrip=false); nothing here proves the diagram carries the model.',
+            })
+
+    findings.extend(_structural_findings(model, labels, warnings))
+    errors = len([finding for finding in findings if finding['severity'] == 'error'])
+    warning_count = len([finding for finding in findings if finding['severity'] == 'warning'])
+    info = len([finding for finding in findings if finding['severity'] == 'info'])
+    reachable = _reachable_states(model)
+    if labels is None:
+        narrative = model.get('narrative')
+        documented_states = 0 if narrative is None or narrative.get('states') is None else len(narrative['states'])
+    else:
+        documented_states = len([sid for sid in labels if _documented_meaning(labels[sid], sid) is not None])
+    events = dict.fromkeys(transition['event'] for transition in model['transitions'])
+    next_steps = []
+    if errors > 0:
+        next_steps.append('Resolve the error findings first — a diagram that cannot be read (or that disagrees with its model) '
+                          'will mislead every later review.')
+    next_steps.append('Run logicprobe_verify on this model for the behavioural checks (S1-S8 structural, A1-A14 adversarial); '
+                      'the review above covers modelling, not behaviour.')
+    if 'narrative' not in model:
+        next_steps.append('Add narrative.states/events/scenarios so the diagram is readable against the code.')
+    if any(finding['code'] == 'UML011_UNBOUNDED_VARIABLE' for finding in findings):
+        next_steps.append('Declare min/max (or boundaryChecks) before relying on A5 boundary probes.')
+    report = {
+        'ok': True,
+        'source': 'model+diagram' if (has_model and has_diagram) else ('diagram' if has_diagram else 'model'),
+        'summary': {
+            'errors': errors,
+            'warnings': warning_count,
+            'info': info,
+            'states': len(model['states']),
+            'events': len(events),
+            'transitions': len(model['transitions']),
+            'terminalStates': len([state for state in model['states'] if state.get('terminal') is True]),
+            'reachableStates': len(reachable),
+            'documentedStates': documented_states,
+        },
+        'findings': findings,
+        'roundTrip': round_trip,
+    }
+    if labels is not None:
+        report['labels'] = labels
+    if has_diagram:
+        report['model'] = model
+    if primary is not None:
+        report['primary'] = primary
+    report['warnings'] = warnings
+    report['nextSteps'] = next_steps
+    return report
+
+
+# ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
 
@@ -3136,6 +4654,54 @@ def _cmd_export(args):
     print(json.dumps(out, indent=2))
 
 
+def _cmd_uml_render(args):
+    try:
+        model = _load_json_file(args.model)
+        result = render_uml(model, args.notation, args.diagram, args.max_steps)
+    except (OSError, ValueError) as exc:
+        print(json.dumps({'ok': False, 'error': str(exc)}))
+        sys.exit(2)
+    out = {'notation': result['notation'], 'diagram': result['diagram'],
+           'primary': result['primary'], 'warnings': result['warnings']}
+    print(json.dumps(out, indent=2))
+
+
+def _cmd_uml_parse(args):
+    try:
+        with open(args.diagram, 'r', encoding='utf-8') as handle:
+            text = handle.read()
+        result = parse_uml(text, args.notation)
+    except (OSError, ValueError) as exc:
+        print(json.dumps({'ok': False, 'error': str(exc)}))
+        sys.exit(2)
+    out = {'notation': result['notation'], 'diagram': result['diagram'], 'model': result['model'],
+           'labels': result['labels'], 'warnings': result['warnings']}
+    print(json.dumps(out, indent=2))
+
+
+def _cmd_uml_review(args):
+    try:
+        options = {}
+        if args.model:
+            options['model'] = _load_json_file(args.model)
+        if args.diagram:
+            with open(args.diagram, 'r', encoding='utf-8') as handle:
+                options['diagram'] = handle.read()
+        if args.notation is not None:
+            options['notation'] = args.notation
+        if args.diagram_kind is not None:
+            options['diagramKind'] = args.diagram_kind
+        if args.no_round_trip:
+            options['roundTrip'] = False
+        if args.max_steps is not None:
+            options['maxSteps'] = args.max_steps
+        report = review_uml(options)
+    except (OSError, ValueError) as exc:
+        print(json.dumps({'ok': False, 'error': str(exc)}))
+        sys.exit(2)
+    print(json.dumps(report, indent=2))
+
+
 def _build_parser():
     parser = argparse.ArgumentParser(prog='logicprobe-engine.py',
                                      description='Standalone LogicModelV1 verification + composition + export (non-DSH mirror)')
@@ -3156,6 +4722,24 @@ def _build_parser():
     p_export.add_argument('model')
     p_export.add_argument('--format', required=True, choices=['uppaal', 'tla', 'prism', 'spin'])
     p_export.set_defaults(func=_cmd_export)
+    p_uml_render = sub.add_parser('uml-render', help='render a LogicModelV1 as Mermaid/PlantUML UML text')
+    p_uml_render.add_argument('model')
+    p_uml_render.add_argument('--notation', choices=['mermaid', 'plantuml'], default='mermaid')
+    p_uml_render.add_argument('--diagram', choices=['state', 'activity', 'sequence'], default='state')
+    p_uml_render.add_argument('--max-steps', type=int, default=60)
+    p_uml_render.set_defaults(func=_cmd_uml_render)
+    p_uml_parse = sub.add_parser('uml-parse', help='parse a Mermaid/PlantUML diagram back into a LogicModelV1')
+    p_uml_parse.add_argument('diagram')
+    p_uml_parse.add_argument('--notation', choices=['auto', 'mermaid', 'plantuml'], default='auto')
+    p_uml_parse.set_defaults(func=_cmd_uml_parse)
+    p_uml_review = sub.add_parser('uml-review', help='review a machine, a diagram, or the match between the two')
+    p_uml_review.add_argument('--model')
+    p_uml_review.add_argument('--diagram')
+    p_uml_review.add_argument('--notation', choices=['auto', 'mermaid', 'plantuml'], default='auto')
+    p_uml_review.add_argument('--diagram-kind', choices=['state', 'activity', 'sequence'])
+    p_uml_review.add_argument('--no-round-trip', action='store_true')
+    p_uml_review.add_argument('--max-steps', type=int)
+    p_uml_review.set_defaults(func=_cmd_uml_review)
     return parser
 
 
