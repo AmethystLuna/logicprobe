@@ -97,6 +97,14 @@ npx -p @deepseek-ai/dsh dsh plugin --profile web add dsh-logicprobe
 
 Restart the profile afterwards. `dsh --profile web --dump-config` must show the `id: logicprobe` row with `enabled: true`. More options (plain skill copy, project-level install) are in [`.dsh/INSTALL.md`](.dsh/INSTALL.md).
 
+pnpm 11 has a release-age gate. It holds back versions published less than a day ago (`minimumReleaseAge`, default 1440 minutes), and its default is non-strict, so a bare-name install **silently resolves to the previous version**. The profile then looks like the release never happened. To get the newest version within about 24 hours of a release, pin it:
+
+```bash
+dsh plugin --profile web add dsh-logicprobe@<version>
+```
+
+pnpm records that version in a `minimumReleaseAgeExclude` entry in the profile's `pnpm-workspace.yaml`. That entry is pnpm's documented escape hatch.
+
 > Package name note: the npm package is `dsh-logicprobe`, with no scope. In the web profile's `package.json`, both the dependency key and the `dsh.profile.bundles` entry must use that name. On a mismatch the dsh loader cannot find `node_modules/dsh-logicprobe` and the boot fails.
 
 ## UML Modelling and Review

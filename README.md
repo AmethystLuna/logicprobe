@@ -95,6 +95,14 @@ npx -p @deepseek-ai/dsh dsh plugin --profile web add dsh-logicprobe
 
 装完重启 profile。运行 `dsh --profile web --dump-config` 应看到 `id: logicprobe` 且 `enabled: true`。更多方式（纯技能拷贝、项目级等）见 [`.dsh/INSTALL.md`](.dsh/INSTALL.md)。
 
+pnpm 11 有一个发布年龄闸门。它挡住发布不满一天的新版本（`minimumReleaseAge`，默认 1440 分钟），而且默认是非严格模式，所以裸名安装会**静默装到上一个版本**，profile 看起来像这次发版没发生。发版后约 24 小时内要装最新版，请带上版本号：
+
+```bash
+dsh plugin --profile web add dsh-logicprobe@<version>
+```
+
+pnpm 会把该版本写进 profile 的 `pnpm-workspace.yaml` 的 `minimumReleaseAgeExclude` 条目。那是它官方的豁免方式。
+
 > 注意包名。npm 包名是 `dsh-logicprobe`，没有 scope。在 web profile 的 `package.json` 中，依赖键与 `dsh.profile.bundles` 必须都写 `dsh-logicprobe`。写错时 dsh 加载器找不到 `node_modules/dsh-logicprobe`，启动会失败。
 
 ## UML 建模与审查

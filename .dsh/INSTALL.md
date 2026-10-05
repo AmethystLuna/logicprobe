@@ -21,6 +21,14 @@ npx -p @deepseek-ai/dsh dsh plugin --profile web add dsh-logicprobe
 
 This installs under the package name `dsh-logicprobe`. If you manage the profile's `package.json` by hand, use that same name for both the dependency key and the `dsh.profile.bundles` entry.
 
+That bare-name install has one gotcha on **pnpm 11 and newer**. pnpm holds back versions published less than a day ago (`minimumReleaseAge`, default 1440 minutes). Its built-in default is non-strict, so it **silently resolves to an older version instead of failing**. For roughly 24 hours after a release, `add dsh-logicprobe` therefore installs the previous version, and the profile looks like the release never happened. Pin the version to get it immediately:
+
+```bash
+dsh plugin --profile web add dsh-logicprobe@<version>
+```
+
+Pinning also makes pnpm record a `minimumReleaseAgeExclude` entry for that version in the profile's `pnpm-workspace.yaml`. That entry is pnpm's documented escape hatch. This was measured while verifying 0.8.0: the pinned form resolved 0.8.0, and the bare name resolved the previous version at the same moment.
+
 Restart the target profile. The bundle mounts a native cordis plugin, and that plugin does two things.
 
 1. It registers the bundled skills through dsh's `ctx.skills` filesystem provider. The skills then appear in the session skill catalog, with no manual copy step.
