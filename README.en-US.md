@@ -4,23 +4,24 @@
 
 [![HOL Guard Scanner](https://img.shields.io/badge/HOL%20Guard-passing-00a67e)](https://github.com/hashgraph-online/hol-guard)
 
-Design documents are not truth — code is. A claim-verification skill that checks every verifiable claim in design docs, architecture specs, and refactoring plans against the actual codebase — and escalates to executable-model verification for behavioral claims.
+Design documents are not truth. Code is. This skill checks every verifiable claim in a design document, an architecture spec, or a refactoring plan against the real codebase. For behavioral claims it escalates to executable-model verification.
 
-**Cross-platform** — works with Claude Code, Codex CLI, Cursor, Kimi CLI, OpenCode, and ZCode. Built on the [Agent Skills](https://agentskills.io) open standard.
+**Cross-platform**: works with Claude Code, Codex CLI, Cursor, Kimi CLI, OpenCode, and ZCode. Built on the [Agent Skills](https://agentskills.io) open standard.
 
 ## What It Does
 
 | Phase | What |
 |-------|------|
-| Phase 1-2 | Enumerate every verifiable claim (API names, file paths, enum values, counts, mechanism feasibility) → verify each against the codebase with evidence |
-| Phase 2a | **8 structural checks (S1-S8)** on extracted state-machine models: S1 reachability, S2 deadlock, S3 liveness, S4 determinism, S5 event completeness, S6 guard completeness, S7 invariant validity, S8 monotonic variables |
-| Phase 2b | **14 adversarial probes (A1-A14)**: unexpected events, race interleaving, order permutation, pair symmetry (lock/unlock, incl. implicit onEntry/onExit pairing), boundary blast, resource injection, minimal counter-example, idempotent replay, leads-to, sequence, atomicity, budget (A12 worst-case path cost, incl. positive-cost-cycle detection), probability reachability (A13, P(hit) meets a lower bound), deadline (A14, maxTicks + tickEvents) |
-| Refactoring | Before/after model comparison — behavioral preservation, invariant continuity, deadlock regression, complexity claims |
-| Data models | DataModelV1 verification — DS/DA/DD checks, migration coverage, copy consistency, before/after breaking-change regression |
-| Concurrency risk mining | Scans documents/plans for concurrency safety claims (thread-safe, lock-free, race condition, interrupt safety, etc.) and flags them for dedicated verification |
-| Output | Structured findings with exact file:line evidence, severity classification, correction direction — never inline fixes; the report carries `coverageNotes` (timing/preemption/hybrid/probability vocabulary routed to UPPAAL / TSan / CBMC / TLA+ / SpaceEx / PRISM, see `skills/logicprobe/references/gap-routing-guide.md`), and the model may carry a natural-language `narrative` (state/event/scenario annotations) echoed verbatim in the report |
+| Phase 1-2 | Enumerate every verifiable claim: API names, file paths, enum values, counts, mechanism feasibility. Verify each one against the codebase with evidence. |
+| Phase 2a | **8 structural checks (S1-S8)** on the extracted state machine: S1 reachability, S2 deadlock, S3 liveness, S4 determinism, S5 event completeness, S6 guard completeness, S7 invariant validity, S8 monotonic variables. |
+| Phase 2b | **14 adversarial probes (A1-A14)**: unexpected events, race interleaving, order permutation, pair symmetry (lock/unlock, incl. implicit onEntry/onExit pairing), boundary blast, resource injection, minimal counter-example, idempotent replay, leads-to, sequence, atomicity, budget (A12 worst-case path cost, incl. positive-cost-cycle detection), probability reachability (A13), deadline (A14). |
+| Refactoring | Before/after model comparison: behavioral preservation, invariant continuity, deadlock regression, complexity claims. |
+| Data models | DataModelV1 verification (DS/DA/DD): migration coverage, copy consistency, before/after breaking-change regression. |
+| UML modelling and review | Draw a code flow as UML, then review the modelling itself: structural defects, documentation gaps, diagram-versus-model fidelity. |
+| Concurrency risk mining | Scan documents and plans for concurrency safety claims (thread-safe, lock-free, race condition, interrupt safety) and flag them for dedicated verification. |
+| Output | Structured findings with exact file:line evidence, severity, and correction direction. Never an inline fix. The report carries `coverageNotes`, which routes timing, preemption, hybrid-control and probability vocabulary to external tools (UPPAAL, TSan, CBMC, TLA+, SpaceEx, PRISM). See `skills/logicprobe/references/gap-routing-guide.md`. A model may also carry a natural-language `narrative` (state, event and scenario annotations), which the report echoes verbatim. |
 
-The model is always shown as a transition table and **confirmed with the user before running** — extraction errors are the dominant failure mode.
+The model is always shown as a transition table first, and **confirmed with the user before it runs**. Extraction errors are the dominant failure mode.
 
 ## Installation
 
@@ -38,7 +39,7 @@ Add the marketplace to **Claude Code**'s `~/.claude/settings.json`:
 }
 ```
 
-Then install from CLI:
+Then install from the CLI:
 
 ```bash
 claude plugin install logicprobe@logicprobe
@@ -50,7 +51,7 @@ claude plugin install logicprobe@logicprobe
 git clone https://github.com/AmethystLuna/logicprobe.git ~/.claude/plugins/dev/logicprobe
 ```
 
-Then enable in `~/.claude/settings.json`:
+Then enable it in `~/.claude/settings.json`:
 
 ```json
 {
@@ -62,19 +63,26 @@ Then enable in `~/.claude/settings.json`:
 
 ## DeepSeek Harness (dsh)
 
-Native dsh support ships as a cordis plugin bundle at the repository root (the root `package.json` declares `dsh.bundle`):
+Native dsh support ships as a cordis plugin bundle at the repository root, declared by `dsh.bundle` in the root `package.json`.
 
-- The skill is discovered as-is by dsh's `skill-filesystem` provider (Agent Skills open standard) — zero code.
-- The bundle injects the claim-verification gate (1% Rule / Red Flags / proactive suggestion) into the first model step of every agent session — the dsh-native counterpart of the Claude `SessionStart` hook. It also registers a model-visible catalog entry (`cordis_inspect`), a native `logicprobe_verify` tool (`ctx.tools`), and a policy-aware `logicprobe:mode` context (`ctx.systemPrompt`).
-- `logicprobe_datamodel_verify` adds data-model verification: DataModelV1, migration coverage, copy consistency, and DD1-DD4 before/after data regression.
-- `logicprobe_concurrency_scan` mines documents/plans for concurrency risk claims (thread-safe, lock-free, race condition, mutex, etc.), flags them for dedicated verification, and attaches tool-routing `suggestions` to absolute claims.
-- `logicprobe_verify` also supports transition `cost` (default 1) with `budget` invariants (A12 worst-case path-cost check incl. positive-cost-cycle detection), and transition `weight` (default 1) with `probability` invariants (A13 probability reachability).
-- State `onEntry`/`onExit` actions are treated by A4 Pair Symmetry as implicit acquire/release; `maxTicks` + `tickEvents` deadlines (A14); report `coverageNotes` routes timing/preemption/hybrid/probability vocabulary to dedicated tools (UPPAAL, TSan/CBMC/TLA+, SpaceEx, PRISM, ...).
-- The engine runs **22 checks (S1-S8 structural + A1-A14 adversarial)**; the model may carry a natural-language `narrative` (state/event/scenario annotations) echoed verbatim in the report.
-- `logicprobe_compose_verify`: composition verification of two or more state machines (rendezvous handshake semantics) reporting C1 composition deadlock / C2 rendezvous never fires.
-- `logicprobe_export`: exports a LogicModelV1 as native input for external tools — UPPAAL (XML `.xta` + queries), TLA+ (TLC module), PRISM (DTMC `.pm` + `.pctl`), SPIN (Promela + ltl) — matching the dimensions covered by `coverageNotes`/gap-routing; exports follow each tool's official syntax so the generated files can be handed straight to the checker (SPIN is verified end-to-end for real).
-- `logicprobe_uml`: models a code flow as UML and **reviews the modelling itself**. `render` draws a LogicModelV1 as Mermaid (state / activity flowchart / sequence) or PlantUML (state / sequence); `parse` reads Mermaid or PlantUML state/activity text back into a LogicModelV1, so a hand-drawn diagram can be verified with `logicprobe_verify` (a sequence diagram is refused — a trace cannot reconstruct a machine); `review` audits the modelling — structural defects (unreachable states, dead ends, ambiguous branches, self-loops with no exit, duplicate transitions), documentation gaps (no narrative, unbounded variables, symbols a reader cannot map back to code, diagram-versus-narrative label drift) and the fidelity check: the diagram is re-parsed and any structural difference is reported as `UML017_ROUND_TRIP_MISMATCH`. The review never replaces behavioural verification; each finding names the engine check that settles it.
-- Together with the embedded-workbench bundle's Plan Verification Gate, this closes the claim-verification loop in dsh.
+The bundle does three things:
+
+1. **Registers the skills.** They follow the Agent Skills open standard and are discovered as-is by dsh's `skill-filesystem` provider. No extra code.
+2. **Injects the gate text.** The first model step of every session receives the claim-verification gate (1% Rule / Red Flags / proactive suggestion). This is the dsh counterpart of the Claude `SessionStart` hook.
+3. **Registers the native tools and a context.** The tools live on `ctx.tools`. A policy-aware `logicprobe:mode` context lives on `ctx.systemPrompt`. A model-visible catalog entry is available through `cordis_inspect`.
+
+The tools:
+
+| Tool | What it does |
+|------|------|
+| `logicprobe_verify` | State-machine verification: S1-S8 structural checks plus A1-A14 adversarial probes. Pass `beforeModel` and `stateMapping` to add the D1-D4 before/after regression. |
+| `logicprobe_datamodel_verify` | Data-model verification: DataModelV1, migration coverage, copy consistency, DD1-DD4 data regression. |
+| `logicprobe_concurrency_scan` | Mines concurrency risk claims (thread-safe, lock-free, race condition, mutex) and flags them for dedicated verification. |
+| `logicprobe_compose_verify` | Composition verification of two or more machines (rendezvous handshake semantics): C1 composition deadlock, C2 rendezvous never fires. |
+| `logicprobe_export` | Exports external-tool input: UPPAAL (`.xta` + queries), TLA+ (TLC module), PRISM (DTMC `.pm` + `.pctl`), SPIN (Promela + ltl). |
+| `logicprobe_uml` | Models a code flow as UML and reviews the modelling. See "UML modelling and review" below. |
+
+Transition `cost` (default 1) plus a `budget` invariant makes A12 check the worst-case path cost. A reachable cycle with positive cost counts as unbounded. Transition `weight` (default 1) plus a `probability` invariant makes A13 compute probability reachability. State `onEntry`/`onExit` actions enter A4 pair symmetry automatically, and `maxTicks` plus `tickEvents` drive the A14 deadline check.
 
 Install (native bundle, recommended):
 
@@ -87,29 +95,48 @@ dsh plugin --profile web add "github:AmethystLuna/logicprobe"
 npx -p @deepseek-ai/dsh dsh plugin --profile web add dsh-logicprobe
 ```
 
-Restart the profile, then run `dsh --profile web --dump-config`: the `id: logicprobe` row must appear with `enabled: true`. More options (plain skill copy, project-level, ...) are in [`.dsh/INSTALL.md`](.dsh/INSTALL.md).
+Restart the profile afterwards. `dsh --profile web --dump-config` must show the `id: logicprobe` row with `enabled: true`. More options (plain skill copy, project-level install) are in [`.dsh/INSTALL.md`](.dsh/INSTALL.md).
 
-> DSH install note: the package name is `dsh-logicprobe`. In the web profile's `package.json`, both the dependency key and the `dsh.profile.bundles` entry must use the same name; a mismatch causes the dsh loader to fail with `ERR_MODULE_NOT_FOUND`.
+> Package name note: the npm package is `dsh-logicprobe`, with no scope. In the web profile's `package.json`, both the dependency key and the `dsh.profile.bundles` entry must use that name. On a mismatch the dsh loader cannot find `node_modules/dsh-logicprobe` and the boot fails.
+
+## UML Modelling and Review
+
+`logicprobe_uml` draws a LogicModelV1 as UML. It also reads a hand-drawn UML diagram back into a model, and it reviews the modelling itself. It has three actions:
+
+- **render**: model to diagram. Mermaid covers state, activity flowchart and sequence views. PlantUML covers state and sequence. Any construct the notation cannot express becomes a warning instead of a silent drop. PlantUML activity is refused, because that syntax cannot carry a graph with merges or cycles faithfully.
+- **parse**: diagram to model. It reads Mermaid and PlantUML state or activity diagrams, so a hand-drawn diagram can go straight into `logicprobe_verify`. A sequence diagram is a trace, not a machine, so parsing one is refused.
+- **review**: audits the modelling. It reports structural defects and documentation gaps. The structural defects are unreachable states, dead ends, ambiguous branches, self-loops with no exit, and duplicate transitions. The documentation gaps are a missing narrative, unbounded variables, states a reader cannot map back to code, and label drift between diagram and narrative. It also runs the fidelity check: it parses the diagram back into a model and reports every structural difference.
+
+Fidelity is the core of the feature. Generated diagrams carry `logicprobe:` comment directives for the initial state, the terminal states, aliases and variable kinds. Mermaid and PlantUML ignore those lines; the parser reads them. That is what makes the diagram-versus-model comparison exact.
+
+The review covers the modelling, never the behaviour. Every finding names the engine check that settles the behavioural half. The full list (`UML001`-`UML019`), the directive format, a worked example and the limits of each view are in [`skills/logicprobe/references/uml-modeling-guide.md`](skills/logicprobe/references/uml-modeling-guide.md).
 
 ## Usage
 
-The plugin auto-injects a capability notification into the first model step. The skill activates when its `Use when` description matches your task:
+The plugin injects a capability notification into the first model step. The skill activates when its `Use when` description matches your task:
 
-- **Design doc / plan review** — "Review this design document" → claim enumeration and codebase verification
-- **Behavioral questions** — "could this state machine deadlock", "is this retry limit safe", "check this timing for bugs" → the skill is proactively suggested (not auto-loaded) as an optional verification pass
-- **Refactoring plans** — the pipeline compares before/after models to flag undocumented behavioral changes
-- **Data model / migration review** — "is this migration non-breaking", "does this copy cover all required fields" → use the `logicprobe-datamodel` skill
-- **Code-flow modelling** — "draw this state machine / this flow", "is this UML diagram right" → `logicprobe_uml`: `render` draws it, `parse` reads a hand-drawn diagram back into a model, `review` audits the modelling (structural defects + round-trip fidelity) — then still run `logicprobe_verify` for the behaviour
+- **Design doc or plan review** — "Review this design document" → claim enumeration and codebase verification
+- **Behavioral questions** — "could this state machine deadlock", "is this retry limit safe" → the skill is proactively suggested (not auto-loaded) as an optional verification pass
+- **Refactoring plans** — the pipeline compares before/after models and flags undocumented behavioral changes
+- **Data model or migration review** — "is this migration non-breaking" → use the `logicprobe-datamodel` skill
+- **Code-flow modelling** — "draw this state machine", "is this UML diagram right" → use `logicprobe_uml` to draw the diagram and review the modelling, then run `logicprobe_verify` for the behaviour
 
-The skill auto-classifies depth (LIGHTWEIGHT / STANDARD / ESCALATED) from plan features in Phase 0, and appends a `## Plan Verification` summary block as the audit trail.
+The skill classifies depth (LIGHTWEIGHT / STANDARD / ESCALATED) from plan features in Phase 0, and appends a `## Plan Verification` summary block as the audit trail.
 
-In DSH, prefer the native `logicprobe_verify` tool for state machines and `logicprobe_datamodel_verify` for data models (see the schema references under each skill); `logicprobe_uml` models a code flow as UML and reviews the modelling (see `skills/logicprobe/references/uml-modeling-guide.md`). Python remains optional for non-DSH hosts: when a LogicModelV1 JSON already exists, run the standalone engine `skills/logicprobe/references/logicprobe-engine.py` (`verify` runs S1-S8/A1-A14/D1-D4, `compose` runs C1/C2 composition, `export` emits UPPAAL/TLA+/PRISM/SPIN input, `uml-render`/`uml-parse`/`uml-review` cover the UML front end — byte-identical to the dsh tools, cross-checked by tests/python/run.mjs); when the model only exists as extracted tables, fill in `skills/logicprobe/references/verification-harness.py`; data-model checks use `skills/logicprobe-datamodel/references/data-model-harness.py`. When Python is unavailable, the corresponding guide provides a manual verification mode.
+Python is optional. When a LogicModelV1 JSON already exists, run the standalone engine at `skills/logicprobe/references/logicprobe-engine.py`:
 
-Sample models are available under [`examples/`](examples/README.md): order state-machine before/after, e-commerce data model, and User field migration.
+- `verify` runs S1-S8 / A1-A14 / D1-D4
+- `compose` runs the C1 / C2 composition
+- `export` emits UPPAAL, TLA+, PRISM and SPIN input
+- `uml-render`, `uml-parse` and `uml-review` cover the UML front end
+
+Its output is byte-identical to the dsh tools, cross-checked by `tests/python/run.mjs`. When the model exists only as extracted tables, fill in `skills/logicprobe/references/verification-harness.py`. Data-model checks use `skills/logicprobe-datamodel/references/data-model-harness.py`. When Python is unavailable, for example on an air-gapped machine, the matching guide describes a manual verification mode.
+
+Sample models live under [`examples/`](examples/README.md): an order state machine before/after, an e-commerce data model, and a User field migration.
 
 ## Codex CLI
 
-This plugin also supports OpenAI Codex CLI. Skills follow the Agent Skills standard and work identically across both platforms.
+This plugin also supports OpenAI Codex CLI. Skills follow the Agent Skills standard and work identically on both platforms.
 
 ### Codex install
 
@@ -127,7 +154,7 @@ Or manually:
 git clone https://github.com/AmethystLuna/logicprobe.git ~/.codex/plugins/logicprobe
 ```
 
-Skills are invoked with `$logicprobe` or auto-selected by Codex based on task context.
+Skills are invoked with `$logicprobe`, or selected automatically by Codex from the task context.
 
 ## Cursor
 
@@ -160,7 +187,7 @@ Skills are invoked with `/skill:logicprobe`.
 
 ## OpenCode
 
-Skills are auto-discovered from `.claude/skills/` and `.codex/skills/` paths. Add to your `opencode.json`:
+Skills are auto-discovered from `.claude/skills/` and `.codex/skills/` paths. Add this to your `opencode.json`:
 
 ```json
 {
@@ -168,29 +195,29 @@ Skills are auto-discovered from `.claude/skills/` and `.codex/skills/` paths. Ad
 }
 ```
 
-Or install via `skop` which consumes the Claude marketplace manifest. See `.opencode/INSTALL.md` for detailed instructions.
+Or install through `skop`, which consumes the Claude marketplace manifest. See `.opencode/INSTALL.md`.
 
 ## ZCode (Z.AI)
 
-ZCode 3.0+ follows the Agent Skills standard. No plugin marketplace — manually copy skills to `.zcode/skills/`:
+ZCode 3.0+ follows the Agent Skills standard. It has no plugin marketplace, so copy the skills yourself:
 
 ```bash
 git clone https://github.com/AmethystLuna/logicprobe.git
 cp -r logicprobe/skills/* .zcode/skills/
 ```
 
-Skills are invoked with `$logicprobe`. See `.zcode/INSTALL.md` for details.
+Skills are invoked with `$logicprobe`. See `.zcode/INSTALL.md`.
 
 ## Requirements
 
-- Claude Code v2.1+ / Codex CLI latest / Cursor 2.5+ / Kimi CLI latest / OpenCode latest / ZCode 3.0+
-- DeepSeek Harness (dsh): dev preview — supports `>= 0.1.0-rc.7` (the standing declaration; this round re-measured 0.1.5-rc.2 / 0.1.5-rc.3 / 0.1.6-alpha.2 / 0.1.7-alpha.1 / 0.1.7-alpha.2 / 0.1.7-rc.1 / 0.1.7-rc.2 / 0.2.0-rc.1 / 0.2.0-rc.2 — per-release evidence in [DSH-COMPATIBILITY.md](DSH-COMPATIBILITY.md))
-- The Web Plugins-page "Gate injection" switch requires **dsh ≥ 0.1.7-alpha.1** — its settings service must project live fields. On older dsh the plugin still loads and still injects, with the switch simply absent and **no error**: below schemastery 3.18.3 the field degrades to an ordinary boolean, and a settings service without `whileServed` makes the client half register nothing.
-- Python 3.6+ optional (only for the automated harness; manual fallback mode requires none)
+- Host: Claude Code v2.1+ / Codex CLI latest / Cursor 2.5+ / Kimi CLI latest / OpenCode latest / ZCode 3.0+
+- DeepSeek Harness (dsh): dev preview, declared support for `>= 0.1.0-rc.7`. The latest round measured install, mount, boot and uninstall on 0.2.1-alpha.1. The earlier round measured 0.1.5-rc.2 through 0.2.0-rc.2. Per-release evidence is in [DSH-COMPATIBILITY.md](DSH-COMPATIBILITY.md).
+- The Web Plugins-page "Gate injection" switch requires **dsh ≥ 0.1.7-alpha.1**, because its settings service must be able to project live fields. On older dsh the plugin still loads and still injects. The switch is simply absent, with no error.
+- Python 3.6+ optional, needed only by the automated tools. The manual fallback mode needs no dependencies.
 
 ## Configuration
 
-In DeepSeek Harness, the bundle registers the `logicprobe_verify` tool (through `ctx.tools`) and a policy-aware `logicprobe:mode` context (through `ctx.systemPrompt`). The bundle accepts a small configuration object:
+In DeepSeek Harness the bundle accepts a small configuration object:
 
 | Key | Type | Default | Description |
 |---|---|---|---|
@@ -198,9 +225,9 @@ In DeepSeek Harness, the bundle registers the `logicprobe_verify` tool (through 
 | `gateContent` | string | built-in gate text | Override the text injected into the first model step. |
 | `interaction` | `ask` \| `auto` \| `follow-approval` | `follow-approval` | Model-confirmation policy. `follow-approval` resolves to `auto` when the session approval policy is `never`. |
 
-The switch is editable live in the dsh Web GUI: sidebar **Plugins** → this plugin's card → "Gate injection". It takes effect without a profile restart and controls only the injected text — turning it off leaves the skills and the verification tools registered. The same card also carries a coarser row switch: turning that off unmounts the whole row (skills, tools, and this switch go with it). Persistent overrides still go through the profile patch below.
+The switch is editable live in the dsh Web GUI: sidebar **Plugins** → this plugin's card → "Gate injection". It takes effect without a profile restart, and it controls only the injected text. Turning it off leaves the skills and the verification tools registered. The same card also carries a coarser row switch: turning that one off unmounts the whole row, so the skills, the tools and this switch all disappear. Persistent overrides still go through the profile patch below.
 
-To change it, override the row by id in your profile's `cordis.patch.yml`:
+To override the row by id, edit your profile's `cordis.patch.yml`:
 
 ```yaml
 - insert:
@@ -215,24 +242,24 @@ To change it, override the row by id in your profile's `cordis.patch.yml`:
 
 ## Uninstall
 
-- If you installed through the DSH plugin manager, remove the `logicprobe` plugin from the target profile using the same manager you used to install it.
-- If you copied `skills/*` manually, delete the copied skill directories from `~/.agents/skills/` or the project `.dsh/skills/`.
+- If you installed through the DSH plugin manager, remove the `logicprobe` plugin from the target profile with the same manager.
+- If you copied `skills/*` manually, delete the copied skill directories from `~/.agents/skills/` or the project's `.dsh/skills/`.
 - If you added the bundle as a `cordis.patch.yml` row, remove the row with `id: logicprobe` from the profile patch and restart DSH.
 
 ## Permissions & Data
 
 - The plugin runtime reads only the `skills/` directory shipped inside the package, in order to register skills through DSH's standard filesystem skill provider.
 - It injects the configured gate text into the first model step of a session.
-- It does not read credentials, open network connections, or access user data outside the DSH session context.
+- It does not read credentials, open network connections, or touch user data outside the DSH session context.
 - When the skill is actually used, the model may read project files as directed by the user, just like any other coding skill.
 
 ## Troubleshooting
 
-- Skill not visible in DSH: confirm you are on a DSH version that supports `ctx.skills`/Agent Skills discovery, and restart the profile after install.
-- Gate not injected: check that `enabled` is not `false` and that the row id `logicprobe` is present in the active profile patch.
-- `logicprobe_verify` not visible: check `cordis_inspect_query` status for `toolRegistered: true`, and confirm the DSH profile resolved the `@deepseek-ai/dsh-tools` peer dependency.
-- Plugin manager rejects installation: make sure `@deepseek-ai/*` packages are declared as `peerDependencies`, not regular `dependencies`.
-- After manual copy, DSH still doesn't see the skill: use the native bundle install (`dsh plugin add "github:AmethystLuna/logicprobe"`) instead of copying.
+- Skill not visible in DSH: confirm the DSH version supports `ctx.skills` and Agent Skills discovery, then restart the profile.
+- Gate not injected: check that `enabled` is not `false`, and that the row id `logicprobe` is present in the active profile patch.
+- `logicprobe_verify` not visible: check `cordis_inspect_query` status for `toolRegistered: true`, and confirm the profile resolved the `@deepseek-ai/dsh-tools` peer dependency.
+- Plugin manager rejects the installation: make sure the `@deepseek-ai/*` packages are declared as `peerDependencies`, not as regular `dependencies`.
+- After a manual copy DSH still does not see the skill: install the native bundle instead (`dsh plugin add "github:AmethystLuna/logicprobe"`).
 
 ## Development
 
@@ -244,10 +271,12 @@ npm run build
 
 Test chain:
 
-- `npm run test:engine` — state-machine / data-model engine regression (`tests/engine`, `tests/data-engine`, `tests/concurrency`, `tests/apply-smoke`, `tests/dsh-client-half`, `tests/exporters`, `tests/external`) plus byte-for-byte Python parity (`tests/python/run.mjs`: the same fixtures are compared between the TS engine and `skills/logicprobe/references/logicprobe-engine.py` across reports / composition / exporter output; auto-SKIP when Python is absent)
-- `npm run test:full` — `tests/full-suite.mjs` combined end-to-end suite
-- `npm run test:python` — Python parity only (build + `tests/python/run.mjs`)
-- Trigger tests are under `tests/skill-triggering/`: `bash tests/skill-triggering/run-all.sh`
+| Command | What it covers |
+|---|---|
+| `npm run test:engine` | State-machine and data-model engine regression (`tests/engine`, `tests/data-engine`, `tests/concurrency`, `tests/uml`, `tests/apply-smoke`, `tests/dsh-client-half`, `tests/exporters`, `tests/external`), plus byte-for-byte Python parity. The parity script `tests/python/run.mjs` compares the same fixtures between the TS engine and `skills/logicprobe/references/logicprobe-engine.py` across reports, composition and exporter output. It SKIPs when Python is absent. |
+| `npm run test:full` | `tests/full-suite.mjs` combined end-to-end suite |
+| `npm run test:python` | Python parity only (build + `tests/python/run.mjs`) |
+| `bash tests/skill-triggering/run-all.sh` | Trigger tests under `tests/skill-triggering/` |
 
 ## License & Security
 

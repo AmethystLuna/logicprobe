@@ -31,15 +31,20 @@ MSVC-less host (`npm install --ignore-scripts`). 0.1.5-alpha.1 replaced `fs-ext`
 with the lazily loaded prebuilt `@deepseek-ai/node-addon-system/flock`, so that
 row installed exactly as published.
 
-The 2026-10-05 round (`0.2.1-alpha.1`) repeated that procedure verbatim from a
-temporary npm install prefix (`npm install --prefix <dir>
-@deepseek-ai/dsh@0.2.1-alpha.1`). The `registry.npmjs.org` connection reset
-(`ECONNRESET`) twice while that tree was downloading — once as a stall with no
-progress for 20 minutes, once as a hard `npm error network aborted` — so the prefix
-was installed from `registry.npmmirror.com` with `--fetch-retries=8
---fetch-retry-maxtimeout=120000`, and the plugin installs inside it were pointed at
-the same mirror through `npm_config_registry`. The packages are the published
-`0.2.1-alpha.1` tarballs; only the transport changed.
+The 2026-10-05 round (`0.2.1-alpha.1`) repeated that procedure from a temporary npm
+install prefix:
+
+```bash
+npm install --prefix <dir> @deepseek-ai/dsh@0.2.1-alpha.1
+```
+
+`registry.npmjs.org` reset the connection twice while that tree was downloading. The
+first reset was a stall with no progress for 20 minutes. The second was a hard
+`npm error network aborted`. The prefix was therefore installed from
+`registry.npmmirror.com`, with `--fetch-retries=8 --fetch-retry-maxtimeout=120000`.
+The plugin installs inside it were pointed at the same mirror through
+`npm_config_registry`. The packages are the published `0.2.1-alpha.1` tarballs; only
+the transport changed.
 
 ```bash
 # 1) install: fresh profile, plugin added as a file: dependency
@@ -141,12 +146,12 @@ carries the `logicprobe:mode` section. The 0.1.5-alpha.2, 0.1.5-rc.1, 0.1.5-rc.2
 
 ## Results
 
-Three categories, kept apart on purpose: the row re-measured against the 0.8.0
-build in the 2026-10-05 round, the rows re-measured against the 0.7.1 build in the
-2026-09-29 round, and the rows carried over from earlier rounds. A carried-over row
-is still declared compatible, but it was produced by an earlier round's procedure
-and was not re-run against this build; presenting it as newly verified would
-overstate the evidence.
+The results fall into three groups, kept apart on purpose. The first group is the row
+re-measured against the 0.8.0 build on 2026-10-05. The second group is the rows
+re-measured against the 0.7.1 build on 2026-09-29. The third group is the rows carried
+over from earlier rounds. A carried-over row is still declared compatible. It was
+produced by an earlier round's procedure, though, and was not re-run against this
+build, so presenting it as newly verified would overstate the evidence.
 
 ### Re-measured this round against `0.8.0` (2026-10-05)
 
@@ -154,11 +159,13 @@ overstate the evidence.
 |---|---|---:|---:|---|---:|---:|---|
 | 0.2.1-alpha.1 | pass | pass | pass | not probed (headless round) | not probed | not probed | not probed |
 
-Both plugins (`dsh-logicprobe` 0.8.0 and the sibling `dsh-embedded-workbench`
-0.9.1) cleared the same four steps on this release, each against its own fresh
-`DSH_HOME`. The round was run twice — at 22:02, then again at 22:33 after an
-internal fix to the bundled UML module, so the quoted run is the frozen build and
-every step passed identically in both:
+Both plugins cleared the same four steps on this release, each against its own fresh
+`DSH_HOME`. Those plugins are `dsh-logicprobe` 0.8.0 and the sibling
+`dsh-embedded-workbench` 0.9.1.
+
+The round ran twice. The first pass was at 22:02. The second pass was at 22:33, after
+an internal fix to the bundled UML module. Every step passed identically in both, so
+the output below is quoted from the second pass, which measured the frozen build:
 
 ```text
 dsh plugin --profile headless add "file:<this-repo>"
@@ -173,26 +180,26 @@ dsh plugin --profile headless remove <package>  &&  dsh --profile headless --dum
   -> row gone (both plugins)
 ```
 
-The boot output is that one `AUTH` line and nothing else: no
+The boot output is that one `AUTH` line and nothing else. There is no
 `plugin tree failed to load`, no `volatile is not a function`, no
-`ERR_MODULE_NOT_FOUND`, no `Cannot find module`. That is the same clean-boot
-signature the 0.1.7 and 0.2.0 rows recorded, and it shows both bundles applied
-before the model-provider call rather than merely installing.
+`ERR_MODULE_NOT_FOUND` and no `Cannot find module`. The 0.1.7 and 0.2.0 rows recorded
+the same clean-boot signature. It shows both bundles applied before the
+model-provider call, rather than merely installing.
 
-pnpm printed its advisory
+pnpm printed its advisory warning
 `[WARN] Issues with peer dependencies found. Run "pnpm peers check" to list them.`
-intermittently: for `dsh-embedded-workbench` only in the first pass, for both
-packages in the second, and for neither in two ad-hoc repeat installs into fresh
-profiles on the same host. It is advisory in every case — the install exited 0 and
-the mount, boot and uninstall steps all passed — and it is recorded here so a later
-reader does not read the warning as a compatibility failure.
+intermittently. It appeared for `dsh-embedded-workbench` only in the first pass, for
+both packages in the second pass, and for neither package in two ad-hoc repeat
+installs into fresh profiles on the same host. The warning is advisory in every case:
+the install exited 0, and the mount, boot and uninstall steps all passed. It is
+recorded here so a later reader does not mistake it for a compatibility failure.
 
-**The peer-range widening is a declaration here, not a gate.** A copy of this
-manifest with the pre-widening ranges (peers and `dsh.compatibility.dsh` both
-ending at `^0.2.0-rc.1`) was added to a fresh profile on 0.2.1-alpha.1 and installed
-cleanly (`exit 0`, 733 ms, pnpm reached, no preflight refusal) — unlike 0.2.0-rc.2,
-where the same shape was refused before pnpm ran. `|| ^0.2.1-alpha.1` is therefore
-added to the peer ranges and the `dsh` range because that is the release this round
+**On this release the peer-range widening is a declaration, not a gate.** A copy of
+this manifest was added to a fresh profile on 0.2.1-alpha.1, with the pre-widening
+ranges (peers and `dsh.compatibility.dsh` both ending at `^0.2.0-rc.1`). It installed
+cleanly: exit 0, 733 ms, pnpm reached, no preflight refusal. On 0.2.0-rc.2 the same
+shape was refused before pnpm ran. The `|| ^0.2.1-alpha.1` branch is therefore added
+to the peer ranges and the `dsh` range because that is the release this round
 measured, not because the host would otherwise reject the package.
 
 ### Re-measured in the 2026-09-29 round against `0.7.1`
@@ -274,8 +281,8 @@ unverified.
 
 ## Declared compatibility (package.json)
 
-Quoted from the manifest of 0.8.0. The `peerDependencies` block is included
-because it, not `dshReleases`, is what the install preflight evaluates
+Quoted from the manifest of 0.8.0. The `peerDependencies` block is included because
+the install preflight evaluates it, not `dshReleases`
 (`@deepseek-ai/dsh-app-boot/lib/index.js:289-293`).
 
 ```json
@@ -330,35 +337,35 @@ because it, not `dshReleases`, is what the install preflight evaluates
 the method usable, and the hosts it targets (≤ 0.1.6-alpha.2) have no install
 preflight to enforce a peer range anyway. From 0.1.7-rc.1 on, the preflight does
 enforce it, so an install there is refused unless the host really provides the
-schemastery this package was tested against — the guard lowers the failure mode,
-it does not licence a support claim that was never measured. On 0.2.1-alpha.1 the
-preflight did **not** refuse the pre-widening manifest (measured), so the extra
-`|| ^0.2.1-alpha.1` branch records the release this package was actually run
-against rather than a gate the host imposes.
+schemastery this package was tested against. The guard lowers the failure mode; it
+does not licence a support claim that was never measured.
+
+On 0.2.1-alpha.1 the preflight did **not** refuse the pre-widening manifest. That is
+a measurement, not an assumption. The extra `|| ^0.2.1-alpha.1` branch therefore
+records the release this package was actually run against. It is not a gate the host
+imposes.
 
 ## Notes
 
 These bullets are grouped by the round that produced them. The first governs
-0.7.1; several later ones describe what an **older** plugin version was verified
+0.7.1. Several later ones describe what an **older** plugin version was verified
 against, so where one reads "keeps 0.1.0-rc.7 … X working" it means that round's
 plugin version, not this one. The Results tables above are the authoritative
 statement for 0.8.0.
 
 - **The 0.2.1-alpha.1 round measured four steps, not the Web half.** Install,
-  mount, headless boot and uninstall were re-run for both plugins on 2026-10-05
-  (see the Results section); `rows active`, `__DSH_BOOT__`, the settings namespace
-  and the live Web switch were **not** probed for that row, so its table cells read
-  "not probed" rather than inheriting the 0.2.0-rc.2 result. What the row does
-  establish is that the bundle applies on the new release: the boot reached the
-  model-provider stage with no plugin load error, which cannot happen if a row
-  failed to compose.
-- **A version bump resets old-version evidence, and 0.8.0 adds a tool but no new
-  host seam.** The release adds `logicprobe_uml` (UML modelling and modelling
-  review) to `ctx.tools` alongside the five existing tools, and extends the
-  `logicprobe:mode` context text. Tool registration and the `cordisInspect` status
-  projection are the same calls this package has made since 0.1.0-rc.7, so the
-  0.7.1 rows above remain the reference for the seams they exercised; the 0.8.0 row
-  is the one that speaks for installation and boot on 0.2.1-alpha.1.
+  mount, headless boot and uninstall were re-run for both plugins on 2026-10-05.
+  See the Results section. `rows active`, `__DSH_BOOT__`, the settings namespace and
+  the live Web switch were **not** probed for that row, so its table cells read
+  "not probed" instead of inheriting the 0.2.0-rc.2 result. The row still establishes
+  that the bundle applies on the new release: the boot reached the model-provider
+  stage with no plugin load error. That cannot happen if a row failed to compose.
+- **A version bump resets old-version evidence. This release adds a tool but no new
+  host seam.** 0.8.0 adds `logicprobe_uml` to `ctx.tools`, next to the five existing
+  tools, and extends the `logicprobe:mode` context text. Tool registration and the
+  `cordisInspect` status projection are the same calls this package has made since
+  0.1.0-rc.7. The 0.7.1 rows above therefore remain the reference for the seams they
+  exercised. The 0.8.0 row speaks for installation and boot on 0.2.1-alpha.1.
 
 - **The Web switch needs a live field; the plugin no longer needs one in order to
   load.** 0.7.1 declares `enabled` live so the dsh Web GUI can edit the

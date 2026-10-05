@@ -1,12 +1,14 @@
 # Installing Logic Probe for DeepSeek Harness (dsh)
 
-DeepSeek Harness (`dsh`) discovers skills via the Agent Skills open standard (agentskills.io) — the same `skill-name/SKILL.md` + frontmatter layout this plugin already uses. The recommended install is the native plugin bundle: it registers the bundled skills and folds the session-start gate into the first model step in one step. The skill-copy options below remain for hosts that do not use the dsh plugin manager.
+DeepSeek Harness (`dsh`) discovers skills through the Agent Skills open standard (agentskills.io). The layout is the same `skill-name/SKILL.md` plus frontmatter that this plugin already uses.
+
+The recommended install is the native plugin bundle. It registers the bundled skills and folds the session-start gate into the first model step in one step. The skill-copy options below remain for hosts that do not use the dsh plugin manager.
 
 ## Install
 
 ### Option A — native plugin bundle (recommended)
 
-Install the bundle from the repository root (the root `package.json` declares `dsh.bundle`):
+Install the bundle from the repository root. The root `package.json` declares `dsh.bundle`:
 
 ```bash
 # from npm (published as dsh-logicprobe)
@@ -17,13 +19,16 @@ dsh plugin --profile web add "github:AmethystLuna/logicprobe"
 npx -p @deepseek-ai/dsh dsh plugin --profile web add dsh-logicprobe
 ```
 
-This installs under the package name `dsh-logicprobe`. If you manage the profile's `package.json` manually, use `dsh-logicprobe` for both the dependency key and the `dsh.profile.bundles` entry.
+This installs under the package name `dsh-logicprobe`. If you manage the profile's `package.json` by hand, use that same name for both the dependency key and the `dsh.profile.bundles` entry.
 
-Restart the target profile. This mounts a native cordis plugin that registers the bundled skills through dsh's `ctx.skills` filesystem provider (so they appear in the session skill catalog with no manual copy step) and folds the gate text (claim-verification doctrine / 1% Rule / Red Flags / proactive suggestion) into the first model step — the dsh-native counterpart of the Claude Code `SessionStart` hook.
+Restart the target profile. The bundle mounts a native cordis plugin, and that plugin does two things.
 
-The bundle also registers the native tools via `ctx.tools` (`logicprobe_verify`, `logicprobe_datamodel_verify`, `logicprobe_concurrency_scan`, `logicprobe_compose_verify`, `logicprobe_export`, `logicprobe_uml`) and a `logicprobe:mode` dynamic context (via `ctx.systemPrompt`). The context resolves `interaction` per session: `follow-approval` becomes `auto` when the last `approval/policy` event is `never`.
+1. It registers the bundled skills through dsh's `ctx.skills` filesystem provider. The skills then appear in the session skill catalog, with no manual copy step.
+2. It folds the gate text into the first model step. The gate carries the claim-verification doctrine: the 1% Rule, the Red Flags table, and the proactive-suggestion rule. This is the dsh counterpart of the Claude Code `SessionStart` hook.
 
-To change the gate text, interaction mode, or disable injection, override the row by id in your profile's `cordis.patch.yml` (the row's `config` is replaced wholesale, not deep-merged):
+The bundle also registers six native tools through `ctx.tools`: `logicprobe_verify`, `logicprobe_datamodel_verify`, `logicprobe_concurrency_scan`, `logicprobe_compose_verify`, `logicprobe_export` and `logicprobe_uml`. It adds one dynamic context, `logicprobe:mode`, through `ctx.systemPrompt`. That context resolves `interaction` per session: `follow-approval` becomes `auto` when the last `approval/policy` event is `never`.
+
+To change the gate text, change the interaction mode, or disable injection, override the row by id in your profile's `cordis.patch.yml`. The row's `config` is replaced wholesale, not deep-merged:
 
 ```yaml
 - insert:
@@ -39,7 +44,7 @@ To change the gate text, interaction mode, or disable injection, override the ro
 
 ### Option B — user-level, cross-harness
 
-Copy the skills into `~/.agents/skills/` — DSH discovery root rank 500, and a shared directory that other Agent-Skills-standard harnesses also read:
+Copy the skills into `~/.agents/skills/`. That is DSH discovery root rank 500, and other harnesses that follow the Agent Skills standard read it too:
 
 ```bash
 git clone https://github.com/AmethystLuna/logicprobe.git
@@ -49,7 +54,7 @@ cp -r logicprobe/skills/* ~/.agents/skills/
 
 ### Option C — project-level
 
-Copy the skills into your project's `.dsh/skills/` (DSH discovery root rank 100 — highest priority, scoped to that project only):
+Copy the skills into your project's `.dsh/skills/`. That is discovery root rank 100, the highest priority, scoped to that project alone:
 
 ```bash
 mkdir -p .dsh/skills
@@ -62,24 +67,24 @@ If your `dsh` configuration supports `customSkillDirs` (rank 300), point it at t
 
 ## Verify
 
-- `dsh --profile <scratch> --dump-config` shows the `logicprobe` row with `enabled: true` (create a scratch profile with `dsh plugin --profile <scratch> add ...` first).
-- Start a session and check the gate text appears in the model context of the first step.
-- `cordis_inspect_list` shows the `logicprobe` provider; `cordis_inspect_query` with method `status` returns `enabled: true`, `interaction: follow-approval`, `toolRegistered: true`, `dataToolRegistered: true`, `concurrencyToolRegistered: true`, `composeToolRegistered: true`, `exportToolRegistered: true`, `umlToolRegistered: true`, `engineSchemaVersion: 1`, and `dataEngineSchemaVersion: 1`.
-- The model-visible `logicprobe_verify` tool accepts Model schema v1 (see `skills/logicprobe/references/dsh-model-schema.md`) and returns the S1-S8 + A1-A14 report; passing `beforeModel` (and optional `stateMapping`) adds D1-D4 before/after regression checks.
-- The model-visible `logicprobe_uml` tool models a code flow as UML and reviews the modelling (see `skills/logicprobe/references/uml-modeling-guide.md`): `action=render` (Mermaid state/activity/sequence, PlantUML state/sequence), `action=parse` (diagram → LogicModelV1), `action=review` (structural findings + diagram-versus-model round-trip fidelity).
-- The model-visible `logicprobe_datamodel_verify` tool accepts DataModelV1 (see `skills/logicprobe-datamodel/references/data-model-schema.md`) and returns DS/DA/DD checks; passing `beforeModel`/`fieldMapping`/`copyPairs`/`migrationMappings` adds migration coverage, copy consistency, rollback symmetry, and DD1-DD4 before/after data regression.
-- The model-visible `logicprobe_concurrency_scan` tool scans document/plan text for concurrency risk claims and flags absolute guarantees for dedicated verification.
+- `dsh --profile <scratch> --dump-config` shows the `logicprobe` row with `enabled: true`. Create a scratch profile first with `dsh plugin --profile <scratch> add ...`.
+- Start a session. The gate text must appear in the model context of the first step.
+- `cordis_inspect_list` shows the `logicprobe` provider. `cordis_inspect_query` with method `status` returns `enabled: true`, `interaction: follow-approval`, `engineSchemaVersion: 1` and `dataEngineSchemaVersion: 1`. Every tool flag must be `true`: `toolRegistered`, `dataToolRegistered`, `concurrencyToolRegistered`, `composeToolRegistered`, `exportToolRegistered` and `umlToolRegistered`.
+- The `logicprobe_verify` tool accepts Model schema v1 and returns the S1-S8 plus A1-A14 report. See `skills/logicprobe/references/dsh-model-schema.md`. Passing `beforeModel` and an optional `stateMapping` adds the D1-D4 before/after regression checks.
+- The `logicprobe_uml` tool models a code flow as UML and reviews the modelling. See `skills/logicprobe/references/uml-modeling-guide.md`. `action=render` draws Mermaid state, activity and sequence views, or PlantUML state and sequence views. `action=parse` reads a diagram back into a LogicModelV1. `action=review` reports structural findings and the diagram-versus-model round-trip fidelity.
+- The `logicprobe_datamodel_verify` tool accepts DataModelV1 and returns the DS/DA/DD checks. See `skills/logicprobe-datamodel/references/data-model-schema.md`. Passing `beforeModel`, `fieldMapping`, `copyPairs` and `migrationMappings` adds migration coverage, copy consistency, rollback symmetry and the DD1-DD4 before/after data regression.
+- The `logicprobe_concurrency_scan` tool scans document or plan text for concurrency risk claims. It flags absolute guarantees for dedicated verification.
 - Ask in a `dsh` session: "你有设计文档 / 计划 claim 核查相关的 skill 吗?"
 
 ## Notes
 
-- Skill frontmatter already matches the DSH expectations: `name` is kebab-case and matches the directory name; `description` is present. The policy keys `disable-model-invocation` / `user-invocable` are omitted, which defaults to model- AND user-invocable — the intended behavior.
-- DSH is in v0.1 developer preview; breaking changes are expected. Pin your `dsh` version.
-- DSH has no plugin marketplace for this repo — install the native bundle via npm (`dsh-logicprobe`) or GitHub; the skill-copy options above are fallbacks.
-- The first-model-step gate injection is provided natively by the root bundle (Option A). This plugin is the verification half of the embedded-workbench ecosystem: the embedded-workbench bundle's Plan Verification Gate routes plan approval through this skill.
-- No custom agents — this plugin is skill-only; nothing else to port.
-- **Permission presets**: under `workspace-write` evidence stays inside the workspace and model confirmation defaults to ask. Under `danger-full-access` + `approval=never`, the bundle resolves interaction to auto (no `ask_user_question` for model confirmation) and never requests sandbox escalation.
-- **Gate injection semantics**: the gate is appended to the first model step that runs via `agent/pre-step`, once per session, guarded by the session's durable history. This is resilient to blank-session preset switches that clear the agent inbox before the first step; anchored/bootstrap presets may strip first-step Gate messages and the plugin re-injects after promotion. The gate text is the dsh-native adaptation of `hooks/session-start-content.md` — behavior rules synced, presentation adapted to the dsh skill catalog (the trigger list lives in the skill description); review it per deployment and override via `gateContent`.
+- Skill frontmatter already matches the DSH expectations. `name` is kebab-case and matches the directory name, and `description` is present. The policy keys `disable-model-invocation` and `user-invocable` are omitted, which defaults to model- and user-invocable. That is the intended behavior.
+- DSH is in v0.1 developer preview, so breaking changes are expected. Pin your `dsh` version.
+- This repo has no plugin marketplace. Install the native bundle from npm (`dsh-logicprobe`) or from GitHub. The skill-copy options above are fallbacks.
+- The first-model-step gate injection comes from the root bundle (Option A). This plugin is the verification half of the embedded-workbench ecosystem: the embedded-workbench bundle's Plan Verification Gate routes plan approval through this skill.
+- No custom agents. This plugin is skill-only, so there is nothing else to port.
+- **Permission presets**: under `workspace-write`, evidence stays inside the workspace and model confirmation defaults to ask. Under `danger-full-access` with `approval=never`, the bundle resolves interaction to auto. It then never calls `ask_user_question` for model confirmation, and it never requests sandbox escalation.
+- **Gate injection semantics**: the gate is appended to the first model step that runs, through `agent/pre-step`. It is appended once per session, guarded by the session's durable history. That makes it resilient to blank-session preset switches, which clear the agent inbox before the first step. Anchored and bootstrap presets may strip first-step gate messages; the plugin re-injects after promotion. The gate text is the dsh-native adaptation of `hooks/session-start-content.md`. The behavior rules are synced, and the presentation is adapted to the dsh skill catalog, where the trigger list lives in the skill description. Review it for your deployment and override it with `gateContent` if needed.
 
 ## Tool Mapping
 

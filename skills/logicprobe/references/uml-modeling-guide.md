@@ -1,85 +1,49 @@
 # UML Modelling Guide
 
-Deep reference for modelling a code flow as UML and then reviewing that modelling. Load
-this when the task is "draw the flow" rather than "check this claim": reverse-engineering a
-handler, documenting a protocol, walking an unfamiliar state machine, or auditing a diagram
-somebody else drew.
+This guide covers two jobs: drawing a code flow as UML, and reviewing that drawing. Load it when the task is "show me the flow" rather than "check this claim". Typical cases are reverse-engineering a handler, documenting a protocol, or auditing a diagram somebody else drew.
 
-The rule this guide enforces: **a diagram is a model, and a model can be wrong.** A flow
-chart that looks tidy is not evidence that the code behaves that way, and a UML model that
-does not match the model you verify against is worse than no diagram — it puts a plausible
-picture in front of a reader who will believe it.
+One rule runs through the whole guide. **A diagram is a model, and a model can be wrong.** A tidy flow chart is not evidence about the code. Worse, a diagram that disagrees with the model it came from will mislead every reader who trusts it.
 
 ## When to use this
 
 | Situation | View that answers it |
 |---|---|
-| "What are the states of this handler and what moves between them?" | State machine |
-| "What does this function actually do, step by step, including error paths?" | Activity (flow) |
-| "In what order do these messages/events arrive, and what is the state after each?" | Sequence |
-| "Someone gave me a diagram — is it right?" | Any; feed it to the review and compare against code |
-| "This diagram and this model disagree" | Feed both to the review: the round-trip check names every difference |
+| "What are the states of this handler, and what moves between them?" | State machine |
+| "What does this function actually do, including its error paths?" | Activity (flow) |
+| "In what order do these messages arrive, and what is the state after each?" | Sequence |
+| "Somebody gave me a diagram. Is it right?" | Any view. Feed it to the review and compare it against the code. |
+| "This diagram and this model disagree." | Feed both to the review. The round-trip check names every difference. |
 
-Do **not** reach for UML when the question is a behavioural claim about a specific machine —
-that is `logicprobe_verify`'s job (S1-S8 / A1-A14). The review here checks the modelling, not
-the behaviour, and every finding says which engine check settles the behavioural half.
+Do not use this guide for a behavioural claim about a specific machine. That is the job of `logicprobe_verify` (S1-S8 and A1-A14). The review here covers the modelling, not the behaviour. Every finding it produces names the engine check that settles the behavioural half.
 
 ## The three views
 
-One machine, three projections. They are not interchangeable, and the differences are the
-reason the review reports which view it saw.
+One machine, three projections. They are not interchangeable. The review reports which view it saw, and the differences matter.
 
-- **State machine** (`stateDiagram-v2` / PlantUML state) — the whole topology: every state,
-  every (event, guard) branch, terminal states as `--> [*]`. This is the view to model code
-  flow into, and the only view that round-trips without loss. Use it for review.
-- **Activity** (`flowchart TD` in Mermaid) — the same machine drawn as work rather than as
-  states, with `event [guard] / actions` on each edge. Better for a reader who thinks in
-  steps; same information. PlantUML activity is **not** generated: its structured-flowchart
-  syntax needs a while/if reconstruction for any graph with a merge or a cycle, and a
-  diagram that quietly reshapes the machine is exactly the failure this feature exists to
-  prevent. The tool refuses that combination instead.
-- **Sequence** (`sequenceDiagram`) — one BFS trace: messages in the order a walker meets
-  them, with a note per state change. A trace is not a machine: branches appear as separate
-  guarded messages, paths the walk never took are absent, and the trace is capped. Use it to
-  show a protocol exchange to a human. It cannot be the review's fidelity input — `parse`
-  refuses it for that reason, and `review` reports the check as inapplicable (`UML019`).
+**State machine** (`stateDiagram-v2`, or a PlantUML state diagram). This view shows the whole topology: every state, every event-and-guard branch, and every terminal state as `--> [*]`. Model code flow into this view, and use it for review. It is the only view that round-trips without loss.
+
+**Activity** (`flowchart TD` in Mermaid). This view draws the same machine as work rather than as states. Each edge carries `event [guard] / actions`. It suits a reader who thinks in steps. It holds the same information as the state view. PlantUML activity is **not** generated: its structured-flowchart syntax needs a while/if reconstruction for any graph with a merge or a cycle. A diagram that quietly reshapes the machine is exactly the failure this feature exists to prevent, so the tool refuses that combination.
+
+**Sequence** (`sequenceDiagram`). This view shows one BFS trace: the messages in the order a walker meets them, with a note per state change. A trace is not a machine. Branches appear as separate guarded messages, paths the walk never took are absent, and the trace is capped. Use it to show a protocol exchange to a human. It cannot be the review's fidelity input, because `parse` refuses it and `review` reports the check as inapplicable (`UML019`).
 
 ## Modelling a code flow from source
 
-Extraction is the same discipline as `logic-verification-guide.md`, applied to code instead
-of a plan:
+Extraction follows the same discipline as `logic-verification-guide.md`, applied to code instead of a plan.
 
-1. **Fix the boundary.** Which function, task, or module is the machine? In: state the code
-   holds across calls (statics, fields, enums, task state variables). Out: the call stack
-   inside one invocation, hardware behaviour, scheduler preemption.
-2. **Name the states from the code, not from intuition.** A state exists if something
-   survives a call boundary and is tested later. An enum, a `state` field, a task-local
-   variable that gates the next entry all qualify; a local mid-function variable does not.
-3. **Name the events from the code.** Every edge must trace to a call site, a message, a
-   timer expiry, or an ISR — a source location the reader can open. An edge with no call
-   site is a guess and belongs in the review findings, not in the model.
-4. **Record guards and actions verbatim.** A guard must be the real condition, with the real
-   variable and the real constant; a retry limit of 3 modelled as "a few" is a model of your
-   assumption, not of the code.
-5. **Mark terminals.** An absorbing state (power-off, fatal, done) is `terminal: true`. If
-   nothing is terminal, say so out loud — the review will flag it.
-6. **Write the narrative as you go.** `narrative.states` / `narrative.events` /
-   `narrative.scenarios` is what lets a reader check the diagram against the code without
-   re-deriving every symbol. The schema requires all three parts and full coverage once the
-   block is present, so the narrative cannot rot half-way.
+1. **Fix the boundary.** Decide which function, task, or module is the machine. In scope: state the code holds across calls, such as statics, fields, enums, and task state variables. Out of scope: the call stack inside one invocation, hardware behaviour, and scheduler preemption.
+2. **Name the states from the code.** A state exists if something survives a call boundary and is tested later. An enum, a `state` field, or a task-local variable that gates the next entry all qualify. A local variable inside one function does not.
+3. **Name the events from the code.** Every edge must trace to a call site, a message, a timer expiry, or an ISR. An edge with no call site is a guess. Put it in the review findings instead of the model.
+4. **Record guards and actions verbatim.** A guard must be the real condition, with the real variable and the real constant. A retry limit of 3 modelled as "a few" is a model of your assumption, not of the code.
+5. **Mark the terminals.** An absorbing state is `terminal: true`. Examples are power-off, fatal, and done. If nothing is terminal, say so. The review will flag it either way.
+6. **Write the narrative as you go.** The `narrative` block holds natural-language meanings for states and events, plus a scenario for each state-and-event pair. It is what lets a reader check the diagram against the code without re-deriving every symbol. Once the block is present, the schema requires all three parts and full coverage, so it cannot rot half-way.
 
 ### Evidence rule
 
-Every state, event, guard and action in the model needs a citation — `file:line` for code,
-section for a document. A UML model without citations is a drawing: it cannot be reviewed,
-only admired. When you present the model, present the citations with it.
+Every state, event, guard and action needs a citation. Use `file:line` for code and a section reference for a document. A UML model without citations is a drawing. It cannot be reviewed, only admired. Present the citations together with the model.
 
 ### Confirming the model
 
-Same gate as the rest of the plugin: show the extracted transition table (or the diagram)
-and get confirmation before treating the model as fact. In `logicprobe interaction=auto`,
-skip the question, cite evidence per element, round-trip the model (render → parse → compare)
-and mark the result `UNCONFIRMED`.
+The usual gate applies: show the extracted transition table or the diagram, and get confirmation before treating the model as fact. In `logicprobe interaction=auto`, skip the question. Instead, cite evidence for every element, round-trip the model (render, parse, compare), and mark the result `UNCONFIRMED`.
 
 ## Rendering
 
@@ -89,19 +53,19 @@ In DSH:
 { "action": "render", "model": { "...LogicModelV1..." }, "notation": "mermaid", "kind": "state" }
 ```
 
-`logicprobe_uml action=render` returns the diagram source plus `warnings`. Warnings are not
-cosmetic: they list every construct the notation could not carry verbatim (a state id that
-needed an alias, a label containing `[` `/`, a trace that was capped).
+`logicprobe_uml` with `action=render` returns the diagram source plus `warnings`. Read those warnings. They list every construct the notation could not carry verbatim: a state id that needed an alias, a label containing `[` or `/`, a trace that was capped.
 
-Without the DSH tool: run the standalone engine
-`skills/logicprobe/references/logicprobe-engine.py uml-render model.json --notation mermaid
---diagram state`, or write the diagram by hand — the generator is a convenience, not a
-requirement. A hand-written diagram is parsed and reviewed exactly like a generated one.
+Without the DSH tool, run the standalone engine:
 
-### Generated diagrams carry directives
+```bash
+python skills/logicprobe/references/logicprobe-engine.py uml-render model.json --notation mermaid --diagram state
+```
 
-The generated text includes comment lines that Mermaid and PlantUML ignore but the parser
-reads:
+You can also write the diagram by hand. The generator is a convenience, not a requirement. A hand-written diagram is parsed and reviewed exactly like a generated one.
+
+### Directives in generated diagrams
+
+Generated text carries comment lines. Mermaid and PlantUML ignore them. The parser reads them:
 
 ```text
 %%logicprobe:uml v1 notation=mermaid diagram=state
@@ -111,13 +75,9 @@ reads:
 %%logicprobe:variable retry integer
 ```
 
-They exist because the notation cannot express everything the model knows: `[*]` says
-"initial" but a flowchart has no such marker; a state id may contain characters the notation
-cannot spell; a boolean variable's assignment (`armed := 1`) is indistinguishable from an
-integer one. Pinning those facts in comments is what makes the round-trip check exact rather
-than approximate. PlantUML uses `'` instead of `%%`. A hand-written diagram needs none of
-them, but adding `%%logicprobe:init` / `%%logicprobe:terminal` to a flowchart is how you say
-which node starts and which end.
+These lines exist because the notation cannot express everything the model knows. `[*]` marks an initial state, but a flowchart has no such marker. A state id may contain characters the notation cannot spell. A boolean assignment (`armed := 1`) looks exactly like an integer one. Pinning those facts in comments is what makes the round-trip check exact instead of approximate. PlantUML uses `'` instead of `%%`.
+
+A hand-written diagram needs none of these directives. Adding `%%logicprobe:init` and `%%logicprobe:terminal` to a flowchart is how you say which node starts and which one ends.
 
 ## Reviewing the modelling
 
@@ -130,52 +90,52 @@ Four input shapes, four different questions:
 | Input | Question answered |
 |---|---|
 | `model` only | Is this machine well-modelled? The review checks its structure, then renders and re-parses it to prove the diagram carries it. |
-| `diagram` only | What does this diagram actually say? It is parsed into a model and that model is reviewed; fidelity to code is **unchecked** (`UML018`). |
+| `diagram` only | What does this diagram actually say? The diagram is parsed into a model, and that model is reviewed. Fidelity to code is **unchecked** (`UML018`). |
 | `model` + `diagram` | Does the diagram match the model? Every structural difference is a modelling defect (`UML017`). |
-| `model` + `kind: "sequence"` | The trace is rendered and the structure is reviewed, but the fidelity check **does not apply** (`UML019`): a trace cannot be parsed back into a machine, so the review says so instead of pretending it verified the diagram. `maxSteps` caps the trace. |
+| `model` + `kind: "sequence"` | The trace is rendered and the structure is reviewed, but the fidelity check **does not apply** (`UML019`). A trace cannot be parsed back into a machine, so the review says so instead of pretending it verified the diagram. `maxSteps` caps the trace. |
 
 ### Findings
 
 | Code | Severity | What it means |
 |---|---|---|
-| `UML001_DIAGRAM_UNREADABLE` | error | The diagram is not readable as Mermaid/PlantUML state or activity text. |
-| `UML002_UNREACHABLE_STATE` | error | A state no transition can enter from init: the diagram draws flow nobody can reach. Structural (guards ignored); S1 is the guard-aware check. |
-| `UML003_DEAD_END_STATE` | error | A non-terminal state with no outgoing transition: either it is terminal or the outgoing flow was never modelled. |
-| `UML004_AMBIGUOUS_BRANCH` | error | Two unconditional arrows for one (state, event). No reader and no implementation can resolve that; S4 is the authoritative check. |
+| `UML001_DIAGRAM_UNREADABLE` | error | The text is not readable as a Mermaid or PlantUML state or activity diagram. |
+| `UML002_UNREACHABLE_STATE` | error | No transition can enter this state from init. The diagram draws flow nobody can reach. The check is structural and ignores guards; S1 is the guard-aware check. |
+| `UML003_DEAD_END_STATE` | error | A non-terminal state has no outgoing transition. Either it is terminal, or the outgoing flow was never modelled. |
+| `UML004_AMBIGUOUS_BRANCH` | error | Two unconditional arrows share one state and event. No reader and no implementation can resolve that. S4 is the authoritative check. |
 | `UML005_OVERLAPPING_GUARD` | warning | The same guard text appears twice in one branch group. |
-| `UML006_INEXHAUSTIVE_BRANCH` | warning / info | Only guarded branches, no default. `warning` when the guards do not look complementary; `info` when a complementary pair (`k < 3` / `k >= 3`) is present, which is probably exhaustive but only S6 can settle it. |
-| `UML007_UNUSED_EVENT` | warning | An event fires only from unreachable states: the diagram shows messages that never arrive. |
-| `UML008_SELF_LOOP_NO_EXIT` | warning | An unguarded self-loop with no other exit — activity the diagram presents as progress but which never leaves; S3 reports absorbing cycles. |
-| `UML009_DUPLICATE_TRANSITION` | warning | The same (from, event, guard, actions, to) row twice. |
-| `UML010_UNUSED_VARIABLE` | warning | A variable never read by a guard and never written: a symbol with no source. |
-| `UML011_UNBOUNDED_VARIABLE` | info | An integer variable with no min/max, so no range invariant can be checked and A5 has no declared domain. |
-| `UML012_NO_TERMINAL` | warning | No terminal state: completion, failure and a stuck flow look the same. |
-| `UML013_NO_NARRATIVE` | info | No natural-language meanings: a reader must re-derive every symbol from the source. |
-| `UML014_UNDOCUMENTED_STATE` | info | States that render as their bare id, so the diagram cannot be read against code. |
-| `UML015_LABEL_DRIFT` | warning | A diagram label disagrees with the model narrative: one of the two is stale, and the review cannot tell which. |
-| `UML016_DIAGRAM_PARSE_NOTES` | info | Notes collected while rendering/reading: information the notation could not carry. |
-| `UML017_ROUND_TRIP_MISMATCH` | error | The diagram does not carry the model: transitions lost or invented, init/terminal/variable differences. The `roundTrip.diffs` array lists each one. |
+| `UML006_INEXHAUSTIVE_BRANCH` | warning or info | The branch group has only guarded branches and no default. The severity is `warning` when the guards do not look complementary. It is `info` when a complementary pair such as `k < 3` and `k >= 3` is present, which is probably exhaustive. Only S6 can settle it. |
+| `UML007_UNUSED_EVENT` | warning | The event fires only from unreachable states. The diagram shows messages that never arrive. |
+| `UML008_SELF_LOOP_NO_EXIT` | warning | An unguarded self-loop has no other exit. The diagram presents it as progress, but the flow never leaves. S3 reports absorbing cycles. |
+| `UML009_DUPLICATE_TRANSITION` | warning | The same from, event, guard, actions and target row appears twice. |
+| `UML010_UNUSED_VARIABLE` | warning | No guard reads this variable and no action writes it. It is a symbol with no source. |
+| `UML011_UNBOUNDED_VARIABLE` | info | An integer variable has no min or max, so no range invariant can be checked and A5 has no declared domain. |
+| `UML012_NO_TERMINAL` | warning | No state is terminal, so completion, failure and a stuck flow all look the same. |
+| `UML013_NO_NARRATIVE` | info | The model carries no meanings, so a reader must re-derive every symbol from the source. |
+| `UML014_UNDOCUMENTED_STATE` | info | These states render as their bare id, so the diagram cannot be read against the code. |
+| `UML015_LABEL_DRIFT` | warning | A diagram label disagrees with the model narrative. One of the two is stale, and the review cannot tell which. |
+| `UML016_DIAGRAM_PARSE_NOTES` | info | Notes collected while rendering or reading the diagram. They mark information the notation could not carry. |
+| `UML017_ROUND_TRIP_MISMATCH` | error | The diagram does not carry the model. Transitions were lost or invented, or init, terminals or variables differ. The `roundTrip.diffs` array lists each one. |
 | `UML018_FIDELITY_UNCHECKED` | info | Only a diagram was supplied, so nothing here proves it matches the code. |
-| `UML019_ROUND_TRIP_SKIPPED` | warning | The fidelity check could not run (view not round-trippable, or switched off). |
+| `UML019_ROUND_TRIP_SKIPPED` | warning | The fidelity check could not run, either because the view is not round-trippable or because it was switched off. |
 
-`ok: true` means the review ran. It does not mean the model is good — read the findings and
-the `summary` counts.
+`ok: true` means the review ran. It does not mean the model is good. Read the findings and the `summary` counts.
 
-### What the round trip proves, and what it does not
+### What the round trip proves
 
-It proves the diagram is a faithful **rendering** of the model: same init, same states, same
-terminal set, same transitions with the same guards and actions, same variables. It does not
-prove the model matches the code — only a citation-per-element comparison can do that (the
-"Evidence rule" above), and it does not prove the machine is correct — that is
-`logicprobe_verify`.
+It proves the diagram is a faithful rendering of the model:
 
-A failing round trip means the notation lost something. In practice that is a real finding:
-an unlabelled arrow (a synthetic `t_A_B` event names a transition the modeller never named),
-a guard the parser could not read, or a diagram that was hand-edited away from its model.
+- the same initial state
+- the same set of states and terminal states
+- the same transitions, with the same guards and actions
+- the same variables and kinds
+
+It does **not** prove the model matches the code. Only a citation-per-element comparison does that, as described under "Evidence rule". It also does not prove the machine is correct. That is the job of `logicprobe_verify`.
+
+A failing round trip means the notation lost something. In practice that is a real finding: an unlabelled arrow, a guard the parser could not read, or a diagram that was hand-edited away from its model.
 
 ## Worked example
 
-Code under review: a handshake that retries on timeout and gives up.
+The code under review is a handshake that retries on timeout and gives up.
 
 ```text
 INIT --power_ready--> STARTING
@@ -185,30 +145,22 @@ STARTING --timeout [retry >= 3]--> FATAL (terminal)
 ERROR --cooldown--> STARTING
 ```
 
-Render it as a state machine and the review reports:
+Render it as a state machine, then review it. The review reports two modelling gaps:
 
 ```text
 UML006_INEXHAUSTIVE_BRANCH (info)  guards look complementary on retry
-UML013_NO_NARRATIVE       (info)  no state/event/scenario meanings
+UML013_NO_NARRATIVE       (info)  no state, event or scenario meanings
 ```
 
-Both are modelling gaps, not behaviour bugs: add the narrative so a reader can check the
-diagram against the code, then run `logicprobe_verify` for S1-S8/A1-A14. Now delete the
-`ERROR --cooldown--> STARTING` arrow and re-review: `ACTIVE` and `ERROR` become dead ends
-(`UML003`) and `cooldown` becomes an event that only fires from an unreachable state
-(`UML007`) — the diagram still looks plausible, which is the whole point.
+Neither is a behaviour bug. Add the narrative so a reader can check the diagram against the code, then run `logicprobe_verify` for S1-S8 and A1-A14.
+
+Now delete the `ERROR --cooldown--> STARTING` arrow and review again. `ACTIVE` and `ERROR` become dead ends (`UML003`), and `cooldown` becomes an event that only fires from an unreachable state (`UML007`). The diagram still looks plausible. That is the whole point.
 
 ## Limits
 
-- The review is **structural**. It evaluates no guard over any valuation; "probably
-  exhaustive" is a shape test, not a proof, and S6 is the check that decides.
-- Reachability ignores guards (`UML002`). A state reachable only under an unsatisfiable
-  guard is a behaviour finding (S1/S6), not a modelling one.
-- Sequence diagrams are traces: they are neither round-tripped nor parsed, and reviewing one
-  renders the trace, reports the structure findings, and marks the fidelity check
-  inapplicable (`UML019`).
-- PlantUML activity is refused by design (see above).
-- Renaming a state in the diagram does not rename it in the code. The review can only tell
-  you the two disagree; resolving it needs the source.
-- The generated diagram is a faithful view of the *model*, never of the *program*. If the
-  model is wrong the diagram is wrong in exactly the same way.
+- The review is **structural**. It evaluates no guard over any valuation. "Probably exhaustive" is a shape test, not a proof. S6 is the check that decides.
+- Reachability ignores guards (`UML002`). A state reachable only under an unsatisfiable guard is a behaviour finding (S1 and S6), not a modelling one.
+- Sequence diagrams are traces. They are neither round-tripped nor parsed. Reviewing one renders the trace, reports the structure findings, and marks the fidelity check inapplicable (`UML019`).
+- PlantUML activity is refused by design, as described above.
+- Renaming a state in the diagram does not rename it in the code. The review can only tell you the two disagree. Resolving it needs the source.
+- The generated diagram is a faithful view of the **model**, never of the **program**. If the model is wrong, the diagram is wrong in exactly the same way.
