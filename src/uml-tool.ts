@@ -1,4 +1,5 @@
-import { defineTool, type JsonValue } from '@deepseek-ai/dsh-tools'
+import { defineTool } from '@deepseek-ai/dsh-tools'
+import type { JsonValue } from './json-value.js'
 import { renderUml, parseUml, reviewUml, UmlError, type UmlDiagram, type UmlNotation } from './uml.js'
 
 export const LOGICPROBE_UML_TOOL_NAME = 'logicprobe_uml'
