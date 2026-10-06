@@ -13,7 +13,7 @@ releases listed in `dsh.compatibility.dshReleases` (author-remediation track
 | Node.js | v24.17.0 |
 | npm | 11.13.0 |
 | pnpm | 11.21.0 |
-| Test date | 2026-09-25 (headless rounds) · 2026-09-29 (live-field and degradation rounds) · 2026-10-05 (headless round for 0.2.1-alpha.1) |
+| Test date | 2026-09-25 (headless rounds) · 2026-09-29 (live-field and degradation rounds) · 2026-10-05 (headless round for 0.2.1-alpha.1) · 2026-10-06 (headless round for 0.9.0 on 0.1.7-rc.2) |
 | Package under test | `dsh-logicprobe` 0.9.0 (bundle patch `cordis.patch.yml`, entry id `logicprobe`) |
 
 ## Method (one disposable profile per version)
@@ -146,26 +146,42 @@ carries the `logicprobe:mode` section. The 0.1.5-alpha.2, 0.1.5-rc.1, 0.1.5-rc.2
 
 ## Results
 
-The results fall into three groups, kept apart on purpose. The first group is the row
-re-measured on the 0.8.x builds (0.2.1-alpha.1). The second group is the rows
-re-measured against the 0.7.1 build on 2026-09-29. The third group is the rows carried
-over from earlier rounds. A carried-over row is still declared compatible. It was
-produced by an earlier round's procedure, though, and was not re-run against this
-build, so presenting it as newly verified would overstate the evidence.
+The results fall into four groups, kept apart on purpose. The first group is the row
+measured for 0.9.0 on dsh 0.1.7-rc.2. The second group is the row re-measured on the
+0.8.x builds (0.2.1-alpha.1). The third group is the rows re-measured against the 0.7.1
+build on 2026-09-29. The last group is the rows carried over from earlier rounds. A
+carried-over row is still declared compatible. It was produced by an earlier round's
+procedure, though, and was not re-run against this build, so presenting it as newly
+verified would overstate the evidence.
 
-### `0.9.0` — no measured row
+### Re-measured on `0.1.7-rc.2` (`0.9.0` on 2026-10-06)
 
-This release changes model-visible text and version strings, and nothing on a
-DSH-facing seam: it registers the same six tools through the same `ctx.tools.register`
-calls, injects through the same `agent/pre-step` listener, registers the same
-`logicprobe:mode` prompt context and the same skills provider. The 0.8.0 and 0.8.1 rows
-below therefore remain the reference for the seams they exercised.
+| dsh release | install | host boot | uninstall | rows active | client bundles in `__DSH_BOOT__` | settings namespace served | Web switch |
+|---|---|---:|---:|---|---:|---:|---|
+| 0.1.7-rc.2 | pass | pass | pass | not probed (headless round) | not probed | not probed | not probed |
 
-The `Package under test` row above is synced by `scripts/bump-version.mjs`; it is not a
-measurement. No install / mount / boot / uninstall round has been run against 0.9.0, so
-that row must not be read as evidence for this build. Run the disposable-profile
-procedure below against 0.9.0 and add its row before this release is treated as
-measured.
+All four steps ran against a fresh `DSH_HOME` on this host, on one disposable `headless`
+profile that was added with `file:<this-repo>` and removed again afterwards. Install exited
+0 and printed no refusal wording; its only warning was pnpm's advisory
+`Issues with peer dependencies found`, the same one the 0.8.x rows below record.
+`--dump-config` showed the `logicprobe` row with `enabled: true` and no
+`disabling profile plugin` line. The boot reached the model-provider stage with a
+deliberately invalid key and printed only
+`dsh: AUTH: Authentication Fails, Your api key: ****test is invalid`, so the tree mounted
+and applied before the provider call. After the uninstall, `--dump-config` carried no
+`logicprobe` row.
+
+Two method deviations belong here, and they make this row weaker than the two below, not
+stronger. It ran the **globally installed** dsh 0.1.7-rc.2 (`dsh --version` → `0.1.7-rc.2`)
+rather than a temporary npm install of that release, and it did **not** run the session-log
+seam scan: the boot failed at provider authentication, so no session was opened to scan.
+
+0.9.0 changes model-visible text and the version strings, and nothing on a DSH-facing seam:
+it registers the same six tools through the same `ctx.tools.register` calls, injects
+through the same `agent/pre-step` listener, and registers the same `logicprobe:mode`
+prompt context and the same skills provider. `0.2.1-alpha.1` was therefore not re-measured
+for this build; the 0.8.0 and 0.8.1 rows below remain the reference for the seams they
+exercised on it.
 
 ### Re-measured on `0.2.1-alpha.1` (`0.8.0` on 2026-10-05, `0.8.1` on 2026-10-06)
 
