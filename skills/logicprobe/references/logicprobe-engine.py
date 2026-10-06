@@ -392,11 +392,32 @@ def validate_model(input_value):
                         bad(p + '.from', 'must be a non-empty string')
                     elif lfrom not in invariant_state_ids:
                         bad(p + '.from', 'references unknown state ' + lfrom)
+                    # `to` is one state id or a target set. A set with a duplicate
+                    # member is a model-authoring slip that would otherwise give one
+                    # meaning two hashes, so it is rejected rather than deduplicated.
                     lto = entry.get('to')
-                    if not isinstance(lto, str) or len(lto) == 0:
-                        bad(p + '.to', 'must be a non-empty string')
-                    elif lto not in invariant_state_ids:
-                        bad(p + '.to', 'references unknown state ' + lto)
+                    if isinstance(lto, str):
+                        if len(lto) == 0:
+                            bad(p + '.to', 'must be a non-empty string')
+                        elif lto not in invariant_state_ids:
+                            bad(p + '.to', 'references unknown state ' + lto)
+                    elif isinstance(lto, list):
+                        if len(lto) == 0:
+                            bad(p + '.to', 'must be a non-empty array of state ids')
+                        else:
+                            seen_targets = set()
+                            for target_index, target in enumerate(lto):
+                                at = p + '.to[' + str(target_index) + ']'
+                                if not isinstance(target, str) or len(target) == 0:
+                                    bad(at, 'must be a non-empty string')
+                                elif target not in invariant_state_ids:
+                                    bad(at, 'references unknown state ' + target)
+                                elif target in seen_targets:
+                                    bad(at, 'duplicates state ' + target + ' in the target set')
+                                else:
+                                    seen_targets.add(target)
+                    else:
+                        bad(p + '.to', 'must be a state id or a non-empty array of state ids')
                 elif kind == 'sequence':
                     evs = entry.get('events')
                     if not isinstance(evs, list) or len(evs) == 0:
@@ -1869,21 +1890,36 @@ def S8_monotonic_variables(model):
                          'Monotonic variables are respected' if not findings else 'Monotonic findings: ' + str(len(findings)))
 
 
-def _find_leads_to_bad_path(model, start, target):
-    # Find a run from start that never reaches target, or None when every run does.
-    # The property is universal (see the A9 row in SKILL.md): one branch that loops
-    # forever, or that stops before the target, refutes it.
+def _leads_to_targets(invariant):
+    # Target states of a leads-to invariant. The schema accepts one state id or a
+    # non-empty array of them, so "reach any of these" needs no separate kind.
+    to = invariant['to']
+    return [to] if isinstance(to, str) else list(to)
+
+
+def _leads_to_target_label(invariant):
+    # Target list as findings print it. A single target renders as its bare id, so
+    # existing messages stay byte-identical.
+    return ', '.join(_leads_to_targets(invariant))
+
+
+def _find_leads_to_bad_path(model, start, targets, label):
+    # Find a run from start that reaches none of targets, or None when every run
+    # reaches at least one of them. The property is universal (see the A9 row in
+    # SKILL.md): one branch that loops forever, or that stops before any target,
+    # refutes it.
     #
-    # Depth-first walk of the run graph with three colours; target runs are success
-    # leaves that are never expanded. A node reached while it is on the current walk
-    # (GRAY) closes a cycle that avoids the target. A node with no outgoing step at
-    # all stops the machine where it stands, which is the same violation for a
-    # different reason. A node whose walk completed without a violation is BLACK, and
-    # reaching it again from another branch is a shared sub-graph, not a cycle -- that
-    # is why the colour map cannot be a plain visited set: a diamond (two branches
-    # rejoining) is acyclic and must pass, while a genuine cycle must not. A run is
-    # identified by its state plus its variable values.
-    if start['state'] == target:
+    # Depth-first walk of the run graph with three colours; runs at a target are
+    # success leaves that are never expanded. A node reached while it is on the
+    # current walk (GRAY) closes a cycle that avoids every target. A node with no
+    # outgoing step at all stops the machine where it stands, which is the same
+    # violation for a different reason. A node whose walk completed without a
+    # violation is BLACK, and reaching it again from another branch is a shared
+    # sub-graph, not a cycle -- that is why the colour map cannot be a plain visited
+    # set: a diamond (two branches rejoining) is acyclic and must pass, while a
+    # genuine cycle must not. A run is identified by its state plus its variable
+    # values.
+    if start['state'] in targets:
         return None
     GRAY = 1
     BLACK = 2
@@ -1899,7 +1935,7 @@ def _find_leads_to_bad_path(model, start, target):
                     nexts.append({'next': nxt, 'event': event})
             frame['nexts'] = nexts
             if not nexts:
-                return {'path': frame['path'], 'reason': 'Dead end before target ' + target}
+                return {'path': frame['path'], 'reason': 'Dead end before target ' + label}
         if frame['index'] >= len(frame['nexts']):
             color[_runtime_key(frame['runtime'])] = BLACK
             stack.pop()
@@ -1907,12 +1943,12 @@ def _find_leads_to_bad_path(model, start, target):
         item = frame['nexts'][frame['index']]
         frame['index'] += 1
         step = {'from': frame['runtime']['state'], 'event': item['event'], 'to': item['next']['state']}
-        if item['next']['state'] == target:
+        if item['next']['state'] in targets:
             continue
         key = _runtime_key(item['next'])
         seen = color.get(key)
         if seen == GRAY:
-            return {'path': frame['path'] + [step], 'reason': 'Cycle avoids target ' + target}
+            return {'path': frame['path'] + [step], 'reason': 'Cycle avoids target ' + label}
         if seen == BLACK:
             continue
         color[key] = GRAY
@@ -1926,10 +1962,12 @@ def A9_leads_to(model, exploration):
     for invariant in model.get('invariants') or []:
         if invariant['kind'] != 'leads-to':
             continue
+        targets = set(_leads_to_targets(invariant))
+        label = _leads_to_target_label(invariant)
         for runtime in exploration['reachable']:
             if runtime['state'] != invariant['from']:
                 continue
-            bad = _find_leads_to_bad_path(model, runtime, invariant['to'])
+            bad = _find_leads_to_bad_path(model, runtime, targets, label)
             if bad is not None:
                 findings.append({
                     'code': 'A9_LEADS_TO_VIOLATION',

@@ -154,7 +154,7 @@ export type InvariantSpec =
       when?: InvariantWhen
     }
   | { id: string; description: string; kind: 'event-before-state'; event: string; state: string }
-  | { id: string; description: string; kind: 'leads-to'; from: string; to: string }
+  | { id: string; description: string; kind: 'leads-to'; from: string; to: string | string[] }
   | { id: string; description: string; kind: 'sequence'; events: string[] }
   | { id: string; description: string; kind: 'atomicity'; events: string[]; commit: string; rollback?: string }
   | { id: string; description: string; kind: 'budget'; budget: number }
@@ -469,8 +469,27 @@ export function validateModel(input: unknown): { ok: true; model: LogicModelV1 }
       } else if (invariant.kind === 'leads-to') {
         if (typeof invariant.from !== 'string' || invariant.from.length === 0) bad(path + '.from', 'must be a non-empty string')
         else if (!invariantStateIds.has(invariant.from)) bad(path + '.from', 'references unknown state ' + invariant.from)
-        if (typeof invariant.to !== 'string' || invariant.to.length === 0) bad(path + '.to', 'must be a non-empty string')
-        else if (!invariantStateIds.has(invariant.to)) bad(path + '.to', 'references unknown state ' + invariant.to)
+        // `to` is one state id or a target set. A set with a duplicate member is a
+        // model-authoring slip that would otherwise give one meaning two hashes, so it
+        // is rejected rather than silently deduplicated.
+        if (typeof invariant.to === 'string') {
+          if (invariant.to.length === 0) bad(path + '.to', 'must be a non-empty string')
+          else if (!invariantStateIds.has(invariant.to)) bad(path + '.to', 'references unknown state ' + invariant.to)
+        } else if (Array.isArray(invariant.to)) {
+          if (invariant.to.length === 0) bad(path + '.to', 'must be a non-empty array of state ids')
+          else {
+            const targets = new Set<string>()
+            invariant.to.forEach((target, targetIndex) => {
+              const at = path + '.to[' + targetIndex + ']'
+              if (typeof target !== 'string' || target.length === 0) bad(at, 'must be a non-empty string')
+              else if (!invariantStateIds.has(target)) bad(at, 'references unknown state ' + target)
+              else if (targets.has(target)) bad(at, 'duplicates state ' + target + ' in the target set')
+              else targets.add(target)
+            })
+          }
+        } else {
+          bad(path + '.to', 'must be a state id or a non-empty array of state ids')
+        }
       } else if (invariant.kind === 'sequence') {
         if (!Array.isArray(invariant.events) || invariant.events.length === 0) bad(path + '.events', 'must be a non-empty array')
         else invariant.events.forEach((event, eventIndex) => {
@@ -1825,15 +1844,29 @@ function S8_monotonicVariables(model: LogicModelV1): CheckResult {
 }
 
 /**
- * Find a run from `start` that never reaches `target`, or return undefined when
- * every run does. The property is universal (see the A9 row in `SKILL.md`): one
- * branch that loops forever, or that stops before the target, refutes it.
+ * Target states of a `leads-to` invariant. The schema accepts one state id or a
+ * non-empty array of them, so "reach any of these" needs no separate invariant kind.
+ */
+function leadsToTargets(invariant: Extract<InvariantSpec, { kind: 'leads-to' }>): string[] {
+  return typeof invariant.to === 'string' ? [invariant.to] : invariant.to
+}
+
+/** Target list as findings print it. A single target renders as its bare id, so existing messages stay byte-identical. */
+function leadsToTargetLabel(invariant: Extract<InvariantSpec, { kind: 'leads-to' }>): string {
+  return leadsToTargets(invariant).join(', ')
+}
+
+/**
+ * Find a run from `start` that reaches none of `targets`, or return undefined when
+ * every run reaches at least one of them. The property is universal (see the A9 row
+ * in `SKILL.md`): one branch that loops forever, or that stops before any target,
+ * refutes it.
  *
- * The search is a depth-first walk of the run graph with three colours, and target
- * runs are success leaves that are never expanded:
+ * The search is a depth-first walk of the run graph with three colours, and runs at a
+ * target are success leaves that are never expanded:
  *
  * - a node reached while it is on the current walk (GRAY) closes a cycle that avoids
- *   the target, so some run never reaches it;
+ *   every target, so some run never reaches one;
  * - a node with no outgoing step at all stops the machine where it stands, which is
  *   the same violation for a different reason;
  * - a node whose walk completed without a violation is BLACK, and reaching it again
@@ -1844,8 +1877,8 @@ function S8_monotonicVariables(model: LogicModelV1): CheckResult {
  * A run is identified by its state plus its variable values, so the same state id
  * with different values is a different node.
  */
-function findLeadsToBadPath(model: LogicModelV1, start: RuntimeState, target: string): { path: PathStep[]; reason: string } | undefined {
-  if (start.state === target) return undefined
+function findLeadsToBadPath(model: LogicModelV1, start: RuntimeState, targets: Set<string>, label: string): { path: PathStep[]; reason: string } | undefined {
+  if (targets.has(start.state)) return undefined
   const GRAY = 1
   const BLACK = 2
   interface LeadFrame {
@@ -1866,7 +1899,7 @@ function findLeadsToBadPath(model: LogicModelV1, start: RuntimeState, target: st
         for (const next of stepRuntime(model, frame.runtime, event)) nexts.push({ next, event })
       }
       frame.nexts = nexts
-      if (nexts.length === 0) return { path: frame.path, reason: 'Dead end before target ' + target }
+      if (nexts.length === 0) return { path: frame.path, reason: 'Dead end before target ' + label }
     }
     if (frame.index >= frame.nexts.length) {
       color.set(runtimeKey(frame.runtime), BLACK)
@@ -1876,15 +1909,15 @@ function findLeadsToBadPath(model: LogicModelV1, start: RuntimeState, target: st
     const { next, event } = frame.nexts[frame.index]
     frame.index += 1
     const step: PathStep = { from: frame.runtime.state, event, to: next.state }
-    if (next.state === target) continue
+    if (targets.has(next.state)) continue
     const key = runtimeKey(next)
     const seen = color.get(key)
-    if (seen === GRAY) return { path: [...frame.path, step], reason: 'Cycle avoids target ' + target }
+    if (seen === GRAY) return { path: [...frame.path, step], reason: 'Cycle avoids target ' + label }
     if (seen === BLACK) continue
     color.set(key, GRAY)
     stack.push({ runtime: next, path: [...frame.path, step], nexts: undefined, index: 0 })
   }
-  // Every branch either reached the target or rejoined a branch that did.
+  // Every branch either reached a target or rejoined a branch that did.
   return undefined
 }
 
@@ -1892,9 +1925,11 @@ function A9_leadsTo(model: LogicModelV1, exploration: Exploration): CheckResult 
   const findings: Finding[] = []
   for (const invariant of model.invariants ?? []) {
     if (invariant.kind !== 'leads-to') continue
+    const targets = new Set(leadsToTargets(invariant))
+    const label = leadsToTargetLabel(invariant)
     for (const runtime of exploration.reachable) {
       if (runtime.state !== invariant.from) continue
-      const bad = findLeadsToBadPath(model, runtime, invariant.to)
+      const bad = findLeadsToBadPath(model, runtime, targets, label)
       if (bad !== undefined) {
         findings.push({
           code: 'A9_LEADS_TO_VIOLATION',

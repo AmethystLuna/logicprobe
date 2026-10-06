@@ -291,11 +291,13 @@ IDEMPOTENT_EVENTS = {"retry", "sync", "webhook_delivery"}
 
 ### A9: Leads-To
 
-For progress claims ("from MIGRATING, eventually DONE"), check every path from the source state. If a path dead-ends or loops before reaching the target, flag it.
+For progress claims ("from MIGRATING, eventually DONE"), check every path from the source state. If a path dead-ends or loops before reaching the target, flag it. When the code has several acceptable outcomes, give the invariant a target set and check every path reaches at least one member; that is still a universal claim, so a branch that reaches none of them fails.
 
 ```python
 LEADS_TO = [
     ("MIGRATING", "DONE"),
+    # or a set of acceptable outcomes
+    ("DRAINING", ["IDLE", "FAULT"]),
 ]
 ```
 

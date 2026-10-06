@@ -176,6 +176,27 @@ check('invalid model parity', () => {
   const diffs = deepDiff(expected, actual.out)
   if (diffs.length) throw new Error(diffs.slice(0, 6).join(' | '))
 })
+// The target-set vocabulary of `leads-to` must reject the same malformed shapes in
+// both engines, and with the same message: an empty set, a duplicated member, an
+// unknown member and a non-array/non-string value.
+for (const [label, to] of [['empty', []], ['duplicate', ['B', 'B']], ['unknown', ['B', 'C']], ['scalar', 5]]) {
+  check('invalid leads-to target set parity: ' + label, () => {
+    const bad = {
+      schemaVersion: 1,
+      init: 'A',
+      states: [{ id: 'A' }, { id: 'B', terminal: true }],
+      transitions: [{ from: 'A', event: 'go', to: 'B' }],
+      invariants: [{ id: 'l', description: 'd', kind: 'leads-to', from: 'A', to }],
+    }
+    const [f] = writeTmp(bad)
+    const expected = runVerification(bad)
+    if (expected.ok) throw new Error('the model should have been rejected')
+    const actual = pythonRun(['verify', f])
+    if (!actual.out) throw new Error('python returned no JSON')
+    const diffs = deepDiff(expected, actual.out)
+    if (diffs.length) throw new Error(diffs.slice(0, 6).join(' | '))
+  })
+}
 
 // ---- UML parity: render / parse / review (mirrors tests/uml/run.mjs) ----
 // Every model that carries transitions is swept across both notations and all three

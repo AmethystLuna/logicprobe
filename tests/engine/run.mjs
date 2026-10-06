@@ -295,6 +295,29 @@ const cases = [
       }
     },
   },
+  // A target set says "reach any one of these". The property stays universal, so a
+  // branch that reaches none of them still refutes it.
+  {
+    name: 'leads-to-set-target.json',
+    errors: 0,
+    findings: [],
+  },
+  {
+    name: 'leads-to-set-single.json',
+    errors: 0,
+    findings: [],
+  },
+  {
+    name: 'leads-to-set-avoids.json',
+    errors: 1,
+    findings: [{ check: 'A9', code: 'A9_LEADS_TO_VIOLATION' }],
+    assert: (report) => {
+      const finding = leadsToFinding(report)
+      if (!finding.message.includes('Cycle avoids target B, C')) {
+        throw new Error('expected the whole target set in the reason, got: ' + finding.message)
+      }
+    },
+  },
 ]
 
 /** The single A9 violation a leads-to fixture is expected to carry. */
@@ -1376,6 +1399,12 @@ async function runClosedModelValidationTests() {
     [mutate({ invariants: [{ id: 'n', description: 'd', kind: 'never-states', states: ['C'] }] }), 'invariants[0].states[0]: references unknown state C'],
     [mutate({ invariants: [{ id: 'l', description: 'd', kind: 'leads-to', from: 'A', to: 'C' }] }), 'invariants[0].to: references unknown state C'],
     [mutate({ invariants: [{ id: 'l', description: 'd', kind: 'leads-to', from: 'C', to: 'B' }] }), 'invariants[0].from: references unknown state C'],
+    // the target set is a set: empty, duplicated or misspelled members are modelling
+    // slips, and accepting them would give one meaning several model hashes
+    [mutate({ invariants: [{ id: 'l', description: 'd', kind: 'leads-to', from: 'A', to: [] }] }), 'invariants[0].to: must be a non-empty array of state ids'],
+    [mutate({ invariants: [{ id: 'l', description: 'd', kind: 'leads-to', from: 'A', to: ['B', 'B'] }] }), 'invariants[0].to[1]: duplicates state B in the target set'],
+    [mutate({ invariants: [{ id: 'l', description: 'd', kind: 'leads-to', from: 'A', to: ['B', 'C'] }] }), 'invariants[0].to[1]: references unknown state C'],
+    [mutate({ invariants: [{ id: 'l', description: 'd', kind: 'leads-to', from: 'A', to: 5 }] }), 'invariants[0].to: must be a state id or a non-empty array of state ids'],
     [mutate({ invariants: [{ id: 'p', description: 'd', kind: 'probability', target: 'C', op: '>=', p: 0.5 }] }), 'invariants[0].target: references unknown state C'],
     [mutate({ invariants: [{ id: 'e', description: 'd', kind: 'event-before-state', event: 'go', state: 'C' }] }), 'invariants[0].state: references unknown state C'],
     [mutate({ invariants: [{ id: 'e', description: 'd', kind: 'event-before-state', event: 'launch', state: 'B' }] }), 'invariants[0].event: references unknown event launch'],

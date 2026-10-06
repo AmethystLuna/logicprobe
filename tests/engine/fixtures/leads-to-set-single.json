@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "init": "A",
+  "states": [
+    {
+      "id": "A"
+    },
+    {
+      "id": "B",
+      "terminal": true
+    }
+  ],
+  "transitions": [
+    {
+      "from": "A",
+      "event": "go",
+      "to": "B"
+    }
+  ],
+  "invariants": [
+    {
+      "id": "a-reaches-b",
+      "description": "a one-member target set means the same as the bare state id",
+      "kind": "leads-to",
+      "from": "A",
+      "to": [
+        "B"
+      ]
+    }
+  ]
+}

@@ -68,7 +68,8 @@ The same reasoning applies to every id a check names. A reference to a state, ev
 | `transitions[].guard` variables | a declared variable |
 | `resourcePairs[].acquireEvent` / `.releaseEvent` / `.failEvent` | a declared event |
 | `invariants[].event` (`event-before-state`) | a declared event |
-| `invariants[].state` / `.states[]` / `.from` / `.to` / `.target` / `.when.state` | a declared state |
+| `invariants[].state` / `.states[]` / `.from` / `.target` / `.when.state` | a declared state |
+| `invariants[].to` and every member of `invariants[].to[]` (`leads-to`) | a declared state |
 
 A vacuous check is worse than a rejected one: a `leads-to` invariant whose `to` state is misspelled can never be violated, and a `never-states` list holding a nonexistent id can never be reached, so both report "pass" for a model that was never actually checked.
 
@@ -162,7 +163,7 @@ A guard is exactly one of:
 | `never-states` | `{ states: ["ERROR"] }` | No reachable runtime state may be in the forbidden set |
 | `var-in-range` | `{ variable, min?, max?, when? }` | Every reachable runtime state selected by `when` keeps the variable in range (at least one of `min`/`max` is required) |
 | `event-before-state` | `{ event: "power_ready", state: "ACTIVE" }` | Every path entering `state` must have passed through `event` first |
-| `leads-to` | `{ from: "MIGRATING", to: "DONE" }` | Every path from `from` must eventually reach `to` |
+| `leads-to` | `{ from: "MIGRATING", to: "DONE" }`, or `to: ["DONE", "FAILED"]` | Every path from `from` must eventually reach `to`. With a target set, every path must reach at least one member. The set must be non-empty and free of duplicates |
 | `sequence` | `{ events: ["backup", "modify", "commit"] }` | Events must occur in the given order |
 | `atomicity` | `{ events: ["write"], commit: "commit", rollback?: "rollback" }` | Atomic group must end with commit/rollback before leaving scope |
 | `budget` | `{ budget: n }` | No reachable path may accumulate transition cost greater than n (A12). Costs are non-negative; a transition without `cost` counts 1, so legacy machines keep step-count semantics |
@@ -306,7 +307,7 @@ List events that must be idempotent in `idempotentEvents`. For every reachable s
 ## Advanced constraints (S8, A9-A14)
 
 - **S8 Monotonic Variables**: declare `monotonic: "inc"|"dec"` on a variable; updates must not move in the opposite direction.
-- **A9 Leads-To**: `{ kind: "leads-to", from, to }` — every path from `from` must eventually reach `to`.
+- **A9 Leads-To**: `{ kind: "leads-to", from, to }` — every path from `from` must eventually reach `to`. `to` is one state id or a non-empty array of state ids for "reach any one of these"; a duplicated member is a validation error rather than a shorthand. Either way the property stays universal: one branch that loops forever, or that stops before every target, refutes it.
 - **A10 Sequence**: `{ kind: "sequence", events }` — events must appear in order.
 - **A11 Atomicity**: `{ kind: "atomicity", events, commit, rollback? }` — once an atomic event starts, the machine must reach commit/rollback before leaving the atomic scope or terminating.
 - **A12 Budget**: `{ kind: "budget", budget }` — no reachable path may accumulate transition cost above the budget; reports the shortest over-budget path and flags reachable positive-cost cycles as unbounded.

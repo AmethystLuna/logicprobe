@@ -1,0 +1,41 @@
+{
+  "schemaVersion": 1,
+  "init": "A",
+  "states": [
+    {
+      "id": "A"
+    },
+    {
+      "id": "B",
+      "terminal": true
+    },
+    {
+      "id": "C",
+      "terminal": true
+    }
+  ],
+  "transitions": [
+    {
+      "from": "A",
+      "event": "go",
+      "to": "B"
+    },
+    {
+      "from": "A",
+      "event": "alt",
+      "to": "C"
+    }
+  ],
+  "invariants": [
+    {
+      "id": "a-reaches-either",
+      "description": "each branch reaches one of the two outcomes, so a target set expresses the intent exactly",
+      "kind": "leads-to",
+      "from": "A",
+      "to": [
+        "B",
+        "C"
+      ]
+    }
+  ]
+}

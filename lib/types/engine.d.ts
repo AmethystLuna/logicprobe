@@ -110,7 +110,7 @@ export type InvariantSpec = {
     description: string;
     kind: 'leads-to';
     from: string;
-    to: string;
+    to: string | string[];
 } | {
     id: string;
     description: string;
