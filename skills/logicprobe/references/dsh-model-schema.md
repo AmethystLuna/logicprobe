@@ -169,7 +169,7 @@ A guard is exactly one of:
 | `budget` | `{ budget: n }` | No reachable path may accumulate transition cost greater than n (A12). Costs are non-negative; a transition without `cost` counts 1, so legacy machines keep step-count semantics |
 | `probability` | `{ target, op: one of >= <= > <, p }` | P(ever hitting target) must satisfy the bound (A13, DTMC from transition `weight`, default 1; value iteration) |
 
-A7 reports the shortest violating path for each failed invariant. An empty path means the initial state already violates it.
+A7 reports a violating path for each failed invariant, and an empty path means the initial state already violates it. The state-predicate kinds, `sequence`, `atomicity` and `budget` are breadth-first, so their witness is the shortest one; `leads-to` and `probability` report a witness without claiming minimality.
 
 ### Scoping a range to a state (`when`)
 
@@ -282,7 +282,7 @@ When `beforeModel` is passed to `logicprobe_verify`, the engine treats `model` a
 | Check | Purpose |
 |---|---|
 | D1 Behavioral Preservation | Every BEFORE (state, event) that could fire must still be fireable from the mapped AFTER state |
-| D2 Invariant Continuity | Every BEFORE invariant (mapped through `stateMapping`) must still hold in AFTER |
+| D2 Invariant Continuity | Every BEFORE invariant (mapped through `stateMapping`) must still hold in AFTER. State predicates go through the same reachability search as S7; `leads-to`, `sequence`, `atomicity`, `budget` and `probability` are re-decided by the searches their own probes (A9-A13) use |
 | D3 Regression Delta | Lists added/removed states, events, and transitions |
 | D4 Deadlock/Liveness Regression | New deadlock states or closed SCCs not present in BEFORE |
 

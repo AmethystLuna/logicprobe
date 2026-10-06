@@ -1211,10 +1211,98 @@ def _shortest_violation_for_invariant(model, max_states, invariant):
     return None
 
 
-def _run_invariants(model, max_states):
+def _is_path_property_invariant(invariant):
+    # Whether an invariant asserts a property of whole runs rather than of a single
+    # runtime state. These kinds cannot be decided by a state predicate, so they are
+    # not part of _shortest_violation_for_invariant (and therefore not of S7), which
+    # owns the states; A9-A13 own the verdicts, and _path_property_violation below
+    # makes the same verdicts available to A7 and D2.
+    return invariant['kind'] in ('leads-to', 'sequence', 'atomicity', 'budget', 'probability')
+
+
+def _probability_violated(invariant, probability):
+    # Whether a probability invariant's bound fails for the computed hit probability.
+    eps = 1e-9
+    op = invariant['op']
+    if op == '>=':
+        return probability < invariant['p'] - eps
+    if op == '>':
+        return probability <= invariant['p'] + eps
+    if op == '<=':
+        return probability > invariant['p'] + eps
+    return probability >= invariant['p'] - eps
+
+
+def _reachable_runtime_states(model, max_states):
+    # Every runtime state reachable from init, capped like the other searches.
+    init = _initial_state(model)
+    visited = set([_runtime_key(init)])
+    reached = [init]
+    queue = deque([init])
+    steps = 0
+    while queue:
+        steps += 1
+        if steps > max_states:
+            break
+        current = queue.popleft()
+        for event in _all_events(model):
+            for nxt in _step_runtime(model, current, event):
+                k = _runtime_key(nxt)
+                if k in visited:
+                    continue
+                visited.add(k)
+                reached.append(nxt)
+                queue.append(nxt)
+    return reached
+
+
+def _path_property_violation(model, max_states, invariant):
+    # Violation of a path-property invariant, or None when it holds. Each kind
+    # delegates to the search its dedicated probe uses (A9 leads-to, A10 sequence, A11
+    # atomicity, A12 budget, A13 probability), so a verdict reported here can never
+    # disagree with the probe that owns the kind.
+    kind = invariant['kind']
+    if kind == 'leads-to':
+        targets = set(_leads_to_targets(invariant))
+        label = _leads_to_target_label(invariant)
+        for runtime in _reachable_runtime_states(model, max_states):
+            if runtime['state'] != invariant['from']:
+                continue
+            bad = _find_leads_to_bad_path(model, runtime, targets, label)
+            if bad is not None:
+                return {'invariant': invariant, 'path': bad['path'], 'reason': bad['reason']}
+        return None
+    if kind == 'sequence':
+        return _find_sequence_violation(model, max_states, invariant)
+    if kind == 'atomicity':
+        return _find_atomicity_violation(model, max_states, invariant)
+    if kind == 'budget':
+        violation = _find_budget_violation(model, max_states, invariant)
+        if violation is None:
+            return None
+        reason = ('a reachable cycle keeps accumulating cost, so no finite budget holds'
+                  if violation['unbounded']
+                  else 'a run accumulates cost ' + str(violation['cost']) + ', above the declared budget ' + str(invariant['budget']))
+        return {'invariant': invariant, 'path': violation['path'], 'reason': reason}
+    if kind == 'probability':
+        computed = _compute_hit_probability(model, max_states, invariant['target'])
+        probability = computed['probability']
+        if not _probability_violated(invariant, probability):
+            return None
+        reason = ('P(hit ' + invariant['target'] + ') = ' + '{:.6f}'.format(probability)
+                  + ' does not satisfy ' + invariant['op'] + ' ' + str(invariant['p'])
+                  + ('' if computed['converged'] else ' (value iteration did not converge)'))
+        return {'invariant': invariant, 'path': [], 'reason': reason}
+    return None
+
+
+def _run_invariants(model, max_states, include_path_properties=False):
     violations = []
     for invariant in model.get('invariants') or []:
-        violation = _shortest_violation_for_invariant(model, max_states, invariant)
+        if include_path_properties and _is_path_property_invariant(invariant):
+            violation = _path_property_violation(model, max_states, invariant)
+        else:
+            violation = _shortest_violation_for_invariant(model, max_states, invariant)
         if violation is not None:
             violations.append(violation)
     return violations
@@ -1596,14 +1684,27 @@ def A6_resource_injection(model):
 
 
 def A7_shortest_violations(model, max_states):
-    violations = _run_invariants(model, max_states)
+    # Path-property invariants are included: "for any invariant that fails" is this
+    # check's contract, and a check that silently skips five of the eight kinds cannot
+    # honour it. The searches for the state kinds, for sequence, atomicity and budget
+    # are breadth-first, so their first witness is the shortest one; the leads-to walk
+    # and the probability bound have no such guarantee, and their message says what it
+    # found instead of claiming minimality.
+    violations = _run_invariants(model, max_states, True)
     findings = []
     for violation in violations:
         invariant = violation['invariant']
+        path_length = len(violation['path'])
+        if _is_path_property_invariant(invariant):
+            message = ('Invariant "' + invariant['id'] + '" violated: ' + violation['reason']
+                       + ('' if path_length == 0 else ' (witness path length: ' + str(path_length) + ')'))
+        else:
+            message = ('Invariant "' + invariant['id'] + '" shortest violating path length: ' + str(path_length)
+                       + (' (initial state)' if path_length == 0 else ''))
         findings.append({
             'code': 'A7_SHORTEST_COUNTEREXAMPLE',
             'severity': 'warning',
-            'message': 'Invariant "' + invariant['id'] + '" shortest violating path length: ' + str(len(violation['path'])) + (' (initial state)' if len(violation['path']) == 0 else ''),
+            'message': message,
             'path': violation['path'],
             'evidence': {'invariant': invariant['id']},
         })
@@ -1669,6 +1770,14 @@ def _map_invariant_for_comparison(invariant, mapping):
         when = invariant.get('when')
         if when is not None and 'state' in when:
             out['when'] = {'state': _map_state_id(mapping, when['state'])}
+    elif invariant['kind'] == 'leads-to':
+        # A target set maps member by member; a rename that drops a state is reported by
+        # D2's own mapped-state check rather than silently changing the property.
+        out['from'] = _map_state_id(mapping, invariant['from'])
+        to = invariant['to']
+        out['to'] = _map_state_id(mapping, to) if isinstance(to, str) else [_map_state_id(mapping, s) for s in to]
+    elif invariant['kind'] == 'probability':
+        out['target'] = _map_state_id(mapping, invariant['target'])
     return out
 
 
@@ -1704,7 +1813,33 @@ def D2_invariant_continuity(before, after, max_states, mapping):
                     'evidence': {'invariant': invariant['id'], 'variable': mapped['variable']},
                 })
                 continue
-        violation = _shortest_violation_for_invariant(after, max_states, mapped)
+        elif mapped['kind'] == 'leads-to':
+            # The state references of a path-property invariant must follow stateMapping
+            # too, otherwise a pure rename searches for a state AFTER does not declare.
+            for state in [mapped['from']] + _leads_to_targets(mapped):
+                if state not in after_states:
+                    findings.append({
+                        'code': 'D2_MAPPED_STATE_MISSING',
+                        'severity': 'warning',
+                        'message': 'BEFORE invariant "' + invariant['id'] + '" maps to state ' + state + ', which is not declared in AFTER.',
+                        'evidence': {'invariant': invariant['id'], 'state': state},
+                    })
+        elif mapped['kind'] == 'probability':
+            if mapped['target'] not in after_states:
+                findings.append({
+                    'code': 'D2_MAPPED_STATE_MISSING',
+                    'severity': 'warning',
+                    'message': 'BEFORE invariant "' + invariant['id'] + '" maps to state ' + mapped['target'] + ', which is not declared in AFTER.',
+                    'evidence': {'invariant': invariant['id'], 'state': mapped['target']},
+                })
+        # Every invariant the engine can decide is re-decided against AFTER.
+        # Path-property kinds go through the same searches their dedicated probes use,
+        # so D2 can no longer report "all BEFORE invariants continue to hold" while
+        # A9-A13 fail on the very same model.
+        if _is_path_property_invariant(mapped):
+            violation = _path_property_violation(after, max_states, mapped)
+        else:
+            violation = _shortest_violation_for_invariant(after, max_states, mapped)
         if violation is not None:
             findings.append({
                 'code': 'D2_INVARIANT_REGRESSION',
@@ -2347,7 +2482,6 @@ def _compute_hit_probability(model, max_states, target_state):
 
 def A13_probability(model, max_states):
     findings = []
-    eps = 1e-9
     for invariant in model.get('invariants') or []:
         if invariant['kind'] != 'probability':
             continue
@@ -2356,16 +2490,7 @@ def A13_probability(model, max_states):
         converged = result['converged']
         op = invariant['op']
         p_bound = invariant['p']
-        violated = False
-        if op == '>=':
-            violated = probability < p_bound - eps
-        elif op == '>':
-            violated = probability <= p_bound + eps
-        elif op == '<=':
-            violated = probability > p_bound + eps
-        else:
-            violated = probability >= p_bound - eps
-        if violated:
+        if _probability_violated(invariant, probability):
             findings.append({
                 'code': 'A13_PROBABILITY_VIOLATION',
                 'severity': 'error',

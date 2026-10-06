@@ -198,6 +198,66 @@ for (const [label, to] of [['empty', []], ['duplicate', ['B', 'B']], ['unknown',
   })
 }
 
+// Path-property invariants must reach D2 in both engines, with the same finding, the
+// same reason and the same witness path. Only one pair per kind is needed here: the
+// point is parity of the new dispatch, not the verdict, which tests/engine/run.mjs owns.
+for (const [label, before, after] of [
+  ['leads-to', {
+    schemaVersion: 1, init: 'A', states: [{ id: 'A' }, { id: 'B', terminal: true }],
+    transitions: [{ from: 'A', event: 'go', to: 'B' }],
+    invariants: [{ id: 'inv', description: 'd', kind: 'leads-to', from: 'A', to: 'B' }],
+  }, {
+    schemaVersion: 1, init: 'A', states: [{ id: 'A' }, { id: 'B', terminal: true }],
+    transitions: [{ from: 'A', event: 'go', to: 'B' }, { from: 'A', event: 'wait', to: 'A' }],
+    invariants: [{ id: 'inv', description: 'd', kind: 'leads-to', from: 'A', to: 'B' }],
+  }],
+  ['sequence', {
+    schemaVersion: 1, init: 'A', states: [{ id: 'A' }, { id: 'B' }, { id: 'C', terminal: true }],
+    transitions: [{ from: 'A', event: 'a', to: 'B' }, { from: 'B', event: 'b', to: 'C' }],
+    invariants: [{ id: 'inv', description: 'd', kind: 'sequence', events: ['a', 'b'] }],
+  }, {
+    schemaVersion: 1, init: 'A', states: [{ id: 'A' }, { id: 'B' }, { id: 'C', terminal: true }],
+    transitions: [{ from: 'A', event: 'a', to: 'B' }, { from: 'B', event: 'b', to: 'C' }, { from: 'A', event: 'b', to: 'C' }],
+    invariants: [{ id: 'inv', description: 'd', kind: 'sequence', events: ['a', 'b'] }],
+  }],
+  ['atomicity', {
+    schemaVersion: 1, init: 'A', states: [{ id: 'A' }, { id: 'B' }, { id: 'C', terminal: true }],
+    transitions: [{ from: 'A', event: 'write', to: 'B' }, { from: 'B', event: 'commit', to: 'C' }],
+    invariants: [{ id: 'inv', description: 'd', kind: 'atomicity', events: ['write'], commit: 'commit', rollback: 'rollback' }],
+  }, {
+    schemaVersion: 1, init: 'A', states: [{ id: 'A' }, { id: 'B' }, { id: 'C', terminal: true }, { id: 'D', terminal: true }],
+    transitions: [{ from: 'A', event: 'write', to: 'B' }, { from: 'B', event: 'commit', to: 'C' }, { from: 'B', event: 'leave', to: 'D' }],
+    invariants: [{ id: 'inv', description: 'd', kind: 'atomicity', events: ['write'], commit: 'commit', rollback: 'rollback' }],
+  }],
+  ['budget', {
+    schemaVersion: 1, init: 'A', states: [{ id: 'A' }, { id: 'B', terminal: true }],
+    transitions: [{ from: 'A', event: 'go', to: 'B', cost: 5 }],
+    invariants: [{ id: 'inv', description: 'd', kind: 'budget', budget: 10 }],
+  }, {
+    schemaVersion: 1, init: 'A', states: [{ id: 'A' }, { id: 'B', terminal: true }],
+    transitions: [{ from: 'A', event: 'go', to: 'B', cost: 50 }],
+    invariants: [{ id: 'inv', description: 'd', kind: 'budget', budget: 10 }],
+  }],
+  ['probability', {
+    schemaVersion: 1, init: 'A', states: [{ id: 'A' }, { id: 'B', terminal: true }, { id: 'C', terminal: true }],
+    transitions: [{ from: 'A', event: 'go', to: 'B', weight: 9 }, { from: 'A', event: 'go', to: 'C', weight: 1 }],
+    invariants: [{ id: 'inv', description: 'd', kind: 'probability', target: 'B', op: '>=', p: 0.9 }],
+  }, {
+    schemaVersion: 1, init: 'A', states: [{ id: 'A' }, { id: 'B', terminal: true }, { id: 'C', terminal: true }],
+    transitions: [{ from: 'A', event: 'go', to: 'B', weight: 1 }, { from: 'A', event: 'go', to: 'C', weight: 1 }],
+    invariants: [{ id: 'inv', description: 'd', kind: 'probability', target: 'B', op: '>=', p: 0.9 }],
+  }],
+]) {
+  check('path-property continuity parity: ' + label, () => {
+    const [fb, fa] = writeTmp(before, after)
+    const expected = runVerification(after, { beforeModel: before })
+    const actual = pythonRun(['verify', fa, '--before-model', fb])
+    if (!actual.out) throw new Error('python returned no JSON')
+    const diffs = deepDiff(expected, actual.out)
+    if (diffs.length) throw new Error(diffs.slice(0, 6).join(' | '))
+  })
+}
+
 // ---- UML parity: render / parse / review (mirrors tests/uml/run.mjs) ----
 // Every model that carries transitions is swept across both notations and all three
 // diagram kinds. A diagram is rendered by the TypeScript side, written to a temp file

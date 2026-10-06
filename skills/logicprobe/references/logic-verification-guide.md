@@ -271,6 +271,8 @@ def shortest_violating_path(states, init, invariant_check):
     return None  # Invariant holds for all reachable states
 ```
 
+That template decides one runtime state at a time, so it only fits the state-predicate kinds. A `leads-to`, `sequence`, `atomicity`, `budget` or `probability` invariant asserts a property of a whole run: reuse the search in its own section (A9-A13) as the witness finder, or A7 will report "all invariants hold" for a model where one of them fails.
+
 ### S8: Monotonic Variables
 
 For counters or progress variables that must only move in one direction, list the events that increase/decrease them. Any event that moves against the declared direction is a finding.
@@ -440,7 +442,7 @@ The BEFORE model comes from **code, not the plan**. The plan may describe the cu
 
 **Behavioral preservation**: For each event sequence accepted by BEFORE, trace the same sequence in AFTER. If AFTER ends in a different state (or rejects the sequence), flag as BEHAVIORAL DELTA. The plan must explicitly document this delta — if it doesn't, it's a regression.
 
-**Invariant continuity**: Re-run S7 invariant checks on both models. Any invariant that passes on BEFORE but fails on AFTER is a regression — the refactoring broke an existing guarantee.
+**Invariant continuity**: Re-decide every invariant on AFTER, mapped through `stateMapping`. Any invariant that holds on BEFORE but fails on AFTER is a regression — the refactoring broke an existing guarantee. State predicates go through the same reachability search as S7; `leads-to`, `sequence`, `atomicity`, `budget` and `probability` are re-decided by the searches their own probes (A9-A13) use, so continuity agrees with the standalone verdict. A state reference that the mapping drops is reported as a mapped-state warning instead of silently changing the property.
 
 **Complexity delta**: Count objectively:
 
@@ -509,7 +511,7 @@ Manual verification is reliable for state machines with **≤ 10 states and ≤ 
 
 **A6 Resource Injection**: For each state that appears to allocate (names containing "alloc", "init", "start", "open", "connect", "begin"), check if there is a recovery/error path if the allocation fails. If no recovery exists, flag as RESOURCE VULNERABLE.
 
-**A7 Minimal Counter-Example**: For each invariant that failed in S7, find the SHORTEST event sequence that violates it. This is the most useful output — it gives the plan author an exact repro.
+**A7 Minimal Counter-Example**: For each invariant that failed, find the event sequence that violates it. This is the most useful output — it gives the plan author an exact repro. The searches for state predicates, `sequence`, `atomicity` and `budget` are breadth-first, so their witness is the shortest one; the `leads-to` walk and the `probability` bound report what they found without claiming minimality.
 
 ### Manual Mode Output Format
 

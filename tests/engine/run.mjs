@@ -428,6 +428,154 @@ async function runDiffTests() {
   console.log('PASS before-after-rename-mapping')
 }
 
+// Path-property invariants (leads-to, sequence, atomicity, budget, probability) assert
+// a property of whole runs. They have their own probes (A9-A13), but D2 and A7 used to
+// decide them with a single-runtime predicate that always held, so a refactoring that
+// broke one was reported as "all BEFORE invariants continue to hold". These cases pin
+// both directions: the regression must be found, and a pure rename must stay clean.
+async function runPathPropertyContinuityTests() {
+  const leadsToBefore = {
+    schemaVersion: 1,
+    init: 'A',
+    states: [{ id: 'A' }, { id: 'B', terminal: true }],
+    transitions: [{ from: 'A', event: 'go', to: 'B' }],
+    invariants: [{ id: 'inv', description: 'progress', kind: 'leads-to', from: 'A', to: 'B' }],
+  }
+  const cases = [
+    {
+      name: 'leads-to',
+      before: leadsToBefore,
+      after: {
+        ...leadsToBefore,
+        transitions: [{ from: 'A', event: 'go', to: 'B' }, { from: 'A', event: 'wait', to: 'A' }],
+      },
+    },
+    {
+      name: 'sequence',
+      before: {
+        schemaVersion: 1,
+        init: 'A',
+        states: [{ id: 'A' }, { id: 'B' }, { id: 'C', terminal: true }],
+        transitions: [{ from: 'A', event: 'a', to: 'B' }, { from: 'B', event: 'b', to: 'C' }],
+        invariants: [{ id: 'inv', description: 'order', kind: 'sequence', events: ['a', 'b'] }],
+      },
+      after: {
+        schemaVersion: 1,
+        init: 'A',
+        states: [{ id: 'A' }, { id: 'B' }, { id: 'C', terminal: true }],
+        transitions: [{ from: 'A', event: 'a', to: 'B' }, { from: 'B', event: 'b', to: 'C' }, { from: 'A', event: 'b', to: 'C' }],
+        invariants: [{ id: 'inv', description: 'order', kind: 'sequence', events: ['a', 'b'] }],
+      },
+    },
+    {
+      name: 'atomicity',
+      before: {
+        schemaVersion: 1,
+        init: 'A',
+        states: [{ id: 'A' }, { id: 'B' }, { id: 'C', terminal: true }],
+        transitions: [{ from: 'A', event: 'write', to: 'B' }, { from: 'B', event: 'commit', to: 'C' }],
+        invariants: [{ id: 'inv', description: 'all-or-nothing', kind: 'atomicity', events: ['write'], commit: 'commit', rollback: 'rollback' }],
+      },
+      after: {
+        schemaVersion: 1,
+        init: 'A',
+        states: [{ id: 'A' }, { id: 'B' }, { id: 'C', terminal: true }, { id: 'D', terminal: true }],
+        transitions: [{ from: 'A', event: 'write', to: 'B' }, { from: 'B', event: 'commit', to: 'C' }, { from: 'B', event: 'leave', to: 'D' }],
+        invariants: [{ id: 'inv', description: 'all-or-nothing', kind: 'atomicity', events: ['write'], commit: 'commit', rollback: 'rollback' }],
+      },
+    },
+    {
+      name: 'budget',
+      before: {
+        schemaVersion: 1,
+        init: 'A',
+        states: [{ id: 'A' }, { id: 'B', terminal: true }],
+        transitions: [{ from: 'A', event: 'go', to: 'B', cost: 5 }],
+        invariants: [{ id: 'inv', description: 'within budget', kind: 'budget', budget: 10 }],
+      },
+      after: {
+        schemaVersion: 1,
+        init: 'A',
+        states: [{ id: 'A' }, { id: 'B', terminal: true }],
+        transitions: [{ from: 'A', event: 'go', to: 'B', cost: 50 }],
+        invariants: [{ id: 'inv', description: 'within budget', kind: 'budget', budget: 10 }],
+      },
+    },
+    {
+      name: 'probability',
+      before: {
+        schemaVersion: 1,
+        init: 'A',
+        states: [{ id: 'A' }, { id: 'B', terminal: true }, { id: 'C', terminal: true }],
+        transitions: [{ from: 'A', event: 'go', to: 'B', weight: 9 }, { from: 'A', event: 'go', to: 'C', weight: 1 }],
+        invariants: [{ id: 'inv', description: 'mostly succeeds', kind: 'probability', target: 'B', op: '>=', p: 0.9 }],
+      },
+      after: {
+        schemaVersion: 1,
+        init: 'A',
+        states: [{ id: 'A' }, { id: 'B', terminal: true }, { id: 'C', terminal: true }],
+        transitions: [{ from: 'A', event: 'go', to: 'B', weight: 1 }, { from: 'A', event: 'go', to: 'C', weight: 1 }],
+        invariants: [{ id: 'inv', description: 'mostly succeeds', kind: 'probability', target: 'B', op: '>=', p: 0.9 }],
+      },
+    },
+  ]
+
+  for (const testCase of cases) {
+    // The dedicated probe must own the verdict on AFTER alone...
+    const solo = runVerification(testCase.after)
+    const a7 = solo.checks.find((check) => check.id === 'A7')
+    const witness = a7?.findings.find((finding) => finding.code === 'A7_SHORTEST_COUNTEREXAMPLE')
+    if (witness === undefined) throw new Error(testCase.name + ': A7 should report the failing path-property invariant')
+    // ...and its message must not claim minimality for a search that cannot guarantee it.
+    if (witness.message.includes('shortest')) throw new Error(testCase.name + ': path-property witness must not claim to be shortest: ' + witness.message)
+
+    // ...and D2 must re-decide it against AFTER instead of reporting that it still holds.
+    const cmp = runVerification(testCase.after, { beforeModel: testCase.before })
+    const d2 = cmp.checks.find((check) => check.id === 'D2')
+    if (d2?.findings.some((finding) => finding.code === 'D2_INVARIANT_REGRESSION') !== true) {
+      throw new Error(testCase.name + ': D2 should report D2_INVARIANT_REGRESSION, got ' + JSON.stringify(d2?.findings ?? []))
+    }
+    assertNoUndefinedValues(cmp)
+  }
+  console.log('PASS path-property-continuity')
+
+  // A rename must not turn into a regression: the state references of these kinds have
+  // to follow stateMapping like the state-predicate kinds already do.
+  const renameBefore = {
+    schemaVersion: 1,
+    init: 'IDLE',
+    states: [{ id: 'IDLE' }, { id: 'DONE', terminal: true }, { id: 'FAILED', terminal: true }],
+    transitions: [
+      { from: 'IDLE', event: 'go', to: 'DONE', weight: 9 },
+      { from: 'IDLE', event: 'fail', to: 'FAILED', weight: 1 },
+    ],
+    invariants: [
+      { id: 'reaches-outcome', description: 'either outcome', kind: 'leads-to', from: 'IDLE', to: ['DONE', 'FAILED'] },
+      { id: 'mostly-succeeds', description: 'usually succeeds', kind: 'probability', target: 'DONE', op: '>=', p: 0.9 },
+    ],
+  }
+  const renameAfter = {
+    schemaVersion: 1,
+    init: 'READY',
+    states: [{ id: 'READY' }, { id: 'DONE', terminal: true }, { id: 'FAILED', terminal: true }],
+    transitions: [
+      { from: 'READY', event: 'go', to: 'DONE', weight: 9 },
+      { from: 'READY', event: 'fail', to: 'FAILED', weight: 1 },
+    ],
+    invariants: [
+      { id: 'reaches-outcome', description: 'either outcome', kind: 'leads-to', from: 'READY', to: ['DONE', 'FAILED'] },
+      { id: 'mostly-succeeds', description: 'usually succeeds', kind: 'probability', target: 'DONE', op: '>=', p: 0.9 },
+    ],
+  }
+  const renameCmp = runVerification(renameAfter, { beforeModel: renameBefore, stateMapping: { IDLE: 'READY' } })
+  const renameD2 = renameCmp.checks.find((check) => check.id === 'D2')
+  if (renameD2 === undefined || renameD2.findings.length !== 0) {
+    throw new Error('a pure rename must not produce D2 findings: ' + JSON.stringify(renameD2?.findings ?? []))
+  }
+  assertNoUndefinedValues(renameCmp)
+  console.log('PASS path-property-rename-mapping')
+}
+
 // Idempotent replay (A8)
 async function runIdempotencyTests() {
   const nonIdempotent = {
@@ -1233,6 +1381,7 @@ await runCanonThreeTests()
 await runIdempotencyTests()
 
 await runDiffTests()
+await runPathPropertyContinuityTests()
 
 async function runNarrativeValidationTests() {
   const complete = {

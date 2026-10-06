@@ -1127,6 +1127,96 @@ function shortestViolationForInvariant(model: LogicModelV1, options: NormalizedO
   return undefined
 }
 
+/**
+ * Whether an invariant asserts a property of whole runs rather than of a single
+ * runtime state. These kinds cannot be decided by a state predicate, so they are not
+ * part of `shortestViolationForInvariant` (and therefore not of S7), which owns the
+ * states; A9-A13 own the verdicts, and `pathPropertyViolation` below makes the same
+ * verdicts available to A7 and D2.
+ */
+function isPathPropertyInvariant(invariant: InvariantSpec): boolean {
+  return invariant.kind === 'leads-to'
+    || invariant.kind === 'sequence'
+    || invariant.kind === 'atomicity'
+    || invariant.kind === 'budget'
+    || invariant.kind === 'probability'
+}
+
+/** Whether a probability invariant's bound fails for the computed hit probability. */
+function probabilityViolated(invariant: Extract<InvariantSpec, { kind: 'probability' }>, probability: number): boolean {
+  const eps = 1e-9
+  if (invariant.op === '>=') return probability < invariant.p - eps
+  if (invariant.op === '>') return probability <= invariant.p + eps
+  if (invariant.op === '<=') return probability > invariant.p + eps
+  return probability >= invariant.p - eps
+}
+
+/** Every runtime state reachable from init, capped like the other searches. */
+function reachableRuntimeStates(model: LogicModelV1, options: NormalizedOptions): RuntimeState[] {
+  const init = initialState(model)
+  const visited = new Set<string>([runtimeKey(init)])
+  const reached: RuntimeState[] = [init]
+  const queue: RuntimeState[] = [init]
+  let steps = 0
+  while (queue.length > 0) {
+    if (++steps > options.maxStates) break
+    const current = queue.shift()!
+    for (const event of allEvents(model)) {
+      for (const next of stepRuntime(model, current, event)) {
+        const key = runtimeKey(next)
+        if (visited.has(key)) continue
+        visited.add(key)
+        reached.push(next)
+        queue.push(next)
+      }
+    }
+  }
+  return reached
+}
+
+/**
+ * Violation of a path-property invariant, or undefined when it holds. Each kind
+ * delegates to the search its dedicated probe uses (A9 leads-to, A10 sequence, A11
+ * atomicity, A12 budget, A13 probability), so a verdict reported here can never
+ * disagree with the probe that owns the kind.
+ */
+function pathPropertyViolation(model: LogicModelV1, options: NormalizedOptions, invariant: InvariantSpec): InvariantViolation | undefined {
+  if (invariant.kind === 'leads-to') {
+    const targets = new Set(leadsToTargets(invariant))
+    const label = leadsToTargetLabel(invariant)
+    for (const runtime of reachableRuntimeStates(model, options)) {
+      if (runtime.state !== invariant.from) continue
+      const bad = findLeadsToBadPath(model, runtime, targets, label)
+      if (bad !== undefined) return { invariant, path: bad.path, reason: bad.reason }
+    }
+    return undefined
+  }
+  if (invariant.kind === 'sequence') return findSequenceViolation(model, options, invariant)
+  if (invariant.kind === 'atomicity') return findAtomicityViolation(model, options, invariant)
+  if (invariant.kind === 'budget') {
+    const violation = findBudgetViolation(model, options, invariant)
+    if (violation === undefined) return undefined
+    return {
+      invariant,
+      path: violation.path,
+      reason: violation.unbounded
+        ? 'a reachable cycle keeps accumulating cost, so no finite budget holds'
+        : 'a run accumulates cost ' + String(violation.cost) + ', above the declared budget ' + String(invariant.budget),
+    }
+  }
+  if (invariant.kind === 'probability') {
+    const { probability, converged } = computeHitProbability(model, options, invariant.target)
+    if (!probabilityViolated(invariant, probability)) return undefined
+    return {
+      invariant,
+      path: [],
+      reason: 'P(hit ' + invariant.target + ') = ' + probability.toFixed(6) + ' does not satisfy ' + invariant.op + ' ' + String(invariant.p)
+        + (converged ? '' : ' (value iteration did not converge)'),
+    }
+  }
+  return undefined
+}
+
 function shortestEventBeforeStateViolation(model: LogicModelV1, options: NormalizedOptions, invariant: Extract<InvariantSpec, { kind: 'event-before-state' }>): InvariantViolation | undefined {
   const init = initialState(model)
   const seenInitially = false
@@ -1157,10 +1247,12 @@ function shortestEventBeforeStateViolation(model: LogicModelV1, options: Normali
   return undefined
 }
 
-function runInvariants(model: LogicModelV1, options: NormalizedOptions): InvariantViolation[] {
+function runInvariants(model: LogicModelV1, options: NormalizedOptions, includePathProperties = false): InvariantViolation[] {
   const violations: InvariantViolation[] = []
   for (const invariant of model.invariants ?? []) {
-    const violation = shortestViolationForInvariant(model, options, invariant)
+    const violation = includePathProperties && isPathPropertyInvariant(invariant)
+      ? pathPropertyViolation(model, options, invariant)
+      : shortestViolationForInvariant(model, options, invariant)
     if (violation !== undefined) violations.push(violation)
   }
   return violations
@@ -1526,14 +1618,27 @@ function A6_resourceInjection(model: LogicModelV1): CheckResult {
 }
 
 function A7_shortestViolations(model: LogicModelV1, options: NormalizedOptions): CheckResult {
-  const violations = runInvariants(model, options)
-  const findings: Finding[] = violations.map((violation) => ({
-    code: 'A7_SHORTEST_COUNTEREXAMPLE',
-    severity: 'warning',
-    message: 'Invariant "' + violation.invariant.id + '" shortest violating path length: ' + violation.path.length + (violation.path.length === 0 ? ' (initial state)' : ''),
-    path: violation.path,
-    evidence: { invariant: violation.invariant.id },
-  }))
+  // Path-property invariants are included: "for any invariant that fails" is this
+  // check's contract, and a check that silently skips five of the eight kinds cannot
+  // honour it. The searches for the state kinds, for sequence, atomicity and budget
+  // are breadth-first, so their first witness is the shortest one; the leads-to walk
+  // and the probability bound have no such guarantee, and their message says what it
+  // found instead of claiming minimality.
+  const violations = runInvariants(model, options, true)
+  const findings: Finding[] = violations.map((violation) => {
+    const pathLength = violation.path.length
+    const message = isPathPropertyInvariant(violation.invariant)
+      ? 'Invariant "' + violation.invariant.id + '" violated: ' + violation.reason
+        + (pathLength === 0 ? '' : ' (witness path length: ' + pathLength + ')')
+      : 'Invariant "' + violation.invariant.id + '" shortest violating path length: ' + pathLength + (pathLength === 0 ? ' (initial state)' : '')
+    return {
+      code: 'A7_SHORTEST_COUNTEREXAMPLE',
+      severity: 'warning' as const,
+      message,
+      path: violation.path,
+      evidence: { invariant: violation.invariant.id },
+    }
+  })
   return checkResult('A7', 'Minimal Counter-Example', findings, violations.length === 0 ? 'All invariants hold for all reachable paths' : 'Violated invariants: ' + findings.length)
 }
 
@@ -1614,6 +1719,25 @@ function mapInvariantForComparison(invariant: InvariantSpec, mapping: Record<str
     }
     return mapped
   }
+  if (invariant.kind === 'leads-to') {
+    // A target set maps member by member; a rename that drops a state is reported by
+    // D2's own mapped-state check rather than silently changing the property.
+    return {
+      ...invariant,
+      id: invariant.id + ':before',
+      description: invariant.description + ' (from BEFORE)',
+      from: mapStateId(mapping, invariant.from),
+      to: typeof invariant.to === 'string' ? mapStateId(mapping, invariant.to) : invariant.to.map((state) => mapStateId(mapping, state)),
+    }
+  }
+  if (invariant.kind === 'probability') {
+    return {
+      ...invariant,
+      id: invariant.id + ':before',
+      description: invariant.description + ' (from BEFORE)',
+      target: mapStateId(mapping, invariant.target),
+    }
+  }
   return { ...invariant, id: invariant.id + ':before', description: invariant.description + ' (from BEFORE)' }
 }
 
@@ -1653,8 +1777,36 @@ function D2_invariantContinuity(before: LogicModelV1, after: LogicModelV1, optio
         })
         continue
       }
+    } else if (mapped.kind === 'leads-to') {
+      // The state references of a path-property invariant must follow stateMapping too,
+      // otherwise a pure rename searches for a state AFTER does not declare.
+      for (const state of [mapped.from, ...leadsToTargets(mapped)]) {
+        if (!afterStates.has(state)) {
+          findings.push({
+            code: 'D2_MAPPED_STATE_MISSING',
+            severity: 'warning',
+            message: 'BEFORE invariant "' + invariant.id + '" maps to state ' + state + ', which is not declared in AFTER.',
+            evidence: { invariant: invariant.id, state },
+          })
+        }
+      }
+    } else if (mapped.kind === 'probability') {
+      if (!afterStates.has(mapped.target)) {
+        findings.push({
+          code: 'D2_MAPPED_STATE_MISSING',
+          severity: 'warning',
+          message: 'BEFORE invariant "' + invariant.id + '" maps to state ' + mapped.target + ', which is not declared in AFTER.',
+          evidence: { invariant: invariant.id, state: mapped.target },
+        })
+      }
     }
-    const violation = shortestViolationForInvariant(after, options, mapped)
+    // Every invariant the engine can decide is re-decided against AFTER. Path-property
+    // kinds go through the same searches their dedicated probes use, so D2 can no
+    // longer report "all BEFORE invariants continue to hold" while A9-A13 fail on the
+    // very same model.
+    const violation = isPathPropertyInvariant(mapped)
+      ? pathPropertyViolation(after, options, mapped)
+      : shortestViolationForInvariant(after, options, mapped)
     if (violation !== undefined) {
       findings.push({
         code: 'D2_INVARIANT_REGRESSION',
@@ -2353,16 +2505,10 @@ function computeHitProbability(model: LogicModelV1, options: NormalizedOptions, 
 
 function A13_probability(model: LogicModelV1, options: NormalizedOptions): CheckResult {
   const findings: Finding[] = []
-  const eps = 1e-9
   for (const invariant of model.invariants ?? []) {
     if (invariant.kind !== 'probability') continue
     const { probability, converged } = computeHitProbability(model, options, invariant.target)
-    let violated = false
-    if (invariant.op === '>=') violated = probability < invariant.p - eps
-    else if (invariant.op === '>') violated = probability <= invariant.p + eps
-    else if (invariant.op === '<=') violated = probability > invariant.p + eps
-    else violated = probability >= invariant.p - eps
-    if (violated) {
+    if (probabilityViolated(invariant, probability)) {
       findings.push({
         code: 'A13_PROBABILITY_VIOLATION',
         severity: 'error',
