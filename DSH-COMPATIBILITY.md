@@ -14,7 +14,7 @@ releases listed in `dsh.compatibility.dshReleases` (author-remediation track
 | npm | 11.13.0 |
 | pnpm | 11.21.0 |
 | Test date | 2026-09-25 (headless rounds) · 2026-09-29 (live-field and degradation rounds) · 2026-10-05 (headless round for 0.2.1-alpha.1) |
-| Package under test | `dsh-logicprobe` 0.8.0 (bundle patch `cordis.patch.yml`, entry id `logicprobe`) |
+| Package under test | `dsh-logicprobe` 0.8.1 (bundle patch `cordis.patch.yml`, entry id `logicprobe`) |
 
 ## Method (one disposable profile per version)
 
@@ -147,21 +147,25 @@ carries the `logicprobe:mode` section. The 0.1.5-alpha.2, 0.1.5-rc.1, 0.1.5-rc.2
 ## Results
 
 The results fall into three groups, kept apart on purpose. The first group is the row
-re-measured against the 0.8.0 build on 2026-10-05. The second group is the rows
+re-measured on the 0.8.x builds (0.2.1-alpha.1). The second group is the rows
 re-measured against the 0.7.1 build on 2026-09-29. The third group is the rows carried
 over from earlier rounds. A carried-over row is still declared compatible. It was
 produced by an earlier round's procedure, though, and was not re-run against this
 build, so presenting it as newly verified would overstate the evidence.
 
-### Re-measured this round against `0.8.0` (2026-10-05)
+### Re-measured on `0.2.1-alpha.1` (`0.8.0` on 2026-10-05, `0.8.1` on 2026-10-06)
 
 | dsh release | install | host boot | uninstall | rows active | client bundles in `__DSH_BOOT__` | settings namespace served | Web switch |
 |---|---|---:|---:|---|---:|---:|---|
 | 0.2.1-alpha.1 | pass | pass | pass | not probed (headless round) | not probed | not probed | not probed |
 
-Both plugins cleared the same four steps on this release, each against its own fresh
-`DSH_HOME`. Those plugins are `dsh-logicprobe` 0.8.0 and the sibling
+Both releases cleared the same four steps on this dsh release, each against its own
+fresh `DSH_HOME`. The plugins are `dsh-logicprobe` and the sibling
 `dsh-embedded-workbench` 0.9.1.
+
+0.8.1 re-ran the identical procedure and passed identically. That release changes only
+`lib/engine.js` (an A9 `leads-to` fix) with its tests, so the DSH-facing seams are the
+same code the 0.8.0 row measured.
 
 The round ran twice. The first pass was at 22:02. The second pass was at 22:33, after
 an internal fix to the bundled UML module. Every step passed identically in both, so
