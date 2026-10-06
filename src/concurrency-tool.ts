@@ -13,7 +13,7 @@ export const LOGICPROBE_CONCURRENCY_SCAN_TOOL_NAME = 'logicprobe_concurrency_sca
 export const logicProbeConcurrencyScanTool = defineTool({
   name: LOGICPROBE_CONCURRENCY_SCAN_TOOL_NAME,
   description:
-    'Scan a document or plan text for concurrency risk points. Use ONLY after confirming the target actually has concurrency requirements or behavior (threads, async tasks, interrupts, shared state, parallel execution). If the target is purely sequential, do not call this tool. Returns findings for keywords like thread-safe, lock-free, data race, race condition, atomic, synchronized, mutex, semaphore, shared variable, reentrant, interrupt-safe. Absolute claims (thread-safe, lock-free, no data race) are flagged as errors requiring dedicated verification.',
+    'Scan a document or plan text for concurrency risk points. Use ONLY after confirming the target actually has concurrency requirements or behavior (threads, async tasks, interrupts, shared state, parallel execution). If the target is purely sequential, do not call this tool. Returns findings for keywords like thread-safe, lock-free, wait-free, data race, race condition, atomic, synchronized, mutex, semaphore, spinlock, shared variable, shared memory, reentrant, interrupt-safe, ISR, IRQ, NMI, critical section, disable_irq/enable_irq. Absolute claims (thread-safe, lock-free, no data race, interrupt-safe, ISR-safe) are flagged as errors requiring dedicated verification, and each carries suggestions naming the analysis to run instead (TSan/Helgrind, CBMC, TLA+, or RTOS-aware interrupt analysis). logicprobe does not prove concurrency safety.',
   parameters: {
     text: {
       type: 'string',

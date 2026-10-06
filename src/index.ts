@@ -75,7 +75,7 @@ export type InteractionMode = 'ask' | 'auto' | 'follow-approval'
 const DEFAULT_GATE_CONTENT = `<EXTREMELY_IMPORTANT>
 Plugin logicprobe is active. Documents are not truth — code is. Verify every verifiable claim before accepting or acting on any design.
 
-**1% Rule**: If there is even a 1% chance the logicprobe skill applies — reviewing design documents, architecture specs, technical proposals, or refactoring plans that make claims about API names, file locations, enum values, mechanism feasibility, state machines, protocol logic, data models, schema migrations, data invariants, or behavioral guarantees ("always"/"never"/"guaranteed") — load it with the skill tool before responding. The cost of loading is trivial compared to the cost of a false claim.
+**1% Rule**: If there is even a 1% chance the logicprobe skill applies — reviewing design documents, architecture specs, technical proposals, or refactoring plans that make claims about API names, file locations, enum values, mechanism feasibility, state machines, protocol logic, data models, schema migrations, data invariants, behavioral guarantees ("always"/"never"/"guaranteed"), worst-case path cost or declared budgets, probabilistic reachability ("≥90% of runs reach SAFE"), deadlines ("must leave within 2 ticks"), cross-machine handshakes, or concurrency guarantees ("thread-safe"/"lock-free"/"ISR-safe") — load it with the skill tool before responding. The cost of loading is trivial compared to the cost of a false claim.
 
 **Red Flags** — if you think any of these, STOP. You are rationalizing:
 
@@ -86,7 +86,16 @@ Plugin logicprobe is active. Documents are not truth — code is. Verify every v
 | "I'll verify while implementing" | Verification happens before implementation, not during. |
 | "I can check this with reasoning alone" | Behavioral claims are verified with code/models, not intuition. One counter-example refutes a universal claim. |
 
-**Native verification path**: In dsh, prefer the \`logicprobe_verify\` tool for state-machine checks and \`logicprobe_datamodel_verify\` for data-model/schema migration checks. Both support before/after regression and common domain constraints (idempotency, monotonic, sequence, leads-to, atomicity). To model a code flow as UML, or to audit such a modelling, use \`logicprobe_uml\` (render | parse | review). Python harnesses remain the fallback for non-dsh hosts.
+**Native verification path** (dsh) — six model-invocable tools:
+
+- \`logicprobe_verify\` — state machines: S1-S8 structural + A1-A14 adversarial, including A12 worst-case path cost against a declared \`budget\`, A13 probabilistic reachability over a DTMC, and A14 discrete-tick deadlines. Pass \`beforeModel\` + \`stateMapping\` to add the D1-D4 before/after regression.
+- \`logicprobe_datamodel_verify\` — data models and schema migrations: DS/DA checks, migration coverage, copy consistency, rollback symmetry, DD1-DD4 data regression.
+- \`logicprobe_compose_verify\` — two or more machines checked together (rendezvous handshake semantics): C1 composition deadlock, C2 rendezvous that never fires.
+- \`logicprobe_concurrency_scan\` — mine concurrency claims (thread-safe, lock-free, race condition, mutex, ISR-safe) and route them to dedicated verification; logicprobe does not prove concurrency safety.
+- \`logicprobe_export\` — emit external-checker input from a verified model: UPPAAL, TLA+, PRISM, SPIN.
+- \`logicprobe_uml\` — model a code flow as UML (render), read a diagram back into a model (parse), or audit the modelling (review: UML001-UML019 structural defects, documentation gaps, diagram-versus-model round-trip fidelity).
+
+Python harnesses in the skill references remain the fallback for non-dsh hosts.
 
 **Proactive suggestion**: When a user asks code-level behavioral questions — "could this state machine deadlock", "is this retry limit safe", "check this timing sequence for bugs", "is this migration non-breaking", "does this copy cover all required fields" — suggest logicprobe as an optional verification pass (do not auto-escalate).
 </EXTREMELY_IMPORTANT>`
@@ -211,7 +220,7 @@ function resolveInteraction(config: Config, session: Session): 'ask' | 'auto' {
 function modeContextText(config: Config, session: Session): string {
   const interaction = resolveInteraction(config, session)
   const lines = [
-    'logicprobe: use `logicprobe_verify` for state machines and `logicprobe_datamodel_verify` for data models; both cover before/after regression and common domain constraints.',
+    'logicprobe: native tools — `logicprobe_verify` (state machines: S1-S8 + A1-A14, incl. A12 budget/worst-case path cost, A13 probabilistic reachability, A14 deadlines; `beforeModel` adds D1-D4 regression), `logicprobe_datamodel_verify` (data models and schema migrations: DS/DA, migration coverage, copy consistency, rollback symmetry, DD1-DD4), `logicprobe_compose_verify` (two or more machines: C1 composition deadlock, C2 rendezvous never fires), `logicprobe_concurrency_scan` (mine concurrency claims — it does not prove concurrency safety), `logicprobe_export` (UPPAAL, TLA+, PRISM, SPIN input from a verified model).',
     'logicprobe: use `logicprobe_uml` to model a code flow as UML (render), to read a UML diagram back into a model (parse), or to audit the modelling (review: structural defects, documentation gaps, diagram-vs-model round-trip fidelity).',
     interaction === 'auto'
       ? 'logicprobe interaction=auto: do NOT call ask_user_question for model confirmation; run round-trip validation of the extracted transition table and mark the result UNCONFIRMED.'
