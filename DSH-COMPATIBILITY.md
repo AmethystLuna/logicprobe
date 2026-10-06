@@ -14,7 +14,7 @@ releases listed in `dsh.compatibility.dshReleases` (author-remediation track
 | npm | 11.13.0 |
 | pnpm | 11.21.0 |
 | Test date | 2026-09-25 (headless rounds) · 2026-09-29 (live-field and degradation rounds) · 2026-10-05 (headless round for 0.2.1-alpha.1) |
-| Package under test | `dsh-logicprobe` 0.8.1 (bundle patch `cordis.patch.yml`, entry id `logicprobe`) |
+| Package under test | `dsh-logicprobe` 0.9.0 (bundle patch `cordis.patch.yml`, entry id `logicprobe`) |
 
 ## Method (one disposable profile per version)
 
@@ -152,6 +152,20 @@ re-measured against the 0.7.1 build on 2026-09-29. The third group is the rows c
 over from earlier rounds. A carried-over row is still declared compatible. It was
 produced by an earlier round's procedure, though, and was not re-run against this
 build, so presenting it as newly verified would overstate the evidence.
+
+### `0.9.0` — no measured row
+
+This release changes model-visible text and version strings, and nothing on a
+DSH-facing seam: it registers the same six tools through the same `ctx.tools.register`
+calls, injects through the same `agent/pre-step` listener, registers the same
+`logicprobe:mode` prompt context and the same skills provider. The 0.8.0 and 0.8.1 rows
+below therefore remain the reference for the seams they exercised.
+
+The `Package under test` row above is synced by `scripts/bump-version.mjs`; it is not a
+measurement. No install / mount / boot / uninstall round has been run against 0.9.0, so
+that row must not be read as evidence for this build. Run the disposable-profile
+procedure below against 0.9.0 and add its row before this release is treated as
+measured.
 
 ### Re-measured on `0.2.1-alpha.1` (`0.8.0` on 2026-10-05, `0.8.1` on 2026-10-06)
 
