@@ -1,6 +1,6 @@
 ---
 name: logicprobe
-description: "Use when reviewing design documents, architecture specs, technical proposals, or refactoring plans that make claims about API names, file locations, enum values, or mechanism feasibility. When the document contains state machines, protocol logic, or behavioral claims (≥3 states, ACK/NACK/retry sequences, 'always'/'never'/'guaranteed' assertions, or refactoring that modifies state topology), escalate into logic-primitive verification — generate and run executable models to check mathematical completeness before trusting any claim. For refactoring specifically, the pipeline compares before/after models to verify behavioral preservation and regression freedom. ALSO use when the task is to model a code flow as UML, or to audit a diagram somebody drew. That covers reverse-engineering a handler and documenting a protocol. The skill renders the model as a state, activity or sequence diagram, reads a hand-drawn diagram back into a model, and reviews the modelling: unreachable states, dead ends, ambiguous branches, documentation gaps, and diagram-versus-model fidelity. ALSO proactively SUGGEST this skill (do not require) when a user asks code-level behavioral questions — 'check this timing for bugs', 'could this state machine deadlock', 'is this retry limit safe' — since plan-level verification has usually already been done."
+description: "Use when reviewing design documents, architecture specs, technical proposals, or refactoring plans that make claims about API names, file locations, enum values, or mechanism feasibility. Escalate into logic-primitive verification — generate and run an executable model before trusting the claim — when the document asserts state-machine or protocol behaviour (≥3 states, ACK/NACK/retry sequences, guards, lock/unlock pairing), a quantitative or temporal guarantee (worst-case path cost ≤ budget, P(reach SAFE) ≥ p, 'must leave within 2 ticks'), a cross-machine handshake (req/ack, power-up sequencing between two components), concurrency guarantees ('thread-safe', 'lock-free', 'ISR-safe' — mined and routed, never proven here), or a refactoring that changes state topology or guard conditions, where the pipeline compares before/after models for behavioral preservation and regression freedom. ALSO use when the task is to model a code flow as UML, or to audit a diagram somebody drew: the skill renders the model as a state, activity or sequence diagram, reads a hand-drawn diagram back into a model, and reviews the modelling — unreachable states, dead ends, ambiguous branches, documentation gaps, diagram-versus-model round-trip fidelity. Data-model, schema and migration claims belong to the sibling logicprobe-datamodel skill. ALSO proactively SUGGEST this skill (do not require) when a user asks code-level behavioral questions — 'check this timing for bugs', 'could this state machine deadlock', 'is this retry limit safe' — since plan-level verification has usually already been done."
 ---
 
 # Logic Probe
@@ -147,6 +147,19 @@ UML modelling variant (the task is to draw a flow, not to check a claim):
     → logicprobe_verify → the behavioural checks (S1-S8 / A1-A14)
 ```
 
+### Native dsh Tools
+
+| Tool | Covers |
+|------|--------|
+| `logicprobe_verify` | S1-S8 structural + A1-A14 adversarial, including A12 budget / worst-case path cost, A13 probabilistic reachability over a DTMC, and A14 discrete-tick deadlines. `beforeModel` + `stateMapping` add the D1-D4 before/after regression. |
+| `logicprobe_datamodel_verify` | Data models and schema migrations: DS/DA checks plus the DD1-DD4 data regression. See the `logicprobe-datamodel` skill. |
+| `logicprobe_compose_verify` | Two or more machines checked together (rendezvous handshake semantics): C1 composition deadlock, C2 rendezvous never fires. |
+| `logicprobe_concurrency_scan` | Mines concurrency claims (thread-safe, lock-free, race condition, mutex, ISR-safe) and routes them to dedicated verification. It does not prove concurrency safety. |
+| `logicprobe_export` | Emits external-checker input from a verified model: UPPAAL, TLA+, PRISM, SPIN. |
+| `logicprobe_uml` | render / parse / review for UML modelling — see [UML Modelling and Modelling Review](#uml-modelling-and-modelling-review). |
+
+`references/logicprobe-engine.py` mirrors the same checks and carries `compose` and `export` subcommands for hosts without the native tools.
+
 ### Refactoring Verification Mode
 
 When the document under review is a refactoring plan (modifying existing state machine logic, not designing from scratch), adapt the pipeline:
@@ -206,7 +219,7 @@ Run these SECOND. Each probe actively tries to BREAK the model. If any probe suc
 | A4 | **Pair symmetry** | Match every `start/stop`, `lock/unlock`, `alloc/free` pair. Flag if any state allows a path where a pair is unbalanced (start without stop, lock without unlock). State `onEntry`/`onExit` actions are treated as implicit acquire/release. | "Resources are always released" |
 | A5 | **Boundary blast** | Probe counters at 0, 1, max-1, max, max+1. Probe timestamps at 0, tick_wraparound. Flag overflow, underflow, or undefined behavior. | "Handles all counter/timer values" |
 | A6 | **Resource injection** | Simulate `malloc→NULL`, `queue→full`, `semaphore→timeout` at each state that calls them. Flag if any state has no recovery path. | "Graceful degradation under resource pressure" |
-| A7 | **Minimal counter-example** | For any invariant that fails, find the SHORTEST event sequence that violates it (BFS from init to violating state). Output the exact path. | "This invariant holds" → refuted by shortest path |
+| A7 | **Counter-example witness** | For any invariant that fails, find the event sequence that violates it and output the exact path. Breadth-first searches (state predicates, sequence, atomicity, budget) yield the shortest witness; the leads-to walk and the probability bound report the witness they found without claiming minimality. | "This invariant holds" → refuted by a concrete path |
 | A8 | **Idempotent replay** | For each event declared in `idempotentEvents`, apply it twice from every reachable state. Flag if the second application changes state or is not replayable. | "This event is safe to retry/replay" |
 | A9 | **Leads-to** | From a declared source state, every path must eventually reach the target state, or reach one member of a declared target set. | "This state always progresses to completion" |
 | A10 | **Sequence order** | Events declared in a sequence must occur in the specified order. | "backup before modify before commit" |
