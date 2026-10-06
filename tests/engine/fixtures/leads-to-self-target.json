@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "init": "A",
+  "states": [
+    {
+      "id": "A"
+    },
+    {
+      "id": "B",
+      "terminal": true
+    }
+  ],
+  "transitions": [
+    {
+      "from": "A",
+      "event": "go",
+      "to": "B"
+    }
+  ],
+  "invariants": [
+    {
+      "id": "a-reaches-a",
+      "description": "control: the target is the source, so every run satisfies it at once",
+      "kind": "leads-to",
+      "from": "A",
+      "to": "A"
+    }
+  ]
+}

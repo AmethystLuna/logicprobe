@@ -1870,28 +1870,55 @@ def S8_monotonic_variables(model):
 
 
 def _find_leads_to_bad_path(model, start, target):
+    # Find a run from start that never reaches target, or None when every run does.
+    # The property is universal (see the A9 row in SKILL.md): one branch that loops
+    # forever, or that stops before the target, refutes it.
+    #
+    # Depth-first walk of the run graph with three colours; target runs are success
+    # leaves that are never expanded. A node reached while it is on the current walk
+    # (GRAY) closes a cycle that avoids the target. A node with no outgoing step at
+    # all stops the machine where it stands, which is the same violation for a
+    # different reason. A node whose walk completed without a violation is BLACK, and
+    # reaching it again from another branch is a shared sub-graph, not a cycle -- that
+    # is why the colour map cannot be a plain visited set: a diamond (two branches
+    # rejoining) is acyclic and must pass, while a genuine cycle must not. A run is
+    # identified by its state plus its variable values.
     if start['state'] == target:
         return None
-    visited = set()
-    queue = deque([{'runtime': start, 'path': []}])
-    while queue:
-        entry = queue.popleft()
-        k = _runtime_key(entry['runtime'])
-        if entry['runtime']['state'] == target:
+    GRAY = 1
+    BLACK = 2
+    color = {}
+    stack = [{'runtime': start, 'path': [], 'nexts': None, 'index': 0}]
+    color[_runtime_key(start)] = GRAY
+    while stack:
+        frame = stack[-1]
+        if frame['nexts'] is None:
+            nexts = []
+            for event in _all_events(model):
+                for nxt in _step_runtime(model, frame['runtime'], event):
+                    nexts.append({'next': nxt, 'event': event})
+            frame['nexts'] = nexts
+            if not nexts:
+                return {'path': frame['path'], 'reason': 'Dead end before target ' + target}
+        if frame['index'] >= len(frame['nexts']):
+            color[_runtime_key(frame['runtime'])] = BLACK
+            stack.pop()
             continue
-        if k in visited:
-            return {'path': entry['path'], 'reason': 'Cycle avoids target ' + target}
-        visited.add(k)
-        nexts = []
-        for event in _all_events(model):
-            for nxt in _step_runtime(model, entry['runtime'], event):
-                nexts.append({'next': nxt, 'event': event})
-        if not nexts:
-            return {'path': entry['path'], 'reason': 'Dead end before target ' + target}
-        for item in nexts:
-            queue.append({'runtime': item['next'],
-                          'path': list(entry['path']) + [{'from': entry['runtime']['state'], 'event': item['event'], 'to': item['next']['state']}]})
-    return {'path': [], 'reason': 'No path reaches target ' + target}
+        item = frame['nexts'][frame['index']]
+        frame['index'] += 1
+        step = {'from': frame['runtime']['state'], 'event': item['event'], 'to': item['next']['state']}
+        if item['next']['state'] == target:
+            continue
+        key = _runtime_key(item['next'])
+        seen = color.get(key)
+        if seen == GRAY:
+            return {'path': frame['path'] + [step], 'reason': 'Cycle avoids target ' + target}
+        if seen == BLACK:
+            continue
+        color[key] = GRAY
+        stack.append({'runtime': item['next'], 'path': frame['path'] + [step], 'nexts': None, 'index': 0})
+    # Every branch either reached the target or rejoined a branch that did.
+    return None
 
 
 def A9_leads_to(model, exploration):

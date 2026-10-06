@@ -247,7 +247,63 @@ const cases = [
     errors: 1,
     findings: [{ check: 'A4', code: 'A4_TERMINAL_WITH_RESOURCE' }],
   },
+  // A9 leads-to. The property is universal: every run from `from` must reach `to`.
+  // These cases pin both directions, so the check cannot regress into an existential
+  // "some run reaches it" test, and a shared node cannot be mistaken for a cycle.
+  {
+    name: 'leads-to-direct.json',
+    errors: 0,
+    findings: [],
+  },
+  {
+    name: 'leads-to-chain.json',
+    errors: 0,
+    findings: [],
+  },
+  {
+    name: 'leads-to-diamond.json',
+    errors: 0,
+    findings: [],
+  },
+  {
+    name: 'leads-to-self-target.json',
+    errors: 0,
+    findings: [],
+  },
+  {
+    name: 'leads-to-cycle-avoids.json',
+    errors: 1,
+    findings: [{ check: 'A9', code: 'A9_LEADS_TO_VIOLATION' }],
+    assert: (report) => {
+      const finding = leadsToFinding(report)
+      if (!finding.message.includes('Cycle avoids target B')) {
+        throw new Error('expected the cycle reason, got: ' + finding.message)
+      }
+    },
+  },
+  {
+    name: 'leads-to-dead-end.json',
+    errors: 2,
+    findings: [
+      { check: 'A9', code: 'A9_LEADS_TO_VIOLATION' },
+      { check: 'S2', code: 'S2_NO_TRANSITIONS' },
+    ],
+    assert: (report) => {
+      const finding = leadsToFinding(report)
+      if (!finding.message.includes('Dead end before target B')) {
+        throw new Error('expected the dead-end reason, got: ' + finding.message)
+      }
+    },
+  },
 ]
+
+/** The single A9 violation a leads-to fixture is expected to carry. */
+function leadsToFinding(report) {
+  const check = report.checks.find((entry) => entry.id === 'A9')
+  const finding = check?.findings.find((entry) => entry.code === 'A9_LEADS_TO_VIOLATION')
+  if (finding === undefined) throw new Error('expected an A9_LEADS_TO_VIOLATION finding')
+  return finding
+}
 
 let failures = 0
 for (const testCase of cases) {

@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 1,
+  "init": "A",
+  "states": [
+    {
+      "id": "A"
+    },
+    {
+      "id": "B",
+      "terminal": true
+    }
+  ],
+  "transitions": [
+    {
+      "from": "A",
+      "event": "go",
+      "to": "B"
+    },
+    {
+      "from": "A",
+      "event": "wait",
+      "to": "A"
+    }
+  ],
+  "invariants": [
+    {
+      "id": "a-reaches-b",
+      "description": "B is reachable, but the wait loop never reaches it, so not every run does",
+      "kind": "leads-to",
+      "from": "A",
+      "to": "B"
+    }
+  ]
+}

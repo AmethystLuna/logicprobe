@@ -1824,26 +1824,68 @@ function S8_monotonicVariables(model: LogicModelV1): CheckResult {
   return checkResult('S8', 'Monotonic Variables', findings, findings.length === 0 ? 'Monotonic variables are respected' : 'Monotonic findings: ' + findings.length)
 }
 
+/**
+ * Find a run from `start` that never reaches `target`, or return undefined when
+ * every run does. The property is universal (see the A9 row in `SKILL.md`): one
+ * branch that loops forever, or that stops before the target, refutes it.
+ *
+ * The search is a depth-first walk of the run graph with three colours, and target
+ * runs are success leaves that are never expanded:
+ *
+ * - a node reached while it is on the current walk (GRAY) closes a cycle that avoids
+ *   the target, so some run never reaches it;
+ * - a node with no outgoing step at all stops the machine where it stands, which is
+ *   the same violation for a different reason;
+ * - a node whose walk completed without a violation is BLACK, and reaching it again
+ *   from another branch is a shared sub-graph, not a cycle.
+ *
+ * That last point is why the colour map cannot be a plain visited set: a diamond
+ * (two branches rejoining) is acyclic and must pass, while a genuine cycle must not.
+ * A run is identified by its state plus its variable values, so the same state id
+ * with different values is a different node.
+ */
 function findLeadsToBadPath(model: LogicModelV1, start: RuntimeState, target: string): { path: PathStep[]; reason: string } | undefined {
   if (start.state === target) return undefined
-  const visited = new Set<string>()
-  const queue: Array<{ runtime: RuntimeState; path: PathStep[] }> = [{ runtime: start, path: [] }]
-  while (queue.length > 0) {
-    const entry = queue.shift()!
-    const key = runtimeKey(entry.runtime)
-    if (entry.runtime.state === target) continue
-    if (visited.has(key)) return { path: entry.path, reason: 'Cycle avoids target ' + target }
-    visited.add(key)
-    const nexts: Array<{ next: RuntimeState; event: string }> = []
-    for (const event of allEvents(model)) {
-      for (const next of stepRuntime(model, entry.runtime, event)) nexts.push({ next, event })
-    }
-    if (nexts.length === 0) return { path: entry.path, reason: 'Dead end before target ' + target }
-    for (const { next, event } of nexts) {
-      queue.push({ runtime: next, path: [...entry.path, { from: entry.runtime.state, event, to: next.state }] })
-    }
+  const GRAY = 1
+  const BLACK = 2
+  interface LeadFrame {
+    runtime: RuntimeState
+    path: PathStep[]
+    /** Outgoing steps, filled on first expansion; `undefined` means "not expanded yet". */
+    nexts: Array<{ next: RuntimeState; event: string }> | undefined
+    index: number
   }
-  return { path: [], reason: 'No path reaches target ' + target }
+  const color = new Map<string, number>()
+  const stack: LeadFrame[] = [{ runtime: start, path: [], nexts: undefined, index: 0 }]
+  color.set(runtimeKey(start), GRAY)
+  while (stack.length > 0) {
+    const frame = stack[stack.length - 1]
+    if (frame.nexts === undefined) {
+      const nexts: Array<{ next: RuntimeState; event: string }> = []
+      for (const event of allEvents(model)) {
+        for (const next of stepRuntime(model, frame.runtime, event)) nexts.push({ next, event })
+      }
+      frame.nexts = nexts
+      if (nexts.length === 0) return { path: frame.path, reason: 'Dead end before target ' + target }
+    }
+    if (frame.index >= frame.nexts.length) {
+      color.set(runtimeKey(frame.runtime), BLACK)
+      stack.pop()
+      continue
+    }
+    const { next, event } = frame.nexts[frame.index]
+    frame.index += 1
+    const step: PathStep = { from: frame.runtime.state, event, to: next.state }
+    if (next.state === target) continue
+    const key = runtimeKey(next)
+    const seen = color.get(key)
+    if (seen === GRAY) return { path: [...frame.path, step], reason: 'Cycle avoids target ' + target }
+    if (seen === BLACK) continue
+    color.set(key, GRAY)
+    stack.push({ runtime: next, path: [...frame.path, step], nexts: undefined, index: 0 })
+  }
+  // Every branch either reached the target or rejoined a branch that did.
+  return undefined
 }
 
 function A9_leadsTo(model: LogicModelV1, exploration: Exploration): CheckResult {

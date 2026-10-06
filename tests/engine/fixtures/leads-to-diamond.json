@@ -1,0 +1,50 @@
+{
+  "schemaVersion": 1,
+  "init": "A",
+  "states": [
+    {
+      "id": "A"
+    },
+    {
+      "id": "B"
+    },
+    {
+      "id": "C"
+    },
+    {
+      "id": "D",
+      "terminal": true
+    }
+  ],
+  "transitions": [
+    {
+      "from": "A",
+      "event": "go",
+      "to": "B"
+    },
+    {
+      "from": "A",
+      "event": "alt",
+      "to": "C"
+    },
+    {
+      "from": "B",
+      "event": "x",
+      "to": "C"
+    },
+    {
+      "from": "C",
+      "event": "z",
+      "to": "D"
+    }
+  ],
+  "invariants": [
+    {
+      "id": "a-reaches-d",
+      "description": "two branches rejoin at C, so every run still reaches D; a shared node is not a cycle",
+      "kind": "leads-to",
+      "from": "A",
+      "to": "D"
+    }
+  ]
+}

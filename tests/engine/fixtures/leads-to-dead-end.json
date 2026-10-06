@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 1,
+  "init": "A",
+  "states": [
+    {
+      "id": "A"
+    },
+    {
+      "id": "B",
+      "terminal": true
+    },
+    {
+      "id": "C"
+    }
+  ],
+  "transitions": [
+    {
+      "from": "A",
+      "event": "go",
+      "to": "B"
+    },
+    {
+      "from": "A",
+      "event": "stall",
+      "to": "C"
+    }
+  ],
+  "invariants": [
+    {
+      "id": "a-reaches-b",
+      "description": "C has no outgoing transition, so a run that takes stall never reaches B",
+      "kind": "leads-to",
+      "from": "A",
+      "to": "B"
+    }
+  ]
+}
