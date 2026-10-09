@@ -54,7 +54,7 @@ export interface BaselineReport {
 }
 
 /**
- * The stable identity of a finding: the check + code + a canonical locator. Prose is
+ * The stable identity of a finding: check + file + code + a canonical locator. Prose is
  * excluded so a reworded message reads as `changed`, not as a new finding.
  */
 export function findingIdentity(finding: ReportFinding): string {
@@ -63,7 +63,8 @@ export function findingIdentity(finding: ReportFinding): string {
     ...(finding.path === undefined ? {} : { path: finding.path }),
   })
   const where = locator === '{}' ? 'message:' + finding.message : locator
-  return (finding.check === undefined ? '' : finding.check + '|') + finding.code + '|' + where
+  const file = finding.file === undefined ? '' : finding.file + '|'
+  return (finding.check === undefined ? '' : finding.check + '|') + file + finding.code + '|' + where
 }
 
 /** Flatten a report of any family into one finding list (`checks[].findings` or `findings[]`). */

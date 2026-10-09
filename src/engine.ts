@@ -210,6 +210,10 @@ export interface Finding {
   message: string
   /** Longer explanation: the shortest-path note, the per-machine reasons, the quoted source lines. */
   detail?: string
+  /** The artefact the finding is about (a diagram name, a file path) — set when one report covers several. */
+  file?: string
+  /** 1-based line in that artefact, when the check knows it. */
+  line?: number
   path?: PathStep[]
   evidence?: Record<string, unknown>
 }
@@ -363,6 +367,7 @@ export const REPORT_SCHEMAS = {
   umlParse: 'logicprobe/uml/parse/v1',
   umlReview: 'logicprobe/uml/review/v1',
   structure: 'logicprobe/structure/v1',
+  granularity: 'logicprobe/granularity/v1',
   baseline: 'logicprobe/baseline/v1',
 } as const
 

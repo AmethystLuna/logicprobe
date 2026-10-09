@@ -1,6 +1,8 @@
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { JsonValue } from './json-value.js'
+import { REPORT_SCHEMAS } from './engine.js'
 import { reviewStructure } from './structure.js'
+import { reviewGranularity, type GranularityDiagram } from './granularity.js'
 
 export const LOGICPROBE_STRUCTURE_TOOL_NAME = 'logicprobe_structure_verify'
 
@@ -19,8 +21,11 @@ export const logicProbeStructureTool = defineTool({
   parameters: {
     diagram: {
       type: 'string',
-      required: true,
-      description: 'Structure-diagram source text: PlantUML component/package/class/deployment, or a Mermaid class diagram.',
+      description: 'Structure-diagram source text: PlantUML component/package/class/deployment, or a Mermaid class diagram. Omit when `diagrams` is given.',
+    },
+    diagrams: {
+      type: 'json',
+      description: 'Multi-granularity mode: an array of {name, diagram, parent?} levels. Each diagram is checked on its own AND against its declared parent (UML028 unknown parent, UML029 refinement violation, UML030 parent cycle), with per-pair node/edge counts.',
     },
     notation: {
       type: 'string',
@@ -44,6 +49,16 @@ export const logicProbeStructureTool = defineTool({
   timeoutMs: 10_000,
   isConcurrencySafe: () => true,
   async execute(args) {
+    if (args.diagrams !== undefined) {
+      return reviewGranularity({
+        diagrams: args.diagrams as unknown as GranularityDiagram[],
+        notation: (args.notation ?? 'auto') as 'auto' | 'plantuml' | 'mermaid',
+        ...(args.matrix === undefined ? {} : { matrix: args.matrix }),
+      }) as unknown as JsonValue
+    }
+    if (args.diagram === undefined) {
+      return { ok: false, ran: false, verdict: 'fail', verdictReason: 'the tool did not run: pass `diagram` (one structure diagram) or `diagrams` (several levels with parents)', schema: REPORT_SCHEMAS.structure, errorCode: 'UML_INPUT', error: 'structure review needs `diagram` or `diagrams`' } as unknown as JsonValue
+    }
     return reviewStructure({
       diagram: args.diagram,
       notation: (args.notation ?? 'auto') as 'auto' | 'plantuml' | 'mermaid',

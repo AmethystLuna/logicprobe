@@ -16,9 +16,10 @@ The claim-verification doctrine it inherits — cite evidence, read `verdict` an
 | "Review this architecture", "are the module dependencies sound", "is the layering right" | Parse the structure diagram into a graph, then run the structural checks below |
 | A component / package / class / deployment diagram (PlantUML) or a Mermaid class diagram | `logicprobe_structure_verify` reads nodes, containers, labels and arrows; nothing is discarded |
 | A rule table of allowed dependencies (allow/deny, layers, required edges) | Every edge is judged against it and reported with the rule ids it matched |
+| One architecture drawn at several levels (repository / module / subdirectory) | `diagrams: [{name, diagram, parent}]`: each level is checked on its own, then against its declared parent, with the per-pair node/edge/expansion counts (`UML028`-`UML031`) |
 | A diagram that must be reconciled with an include/graph check over the source | The per-edge rule ids are the meeting point: a difference between the two is the finding worth chasing |
 
-Non-DSH hosts run the same engine: `python skills/logicprobe/references/logicprobe-engine.py structure diagram.puml --matrix matrix.json` (an exact mirror, cross-checked by `tests/python/run.mjs`).
+Non-DSH hosts run the same engine: `python skills/logicprobe/references/logicprobe-engine.py structure diagram.puml --matrix matrix.json` (an exact mirror, cross-checked by `tests/python/run.mjs`), and `… granularity manifest.json` for a multi-level set.
 
 ## What It Checks
 
@@ -31,6 +32,10 @@ Non-DSH hosts run the same engine: `python skills/logicprobe/references/logicpro
 | `UML024_LAYER_VIOLATION` | error | An edge from a lower declared layer into a higher one (a child depending on its parent). Downward edges are allowed. |
 | `UML025_MISSING_EXPECTED_EDGE` | warning | A rule with `require: true` whose edge the diagram does not draw — including the case where no node matches the source pattern at all. The matrix and the diagram disagree. |
 | `UML026_NO_NODES` | error | The text declares no node, so there is no structure to review. |
+| `UML028_UNKNOWN_PARENT` | error | A level names a parent that is not in the set. |
+| `UML029_REFINEMENT_VIOLATION` | error | Multi-level only: a child invents a dependency at the parent level, or drops a parent edge instead of expanding it into a path. |
+| `UML030_PARENT_CYCLE` | error | The declared parent relation is not a forest. |
+| `UML031_NO_DIAGRAMS` | error | Nothing was supplied to compare. |
 
 ## The Dependency Matrix
 

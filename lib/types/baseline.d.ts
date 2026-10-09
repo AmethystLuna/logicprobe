@@ -55,7 +55,7 @@ export interface BaselineReport {
     nextSteps: string[];
 }
 /**
- * The stable identity of a finding: the check + code + a canonical locator. Prose is
+ * The stable identity of a finding: check + file + code + a canonical locator. Prose is
  * excluded so a reworded message reads as `changed`, not as a new finding.
  */
 export declare function findingIdentity(finding: ReportFinding): string;

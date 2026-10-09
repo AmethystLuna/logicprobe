@@ -787,6 +787,50 @@ check('compose C2 reason + truncation caveat parity', () => {
   if (!req.message.includes('artefact of the cap')) throw new Error('python must caveat a truncated result: ' + req.message)
 })
 
+// ---- multi-granularity parity ----------------------------------------------
+// The manifest-based CLI must produce the same refinement report as the inline API,
+// including the per-pair expansion/invention table and the diagram hashes.
+const { reviewGranularity } = await import('../../lib/granularity.js')
+
+check('granularity parity (root + refined child)', () => {
+  const puml = (...lines) => ['@startuml', ...lines, '@enduml'].join('\n')
+  const root = puml('component [SVC] as SVC', 'component [PAY] as PAY', 'component [DB] as DB', 'SVC --> PAY', 'PAY --> DB')
+  const child = puml('component [SVC] as SVC', 'component [PAY] as PAY', 'component [DB] as DB', 'component [Retry] as RETRY', 'SVC --> RETRY', 'RETRY --> PAY', 'PAY --> DB')
+  const rootFile = writeDiagram(root)
+  const childFile = writeDiagram(child)
+  const manifest = join(tmpDir, 'granularity-manifest.json')
+  writeFileSync(manifest, JSON.stringify({ diagrams: [
+    { name: 'L0', file: rootFile.replaceAll('\\', '/') },
+    { name: 'L1', file: childFile.replaceAll('\\', '/'), parent: 'L0' },
+  ] }), 'utf8')
+  const expected = reviewGranularity({ diagrams: [{ name: 'L0', diagram: root }, { name: 'L1', diagram: child, parent: 'L0' }] })
+  const actual = pythonRun(['granularity', manifest])
+  if (!actual.out) throw new Error('python returned no JSON' + (actual.stderr ? ': ' + actual.stderr : ''))
+  const diffs = deepDiff(expected, actual.out)
+  if (diffs.length) throw new Error(diffs.slice(0, 6).join(' | '))
+  if (actual.out.verdict !== 'pass' || actual.code !== 0) throw new Error('a refinement passes and exits 0')
+  if (actual.out.pairs[0].expandedEdges.length !== 1) throw new Error('the expansion must be reported')
+})
+
+check('granularity parity (invented edge fails)', () => {
+  const puml = (...lines) => ['@startuml', ...lines, '@enduml'].join('\n')
+  const root = puml('component [SVC] as SVC', 'component [PAY] as PAY', 'SVC --> PAY')
+  const child = puml('component [SVC] as SVC', 'component [PAY] as PAY', 'SVC --> PAY', 'PAY --> SVC')
+  const rootFile = writeDiagram(root)
+  const childFile = writeDiagram(child)
+  const manifest = join(tmpDir, 'granularity-manifest-bad.json')
+  writeFileSync(manifest, JSON.stringify({ diagrams: [
+    { name: 'L0', file: rootFile.replaceAll('\\', '/') },
+    { name: 'L1', file: childFile.replaceAll('\\', '/'), parent: 'L0' },
+  ] }), 'utf8')
+  const expected = reviewGranularity({ diagrams: [{ name: 'L0', diagram: root }, { name: 'L1', diagram: child, parent: 'L0' }] })
+  const actual = pythonRun(['granularity', manifest])
+  if (!actual.out) throw new Error('python returned no JSON')
+  const diffs = deepDiff(expected, actual.out)
+  if (diffs.length) throw new Error(diffs.slice(0, 6).join(' | '))
+  if (actual.out.verdict !== 'fail' || actual.code !== 2) throw new Error('an invented dependency fails and exits 2')
+})
+
 rmSync(tmpDir, { recursive: true, force: true })
 if (failures > 0) { console.log('python parity failed:', failures); process.exit(1) }
 console.log('all python parity checks passed')

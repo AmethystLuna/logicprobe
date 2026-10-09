@@ -117,6 +117,54 @@ The diagram and an include/dependency scan over the source are two representatio
 
 Never present the diagram's clean verdict as evidence about the code: it is evidence about the drawing. The reconciliation is the part that touches the source.
 
+## Multi-granularity: one architecture at several levels
+
+A module-level diagram and the repository-level diagram it belongs to are two views of one
+fact, and nothing keeps them in step. Declare the relation and both are checked:
+
+```text
+logicprobe_structure_verify  { diagrams: [ { name, diagram, parent? }, … ] }
+logicprobe-engine.py granularity manifest.json     # { "diagrams": [ { "name": "L1", "file": "L1.puml", "parent": "L0" }, … ] }
+```
+
+Per-diagram structural checks run first (UML020-UML026), and every finding is tagged with
+the `file` it came from, so a report over several levels never carries an anonymous
+finding. Then each declared pair is checked:
+
+| Code | Severity | What it means |
+|---|---|---|
+| `UML028_UNKNOWN_PARENT` | error | The `parent` names a diagram that is not in the set. |
+| `UML029_REFINEMENT_VIOLATION` | error | **invented-edge**: the child draws a dependency between two nodes the parent also has, but the parent does not. **unexpanded-edge**: the parent draws an edge between two nodes the child also has, the child does not draw it, and no child path connects the same ends. |
+| `UML030_PARENT_CYCLE` | error | The parent relation contains a cycle, so "which level owns this dependency" has no answer. |
+| `UML031_NO_DIAGRAMS` | error | Nothing was supplied to compare. |
+
+The rule is *refinement*, not equality: a child may add nodes and edges **below** the
+parent level (an edge with an endpoint the parent does not have is the child's own
+detail), and it may cover a **subtree** of the parent — a parent edge whose ends are not
+both present in the child is out of scope for that level, not dropped. What it may never
+do is invent a dependency at the parent level, or silently drop one it should have
+expanded.
+
+Each pair is summarised so the counts can be read without diffing two diagrams by eye:
+
+```json
+{ "parent": "L0", "child": "L1",
+  "parentNodes": 3, "childNodes": 4, "parentEdges": 2, "childEdges": 4,
+  "inheritedEdges": 1, "newEdges": 2,
+  "expandedEdges": [{ "from": "SVC", "to": "PAY", "line": 5 }],
+  "missingEdges": [], "inventedEdges": [] }
+```
+
+A parent edge the child replaces with a path is a **legitimate expansion**, and it is
+listed in `expandedEdges` rather than silently accepted: a reviewer confirms each one,
+because that is where a refactoring quietly changes who calls whom. `hashes.diagrams`
+records a sha256 per level, so a baseline diff can tell which level moved.
+
+The same discipline as the single-diagram review applies: this checks the *diagrams*
+against each other, not against the code. A level that is consistent with its parent but
+not with the code is a drawing bug; a level that disagrees with its parent is a hierarchy
+bug. Both need the source-side scan to settle.
+
 ## Extracting the matrix from an existing rule table
 
 A machine-checked rule table (an include/dependency checker, a lint config, a review checklist) can seed the matrix: one rule entry per row, `id` = the row's own number so citations line up, `source`/`allow`/`deny` = the row's patterns, `layers` = the layering the table describes. Review the result before trusting it — a translation that silently widens `deny` into `allow` is worse than no check. Keep both files under version control together, and treat a matrix change as a code change.

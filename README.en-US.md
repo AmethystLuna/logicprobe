@@ -159,6 +159,8 @@ A component diagram is not a state machine; it is a directed **dependency graph*
 | `UML024_LAYER_VIOLATION` | error | An upward edge between declared layers (downward is allowed, upward is not) |
 | `UML025_MISSING_EXPECTED_EDGE` | warning | A `require: true` edge the diagram does not draw: the matrix and the diagram disagree |
 
+**Multi-level**: the same set can be supplied by level — `diagrams: [{name, diagram, parent}]`. Each level runs the structural checks above (findings tagged with the `file` they came from), then every declared pair is checked for **refinement**: a child must not invent a dependency between nodes its parent also has, and must not drop a parent edge without expanding it into a path (expansions are listed in `expandedEdges` for a reviewer to confirm). A cyclic parent relation is `UML030`, an unknown parent `UML028`, an empty set `UML031`. Each pair reports its node/edge/inherited/new/expanded/missing/invented counts (`pairs[]`), and every level is hashed (`hashes.diagrams`), so a baseline diff can tell which level moved. Commands: `structure diagram.puml` for one diagram, `granularity manifest.json` for several levels.
+
 The dependency matrix is the single source of truth:
 
 ```json

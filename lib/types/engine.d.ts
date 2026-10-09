@@ -181,6 +181,10 @@ export interface Finding {
     message: string;
     /** Longer explanation: the shortest-path note, the per-machine reasons, the quoted source lines. */
     detail?: string;
+    /** The artefact the finding is about (a diagram name, a file path) — set when one report covers several. */
+    file?: string;
+    /** 1-based line in that artefact, when the check knows it. */
+    line?: number;
     path?: PathStep[];
     evidence?: Record<string, unknown>;
 }
@@ -293,6 +297,7 @@ export declare const REPORT_SCHEMAS: {
     readonly umlParse: 'logicprobe/uml/parse/v1';
     readonly umlReview: 'logicprobe/uml/review/v1';
     readonly structure: 'logicprobe/structure/v1';
+    readonly granularity: 'logicprobe/granularity/v1';
     readonly baseline: 'logicprobe/baseline/v1';
 };
 export type ReportSchema = typeof REPORT_SCHEMAS[keyof typeof REPORT_SCHEMAS];

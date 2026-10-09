@@ -277,6 +277,7 @@ REPORT_SCHEMAS = {
     'umlParse': 'logicprobe/uml/parse/v1',
     'umlReview': 'logicprobe/uml/review/v1',
     'structure': 'logicprobe/structure/v1',
+    'granularity': 'logicprobe/granularity/v1',
     'baseline': 'logicprobe/baseline/v1',
 }
 
@@ -5904,6 +5905,215 @@ def review_structure(options):
 
 
 # ---------------------------------------------------------------------------
+# Multi-granularity structure review (mirror of src/granularity.ts)
+#
+# One architecture at several levels of detail: a child diagram must be a refinement of
+# its declared parent. A level that invents a parent-level dependency, or drops one
+# without expanding it into a path, breaks the hierarchy as a rule source.
+# ---------------------------------------------------------------------------
+
+def _granularity_reaches(graph, frm, to):
+    adjacency = {}
+    for node in graph['nodes']:
+        adjacency[node['id']] = []
+    for edge in graph['edges']:
+        adjacency.get(edge['from'], []).append(edge['to'])
+    seen = set([frm])
+    queue = deque([frm])
+    while queue:
+        current = queue.popleft()
+        for nxt in adjacency.get(current, []):
+            if nxt == to:
+                return True
+            if nxt in seen:
+                continue
+            seen.add(nxt)
+            queue.append(nxt)
+    return False
+
+
+def _granularity_parent_cycle(diagrams):
+    by_name = dict((entry['name'], entry) for entry in diagrams)
+    for start in diagrams:
+        path = [start['name']]
+        seen = set([start['name']])
+        cursor = start.get('parent')
+        while cursor is not None:
+            if cursor in seen:
+                path.append(cursor)
+                return path
+            seen.add(cursor)
+            path.append(cursor)
+            cursor = by_name.get(cursor, {}).get('parent')
+    return None
+
+
+def review_granularity(options):
+    """Review a set of structure diagrams with declared parent relations."""
+    diagrams = options['diagrams']
+    findings = []
+    warnings = []
+    diagram_summaries = []
+    graphs = {}
+
+    if not diagrams:
+        findings.append({'code': 'UML031_NO_DIAGRAMS', 'severity': 'error',
+                         'message': 'no diagram was supplied, so there are no granularity levels to compare.'})
+
+    cycle = _granularity_parent_cycle(diagrams)
+    if cycle is not None:
+        findings.append({
+            'code': 'UML030_PARENT_CYCLE',
+            'severity': 'error',
+            'message': 'the declared parent relation has a cycle: ' + ' → '.join(cycle) + '. A refinement hierarchy must be a forest, or "which level owns this dependency" has no answer.',
+            'evidence': {'cycle': cycle},
+        })
+
+    known_names = set(entry['name'] for entry in diagrams)
+    for entry in diagrams:
+        parent = entry.get('parent')
+        if parent is not None and parent not in known_names:
+            findings.append({
+                'code': 'UML028_UNKNOWN_PARENT',
+                'severity': 'error',
+                'message': 'diagram "' + entry['name'] + '" declares parent "' + parent + '", which is not part of this set.',
+                'file': entry['name'],
+                'evidence': {'diagram': entry['name'], 'parent': parent, 'known': sorted(known_names)},
+            })
+        report = review_structure({'diagram': entry['diagram'],
+                                   'notation': options.get('notation') or 'auto',
+                                   **({} if options.get('matrix') is None else {'matrix': options['matrix']})})
+        graphs[entry['name']] = report['graph']
+        # Tag every finding with the diagram it came from: with several diagrams in one
+        # report, an untagged finding is unactionable.
+        for finding in report['findings']:
+            findings.append({**finding, 'file': entry['name']})
+        warnings.extend(entry['name'] + ': ' + warning for warning in report['warnings'])
+        summary = {'name': entry['name'], 'notation': report['notation'], 'nodes': report['summary']['nodes'],
+                   'edges': report['summary']['edges'], 'verdict': report['verdict'],
+                   'findings': len(report['findings'])}
+        if parent is not None:
+            summary['parent'] = parent
+        diagram_summaries.append(summary)
+
+    pairs = []
+    for child in diagrams:
+        parent_name = child.get('parent')
+        if parent_name is None:
+            continue
+        parent_graph = graphs.get(parent_name)
+        child_graph = graphs.get(child['name'])
+        if parent_graph is None or child_graph is None:
+            continue
+        parent_nodes = set(node['id'] for node in parent_graph['nodes'])
+        child_nodes = set(node['id'] for node in child_graph['nodes'])
+        parent_edges = set(edge['from'] + '\u0000' + edge['to'] for edge in parent_graph['edges'])
+        child_edges = set(edge['from'] + '\u0000' + edge['to'] for edge in child_graph['edges'])
+
+        inherited_edges = 0
+        new_edges = 0
+        invented_edges = []
+        for edge in child_graph['edges']:
+            has_from = edge['from'] in parent_nodes
+            has_to = edge['to'] in parent_nodes
+            if not has_from or not has_to:
+                new_edges += 1
+                continue
+            if edge['from'] + '\u0000' + edge['to'] in parent_edges:
+                inherited_edges += 1
+                continue
+            invented_edges.append({'from': edge['from'], 'to': edge['to'], 'line': edge['line']})
+
+        expanded_edges = []
+        missing_edges = []
+        for edge in parent_graph['edges']:
+            if edge['from'] + '\u0000' + edge['to'] in child_edges:
+                continue
+            # The child only has to answer for a parent edge whose ends it also carries.
+            if edge['from'] not in child_nodes or edge['to'] not in child_nodes:
+                continue
+            entry = {'from': edge['from'], 'to': edge['to'], 'line': edge['line']}
+            if _granularity_reaches(child_graph, edge['from'], edge['to']):
+                expanded_edges.append(entry)
+            else:
+                missing_edges.append(entry)
+
+        if invented_edges:
+            findings.append({
+                'code': 'UML029_REFINEMENT_VIOLATION',
+                'severity': 'error',
+                'message': 'diagram "' + child['name'] + '" draws ' + str(len(invented_edges)) + ' dependency(ies) between nodes its parent "' + parent_name + '" also has, but the parent does not: '
+                           + ', '.join(edge['from'] + ' → ' + edge['to'] for edge in invented_edges)
+                           + '. A refinement may add detail below the parent level, never a dependency at the parent level.',
+                'file': child['name'],
+                'evidence': {'kind': 'invented-edge', 'parent': parent_name, 'edges': invented_edges},
+            })
+        if missing_edges:
+            findings.append({
+                'code': 'UML029_REFINEMENT_VIOLATION',
+                'severity': 'error',
+                'message': 'diagram "' + child['name'] + '" drops ' + str(len(missing_edges)) + ' dependency(ies) its parent "' + parent_name + '" draws, without expanding them into a path: '
+                           + ', '.join(edge['from'] + ' → ' + edge['to'] for edge in missing_edges) + '.',
+                'file': child['name'],
+                'evidence': {'kind': 'unexpanded-edge', 'parent': parent_name, 'edges': missing_edges},
+            })
+        pairs.append({
+            'parent': parent_name,
+            'child': child['name'],
+            'parentNodes': len(parent_nodes),
+            'childNodes': len(child_nodes),
+            'parentEdges': len(parent_graph['edges']),
+            'childEdges': len(child_graph['edges']),
+            'inheritedEdges': inherited_edges,
+            'newEdges': new_edges,
+            'expandedEdges': expanded_edges,
+            'missingEdges': missing_edges,
+            'inventedEdges': invented_edges,
+        })
+
+    errors = len([finding for finding in findings if finding['severity'] == 'error'])
+    warning_count = len([finding for finding in findings if finding['severity'] == 'warning'])
+    invented = sum(len(pair['inventedEdges']) for pair in pairs)
+    missing = sum(len(pair['missingEdges']) for pair in pairs)
+    expanded = sum(len(pair['expandedEdges']) for pair in pairs)
+
+    next_steps = []
+    if errors > 0:
+        next_steps.append('Fix the refinement violations first: a level that invents or drops a parent-level dependency makes the hierarchy unusable as a rule source.')
+    if not pairs and diagrams:
+        next_steps.append('Give the levels a `parent` so the refinement can be checked; a set of unrelated diagrams has no consistency property to verify.')
+    if expanded > 0:
+        next_steps.append(str(expanded) + ' parent edge(s) are drawn as a path in the child — that is a legitimate expansion, and it is listed per pair so a reviewer can confirm each one.')
+    next_steps.append('Reconcile the levels with the source-side scan: the diagram pair is consistent or not, and neither says anything about the code until it is scanned.')
+
+    return {
+        'ok': True,
+        'ran': True,
+        **verdict_of_findings(findings),
+        'schema': REPORT_SCHEMAS['granularity'],
+        'diagrams': diagram_summaries,
+        'pairs': pairs,
+        'findings': findings,
+        'summary': {
+            'diagrams': len(diagrams),
+            'roots': len([entry for entry in diagrams if entry.get('parent') is None]),
+            'pairs': len(pairs),
+            'nodes': sum(len(graphs.get(entry['name'], {'nodes': []})['nodes']) for entry in diagrams),
+            'edges': sum(len(graphs.get(entry['name'], {'edges': []})['edges']) for entry in diagrams),
+            'inventedEdges': invented,
+            'missingEdges': missing,
+            'expandedEdges': expanded,
+            'errors': errors,
+            'warnings': warning_count,
+        },
+        'hashes': {'diagrams': [{'name': entry['name'], 'hash': hashlib.sha256(entry['diagram'].encode('utf-8')).hexdigest()}
+                                for entry in diagrams]},
+        'warnings': warnings,
+        'nextSteps': next_steps,
+    }
+
+
+# ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
 
@@ -5999,7 +6209,8 @@ def _cmd_uml_render(args):
 
 def _cmd_uml_parse(args):
     try:
-        with open(args.diagram, 'r', encoding='utf-8') as handle:
+        # newline='' keeps the bytes as they are on disk: the diagram hash must not depend on the checkout's line endings.
+        with open(args.diagram, 'r', encoding='utf-8', newline='') as handle:
             text = handle.read()
         result = parse_uml(text, args.notation)
     except (OSError, ValueError) as exc:
@@ -6015,7 +6226,8 @@ def _cmd_uml_parse(args):
 
 def _cmd_structure(args):
     try:
-        with open(args.diagram, 'r', encoding='utf-8') as handle:
+        # newline='' keeps the bytes as they are on disk: the diagram hash must not depend on the checkout's line endings.
+        with open(args.diagram, 'r', encoding='utf-8', newline='') as handle:
             text = handle.read()
         options = {'diagram': text}
         if args.notation is not None and args.notation != 'auto':
@@ -6029,13 +6241,39 @@ def _cmd_structure(args):
     _emit_report(report, args.baseline)
 
 
+def _cmd_granularity(args):
+    try:
+        manifest = _load_json_file(args.manifest)
+        diagrams = []
+        for entry in manifest.get('diagrams') or []:
+            diagram = {'name': entry['name'], 'diagram': entry.get('diagram')}
+            if entry.get('file'):
+                # newline='' keeps the bytes as they are on disk: the diagram hash must not depend on the checkout's line endings.
+                with open(entry['file'], 'r', encoding='utf-8', newline='') as handle:
+                    diagram['diagram'] = handle.read()
+            if entry.get('parent') is not None:
+                diagram['parent'] = entry['parent']
+            diagrams.append(diagram)
+        options = {'diagrams': diagrams}
+        if args.notation is not None and args.notation != 'auto':
+            options['notation'] = args.notation
+        if args.matrix:
+            options['matrix'] = _load_json_file(args.matrix)
+        report = review_granularity(options)
+    except (OSError, KeyError, ValueError) as exc:
+        print(json.dumps(_refusal_json(exc)))
+        sys.exit(2)
+    _emit_report(report, args.baseline)
+
+
 def _cmd_uml_review(args):
     try:
         options = {}
         if args.model:
             options['model'] = _load_json_file(args.model)
         if args.diagram:
-            with open(args.diagram, 'r', encoding='utf-8') as handle:
+            # newline='' keeps the bytes as they are on disk: the diagram hash must not depend on the checkout's line endings.
+            with open(args.diagram, 'r', encoding='utf-8', newline='') as handle:
                 options['diagram'] = handle.read()
         if args.notation is not None:
             options['notation'] = args.notation
@@ -6105,6 +6343,12 @@ def _build_parser():
     p_structure.add_argument('--matrix', help='dependency matrix JSON: {rules, layers, default}')
     p_structure.add_argument('--baseline', metavar='REPORT', help='compare against an earlier report and print the diff')
     p_structure.set_defaults(func=_cmd_structure)
+    p_granularity = sub.add_parser('granularity', help='review several structure diagrams with declared parents (UML028-UML031)')
+    p_granularity.add_argument('manifest', help='JSON: {diagrams: [{name, file|diagram, parent?}]}')
+    p_granularity.add_argument('--notation', choices=['auto', 'plantuml', 'mermaid'], default='auto')
+    p_granularity.add_argument('--matrix', help='dependency matrix applied to every level')
+    p_granularity.add_argument('--baseline', metavar='REPORT', help='compare against an earlier report and print the diff')
+    p_granularity.set_defaults(func=_cmd_granularity)
     return parser
 
 

@@ -157,6 +157,8 @@ pnpm 会把该版本写进 profile 的 `pnpm-workspace.yaml` 的 `minimumRelease
 | `UML024_LAYER_VIOLATION` | error | 从下层指向已声明上层的反向依赖（向下允许、向上禁止） |
 | `UML025_MISSING_EXPECTED_EDGE` | warning | `require: true` 要求存在的边图里没有；矩阵与图不一致 |
 
+**多粒度**:同一套图可以按层级给出来 —— `diagrams: [{name, diagram, parent}]` —— 每一层先各自跑上面的结构检查(发现按 `file` 标注来源),再逐对做**细化校验**:子图不得在父层节点之间凭空造出依赖,也不得丢掉父图的边而不把它展开成路径(展开成路径的会列进 `expandedEdges` 供人确认);父图关系成环报 `UML030`,父图未知名报 `UML028`。每对还给出节点/边/继承/新增/展开/丢失/造出的计数(`pairs[]`),并给每层记 sha256(`hashes.diagrams`),这样"哪一层动了"可以由 `--baseline` 直接算出来。命令:`structure diagram.puml` 审单图,`granularity manifest.json` 审多层。
+
 依赖矩阵就是单一事实源，JSON 形式：
 
 ```json
