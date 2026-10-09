@@ -508,8 +508,8 @@ const archivedModel = {
   init: 'A',
   states: [{ id: 'A', _note: 'power-on' }, { id: 'B', terminal: true }],
   transitions: [{ from: 'A', event: 'go', to: 'B' }],
-  _source: 'docs/uml/axis-state-machine.model.json',
-  _verified: { modelHash: '5f83e994153c9f53c2303029d3cfc4140f32b75f868c63b69fdbcf1586c41351' },
+  _source: 'docs/uml/order-service.model.json',
+  _verified: { modelHash: '00000000000000000000000000000000000000000000000000000000deadbeef' },
 }
 
 check('metadata keys + hashSpec parity', () => {
@@ -555,7 +555,7 @@ check('--hash-check answers for a published hash and for an unrecorded one', () 
   if (!hit.out || hit.out.matches.join(',') !== 'v1' || hit.code !== 0) {
     throw new Error('a v1 hash must be recognised: ' + JSON.stringify(hit.out))
   }
-  const miss = pythonRun(['verify', f, '--hash-check', '5f83e994153c9f53c2303029d3cfc4140f32b75f868c63b69fdbcf1586c41351'])
+  const miss = pythonRun(['verify', f, '--hash-check', '00000000000000000000000000000000000000000000000000000000deadbeef'])
   if (!miss.out || miss.out.matches.length !== 0 || miss.code !== 2) {
     throw new Error('an unrecorded hash must be reported as such: ' + JSON.stringify(miss.out))
   }
@@ -566,13 +566,13 @@ check('--hash-check answers for a published hash and for an unrecorded one', () 
 
 const structureDiagram = [
   '@startuml',
-  'component [Motion Service] as MS',
-  'component [Locator Adapter] as LA',
+  'component [Order Service] as SVC',
+  'component [Payment Adapter] as PAY',
   'package "HAL" {',
-  '  component [AT32 Driver] as DRV',
+  '  component [Storage Driver] as DRV',
   '}',
-  'MS --> LA : request',
-  'LA --> DRV : read',
+  'SVC --> PAY : request',
+  'PAY --> DRV : read',
   '@enduml',
 ].join('\n')
 
@@ -595,7 +595,7 @@ check('structure-diagram review parity + failing exit code', () => {
 })
 
 check('another Mermaid family refusal parity', () => {
-  const text = ['classDiagram', '  class MotionService', '  MotionService --> LocatorAdapter'].join('\n')
+  const text = ['classDiagram', '  class OrderService', '  OrderService --> PaymentAdapter'].join('\n')
   const actual = pythonRun(['uml-parse', writeDiagram(text)])
   if (!actual.out || actual.out.ok !== false) throw new Error('python did not refuse the family')
   if (actual.out.errorCode !== 'UML_NOT_A_STATE_DIAGRAM') throw new Error('python errorCode: ' + actual.out.errorCode)
@@ -612,31 +612,31 @@ const { parseStructure, reviewStructure } = await import('../../lib/structure.js
 const structurePuml = [
   '@startuml',
   'package "app" {',
-  '  component [Motion Service] as MS',
-  '  component [Locator Adapter] as LA',
+  '  component [Order Service] as SVC',
+  '  component [Payment Adapter] as PAY',
   '}',
   'package "hal" {',
-  '  component [AT32 Driver] as DRV',
+  '  component [Storage Driver] as DRV',
   '}',
   'component [Orphan Cache] as CACHE',
   'component [Persistence] as DB',
-  'MS --> LA : plan',
-  'LA --> DRV : read',
-  'DRV --> MS : fault',
-  'MS --> GHOST : unknown',
-  'LA --> DB : store',
+  'SVC --> PAY : plan',
+  'PAY --> DRV : read',
+  'DRV --> SVC : fault',
+  'SVC --> GHOST : unknown',
+  'PAY --> DB : store',
   '@enduml',
 ].join('\n')
 
 const structureMatrix = {
   rules: [
-    { id: 'R1-app-may-use-hal', source: 'MS', allow: ['LA'], deny: ['DRV'] },
-    { id: 'R2-adapter-owns-hal', source: 'LA', allow: ['DRV'], deny: ['MS'] },
-    { id: 'R3-no-back-edges', source: '*', deny: ['MS'] },
-    { id: 'R4-persistence-required', source: 'LA', allow: ['DB'], require: true },
-    { id: 'R5-ghost-required', source: 'MS', allow: ['NOPE'], require: true },
+    { id: 'R1-app-may-use-hal', source: 'SVC', allow: ['PAY'], deny: ['DRV'] },
+    { id: 'R2-adapter-owns-hal', source: 'PAY', allow: ['DRV'], deny: ['SVC'] },
+    { id: 'R3-no-back-edges', source: '*', deny: ['SVC'] },
+    { id: 'R4-persistence-required', source: 'PAY', allow: ['DB'], require: true },
+    { id: 'R5-ghost-required', source: 'SVC', allow: ['NOPE'], require: true },
   ],
-  layers: [{ name: 'app', members: ['MS', 'LA'] }, { name: 'hal', members: ['DRV'] }],
+  layers: [{ name: 'app', members: ['SVC', 'PAY'] }, { name: 'hal', members: ['DRV'] }],
   default: 'deny',
 }
 
@@ -685,7 +685,7 @@ check('structure matrix-invalid parity', () => {
 })
 
 check('structure mermaid class-diagram parity', () => {
-  const text = ['classDiagram', '  class MotionService', '  class LocatorAdapter', '  MotionService --> LocatorAdapter : uses'].join('\n')
+  const text = ['classDiagram', '  class OrderService', '  class PaymentAdapter', '  OrderService --> PaymentAdapter : uses'].join('\n')
   const expected = reviewStructure({ diagram: text })
   const actual = pythonRun(['structure', writeDiagram(text)])
   if (!actual.out) throw new Error('python returned no JSON')

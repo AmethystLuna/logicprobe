@@ -41,19 +41,19 @@ function findFinding(report, code) {
 const componentDiagram = [
   '@startuml',
   'package "app" {',
-  '  component [Motion Service] as MS',
-  '  component [Locator Adapter] as LA',
+  '  component [Order Service] as SVC',
+  '  component [Payment Adapter] as PAY',
   '}',
   'package "hal" {',
-  '  component [AT32 Driver] as DRV',
+  '  component [Storage Driver] as DRV',
   '}',
   'component [Orphan Cache] as CACHE',
   'component [Persistence] as DB',
-  'MS --> LA : plan',
-  'LA --> DRV : read',
-  'DRV --> MS : fault',
-  'MS --> GHOST : unknown',
-  'LA --> DB : store',
+  'SVC --> PAY : plan',
+  'PAY --> DRV : read',
+  'DRV --> SVC : fault',
+  'SVC --> GHOST : unknown',
+  'PAY --> DB : store',
   '@enduml',
 ].join('\n')
 
@@ -63,13 +63,13 @@ test('parse: declarations, aliases, labels, containers and nesting', () => {
   const graph = parseStructure(componentDiagram)
   const byId = new Map(graph.nodes.map((node) => [node.id, node]))
   if (byId.size !== 8) throw new Error('expected 8 nodes, got ' + [...byId.keys()].join(','))
-  const ms = byId.get('MS')
-  if (ms.label !== 'Motion Service') throw new Error('alias label lost: ' + JSON.stringify(ms))
+  const ms = byId.get('SVC')
+  if (ms.label !== 'Order Service') throw new Error('alias label lost: ' + JSON.stringify(ms))
   if (ms.parent !== 'app') throw new Error('package nesting lost: ' + JSON.stringify(ms))
   if (byId.get('app').container !== true) throw new Error('a package is a container')
   if (byId.get('CACHE').parent !== undefined) throw new Error('a top-level node has no parent')
   if (graph.edges.length !== 5) throw new Error('expected 5 edges, got ' + graph.edges.length)
-  const read = graph.edges.find((edge) => edge.from === 'LA' && edge.to === 'DRV')
+  const read = graph.edges.find((edge) => edge.from === 'PAY' && edge.to === 'DRV')
   if (read.label !== 'read') throw new Error('edge label lost: ' + JSON.stringify(read))
   if (read.line !== 12) throw new Error('edge line should be 12, got ' + read.line)
 })
@@ -97,7 +97,7 @@ test('parse: note blocks are not dependencies', () => {
 })
 
 test('parse: a mermaid class diagram reads classes and arrows', () => {
-  const text = ['classDiagram', '  class MotionService', '  class LocatorAdapter', '  MotionService --> LocatorAdapter : uses'].join('\n')
+  const text = ['classDiagram', '  class OrderService', '  class PaymentAdapter', '  OrderService --> PaymentAdapter : uses'].join('\n')
   const graph = parseStructure(text)
   if (graph.notation !== 'mermaid') throw new Error('notation not reported')
   if (graph.nodes.length !== 2 || graph.edges.length !== 1) throw new Error('mermaid class parse: ' + JSON.stringify(graph))
@@ -138,10 +138,10 @@ test('glob: * spans separators, ? is one character, a literal matches itself', (
   if (!globMatches('app.*', 'app.motion')) throw new Error('app.* must match app.motion')
   if (globMatches('app.*', 'hal.app')) throw new Error('app.* must not match hal.app')
   if (!globMatches('*', 'anything.at.all')) throw new Error('* matches everything')
-  if (!globMatches('M?', 'MS')) throw new Error('? matches one character')
-  if (globMatches('M?', 'MSS')) throw new Error('? matches exactly one character')
-  if (!globMatches('MS', 'MS')) throw new Error('a literal matches itself')
-  if (globMatches('MS', 'MSS')) throw new Error('a literal is not a prefix match')
+  if (!globMatches('S?', 'SV')) throw new Error('? matches one character')
+  if (globMatches('S?', 'SVC')) throw new Error('? matches exactly one character')
+  if (!globMatches('SVC', 'SVC')) throw new Error('a literal matches itself')
+  if (globMatches('SVC', 'SVCX')) throw new Error('a literal is not a prefix match')
 })
 
 // ------------------------------------------------------------ structural --
@@ -169,7 +169,7 @@ test('review: dangling endpoint, cycle and orphan all fire on one diagram', () =
     if (findFinding(report, code).length === 0) throw new Error('missing ' + code + ' in ' + JSON.stringify(codes(report)))
   }
   const cycle = findFinding(report, 'UML022_CYCLE')[0]
-  if (JSON.stringify(cycle.evidence.cycle) !== JSON.stringify(['MS', 'LA', 'DRV', 'MS'])) {
+  if (JSON.stringify(cycle.evidence.cycle) !== JSON.stringify(['SVC', 'PAY', 'DRV', 'SVC'])) {
     throw new Error('cycle path: ' + JSON.stringify(cycle.evidence.cycle))
   }
   if (report.verdict !== 'fail') throw new Error('an error finding fails the review')
@@ -186,13 +186,13 @@ test('review: text with no node is an error report, not an empty pass', () => {
 
 const matrix = {
   rules: [
-    { id: 'R1-app-may-use-hal', source: 'MS', allow: ['LA'], deny: ['DRV'] },
-    { id: 'R2-adapter-owns-hal', source: 'LA', allow: ['DRV'], deny: ['MS'] },
-    { id: 'R3-no-back-edges', source: '*', deny: ['MS'] },
-    { id: 'R4-persistence-required', source: 'LA', allow: ['DB'], require: true },
+    { id: 'R1-app-may-use-hal', source: 'SVC', allow: ['PAY'], deny: ['DRV'] },
+    { id: 'R2-adapter-owns-hal', source: 'PAY', allow: ['DRV'], deny: ['SVC'] },
+    { id: 'R3-no-back-edges', source: '*', deny: ['SVC'] },
+    { id: 'R4-persistence-required', source: 'PAY', allow: ['DB'], require: true },
   ],
   layers: [
-    { name: 'app', members: ['MS', 'LA'] },
+    { name: 'app', members: ['SVC', 'PAY'] },
     { name: 'hal', members: ['DRV'] },
   ],
   default: 'deny',
@@ -201,13 +201,13 @@ const matrix = {
 test('matrix: every edge is judged and names the rules it matched', () => {
   const report = reviewStructure({ diagram: componentDiagram, matrix })
   const verdicts = new Map(report.edgeVerdicts.map((verdict) => [verdict.from + '->' + verdict.to, verdict]))
-  const back = verdicts.get('DRV->MS')
-  if (back.allowed !== false || back.basis !== 'deny') throw new Error('R3 must deny DRV→MS: ' + JSON.stringify(back))
+  const back = verdicts.get('DRV->SVC')
+  if (back.allowed !== false || back.basis !== 'deny') throw new Error('R3 must deny DRV→SVC: ' + JSON.stringify(back))
   if (!back.matchedRules.includes('R3-no-back-edges')) throw new Error('the denying rule id must be reported')
-  const unknown = verdicts.get('MS->GHOST')
+  const unknown = verdicts.get('SVC->GHOST')
   if (unknown.allowed !== false || unknown.basis !== 'unlisted') throw new Error('default deny must close the matrix: ' + JSON.stringify(unknown))
-  const read = verdicts.get('LA->DRV')
-  if (read.allowed !== true || read.basis !== 'allow') throw new Error('R2 must allow LA→DRV: ' + JSON.stringify(read))
+  const read = verdicts.get('PAY->DRV')
+  if (read.allowed !== true || read.basis !== 'allow') throw new Error('R2 must allow PAY→DRV: ' + JSON.stringify(read))
   if (report.summary.disallowedEdges !== 2) throw new Error('disallowedEdges: ' + report.summary.disallowedEdges)
   assertNoUndefinedValues(report)
 })
@@ -244,7 +244,7 @@ test('matrix: a layer violation is an upward edge between declared layers', () =
   const violation = findFinding(report, 'UML024_LAYER_VIOLATION')[0]
   if (violation === undefined) throw new Error('expected UML024, got ' + JSON.stringify(codes(report)))
   const entry = violation.evidence.violations[0]
-  if (entry.from !== 'DRV' || entry.to !== 'MS' || entry.fromLayer !== 'hal' || entry.toLayer !== 'app') {
+  if (entry.from !== 'DRV' || entry.to !== 'SVC' || entry.fromLayer !== 'hal' || entry.toLayer !== 'app') {
     throw new Error('violation detail: ' + JSON.stringify(entry))
   }
 })
@@ -256,14 +256,14 @@ test('matrix: a downward edge is not a layer violation', () => {
 })
 
 test('matrix: a required edge that is absent is UML025, including a missing target node', () => {
-  const diagram = ['@startuml', 'component [MS] as MS', 'component [DRV] as DRV', 'MS --> DRV', '@enduml'].join('\n')
-  const absentTarget = reviewStructure({ diagram, matrix: { rules: [{ id: 'R9', source: 'MS', allow: ['DB'], require: true }] } })
+  const diagram = ['@startuml', 'component [SVC] as SVC', 'component [DRV] as DRV', 'SVC --> DRV', '@enduml'].join('\n')
+  const absentTarget = reviewStructure({ diagram, matrix: { rules: [{ id: 'R9', source: 'SVC', allow: ['DB'], require: true }] } })
   const finding = findFinding(absentTarget, 'UML025_MISSING_EXPECTED_EDGE')[0]
   if (finding === undefined) throw new Error('a required edge with no such target node must be reported')
-  if (finding.evidence.missing[0].unsatisfiedFrom.join(',') !== 'MS') throw new Error('the unsatisfied source must be named: ' + JSON.stringify(finding.evidence))
+  if (finding.evidence.missing[0].unsatisfiedFrom.join(',') !== 'SVC') throw new Error('the unsatisfied source must be named: ' + JSON.stringify(finding.evidence))
   const noSource = reviewStructure({ diagram, matrix: { rules: [{ id: 'R9', source: 'NOPE', allow: ['DRV'], require: true }] } })
   if (noSource.findings[0].evidence.missing[0].noSourceMatch !== true) throw new Error('a source pattern matching nothing must be distinguished')
-  const satisfied = reviewStructure({ diagram, matrix: { rules: [{ id: 'R9', source: 'MS', allow: ['DRV'], require: true }] } })
+  const satisfied = reviewStructure({ diagram, matrix: { rules: [{ id: 'R9', source: 'SVC', allow: ['DRV'], require: true }] } })
   if (findFinding(satisfied, 'UML025_MISSING_EXPECTED_EDGE').length !== 0) throw new Error('a satisfied requirement must be silent')
   if (absentTarget.verdict !== 'pass_with_findings') throw new Error('UML025 is a warning: ' + absentTarget.verdict)
 })
@@ -324,7 +324,7 @@ test('guide fixture: the documented example still produces the documented codes'
 
 // The engine is the same in both hosts; this file is read by the Python parity suite.
 test('fixtures on disk parse', () => {
-  const path = new URL('./fixtures/motion-module.puml', import.meta.url)
+  const path = new URL('./fixtures/component-diagram.puml', import.meta.url)
   const report = reviewStructure({ diagram: readFileSync(path, 'utf8') })
   if (report.summary.nodes < 4) throw new Error('fixture did not parse into a graph')
 })

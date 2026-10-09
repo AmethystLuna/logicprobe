@@ -1645,8 +1645,8 @@ async function runReportContractTests() {
   }
   const archived = {
     ...JSON.parse(JSON.stringify(bare)),
-    _source: 'docs/uml/axis-state-machine.model.json',
-    _verified: { modelHash: '5f83e994153c9f53c2303029d3cfc4140f32b75f868c63b69fdbcf1586c41351', at: '2026-10-09' },
+    _source: 'docs/uml/order-service.model.json',
+    _verified: { modelHash: '00000000000000000000000000000000000000000000000000000000deadbeef', at: '2026-10-09' },
     _extraction_caveats: ['guards approximated'],
     states: [{ id: 'A', _note: 'power-on' }, { id: 'B', terminal: true }],
   }

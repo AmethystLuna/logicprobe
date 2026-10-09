@@ -141,13 +141,13 @@ line, ignores the words it does not know, and reads the arrows as state transiti
 
 ```plantuml
 @startuml
-component [Motion Service] as MS
-component [Locator Adapter] as LA
+component [Order Service] as SVC
+component [Payment Adapter] as PAY
 package "HAL" {
-  component [AT32 Driver] as DRV
+  component [Storage Driver] as DRV
 }
-MS --> LA : request
-LA --> DRV : read
+SVC --> PAY : request
+PAY --> DRV : read
 @enduml
 ```
 
@@ -160,7 +160,7 @@ same input returns the by-product **plus**:
   "verdict": "fail",
   "findings": [{ "code": "UML_NOT_A_STATE_DIAGRAM", "severity": "error",
                  "message": "the text is not a state or activity diagram: 4 declaration(s) of unsupported construct(s) (component ×3, package ×1) and 2 arrow(s) between them were read as states and transitions, so the parsed model is not this diagram." }],
-  "discardedConstructs": [{ "construct": "component", "line": 2, "text": "component [Motion Service] as MS" }, "…"],
+  "discardedConstructs": [{ "construct": "component", "line": 2, "text": "component [Order Service] as SVC" }, "…"],
   "discardedEdges": 2
 }
 ```

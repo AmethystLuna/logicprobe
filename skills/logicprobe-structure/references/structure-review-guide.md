@@ -17,7 +17,7 @@ logicprobe-engine.py structure diagram.puml [--notation auto|plantuml|mermaid] [
 
 **What is read**: declarations (with `as` aliases and quoted labels), container nesting (`package "app" { … }`), arrows with labels, and note blocks (skipped — a note is not a dependency). Anything else is reported as `STRUCTURE_IGNORED_LINE` in `warnings`, never silently dropped.
 
-**Node identity**: the alias/id when one exists (`component [Motion Service] as MS` → `MS`), otherwise the declared name. An endpoint that only ever appears in an arrow still becomes a node, marked `declared: false` — that is what `UML021` reports.
+**Node identity**: the alias/id when one exists (`component [Order Service] as SVC` → `SVC`), otherwise the declared name. An endpoint that only ever appears in an arrow still becomes a node, marked `declared: false` — that is what `UML021` reports.
 
 ## Matrix schema
 
@@ -33,7 +33,7 @@ logicprobe-engine.py structure diagram.puml [--notation auto|plantuml|mermaid] [
     }
   ],
   "layers": [
-    { "name": "app", "members": ["MS", "LA"] },   // top first
+    { "name": "app", "members": ["SVC", "PAY"] },   // top first
     { "name": "hal", "members": ["DRV", "DB"] }
   ],
   "default": "allow"           // or "deny": anything unlisted is a violation
@@ -70,17 +70,17 @@ The diagram (a real shape: two packages, an orphan, a back edge, an undeclared e
 ```plantuml
 @startuml
 package "app" {
-  component [Motion Service] as MS
-  component [Locator Adapter] as LA
+  component [Order Service] as SVC
+  component [Payment Adapter] as PAY
 }
 package "hal" {
-  component [AT32 Driver] as DRV
+  component [Storage Driver] as DRV
 }
 component [Orphan Cache] as CACHE
-MS --> LA : plan
-LA --> DRV : read
-DRV --> MS : fault
-MS --> GHOST : unknown
+SVC --> PAY : plan
+PAY --> DRV : read
+DRV --> SVC : fault
+SVC --> GHOST : unknown
 @enduml
 ```
 
@@ -89,16 +89,16 @@ Without a matrix the structural checks already speak:
 ```text
 UML021_DANGLING_REFERENCE (error)   GHOST is never declared
 UML020_ISOLATED_NODE      (warning) CACHE has no edge
-UML022_CYCLE              (error)   MS → LA → DRV → MS
+UML022_CYCLE              (error)   SVC → PAY → DRV → SVC
 verdict: fail
 ```
 
 With the matrix from the skill body (`default: "deny"`, layers `app` over `hal`):
 
 ```text
-UML023_DISALLOWED_EDGE (error)  DRV → MS  basis=deny      (R3-no-back-edges)
-UML023_DISALLOWED_EDGE (error)  MS → GHOST basis=unlisted (no rule allows it)
-UML024_LAYER_VIOLATION (error)  DRV (hal) → MS (app)
+UML023_DISALLOWED_EDGE (error)  DRV → SVC  basis=deny      (R3-no-back-edges)
+UML023_DISALLOWED_EDGE (error)  SVC → GHOST basis=unlisted (no rule allows it)
+UML024_LAYER_VIOLATION (error)  DRV (hal) → SVC (app)
 verdict: fail, disallowedEdges: 2, layerViolations: 1
 ```
 
@@ -119,7 +119,7 @@ Never present the diagram's clean verdict as evidence about the code: it is evid
 
 ## Extracting the matrix from an existing rule table
 
-A machine-checked rule table (an `arch_check.py`, a lint config, a review checklist) can seed the matrix: one rule entry per row, `id` = the row's own number so citations line up, `source`/`allow`/`deny` = the row's patterns, `layers` = the layering the table describes. Review the result before trusting it — a translation that silently widens `deny` into `allow` is worse than no check. Keep both files under version control together, and treat a matrix change as a code change.
+A machine-checked rule table (an include/dependency checker, a lint config, a review checklist) can seed the matrix: one rule entry per row, `id` = the row's own number so citations line up, `source`/`allow`/`deny` = the row's patterns, `layers` = the layering the table describes. Review the result before trusting it — a translation that silently widens `deny` into `allow` is worse than no check. Keep both files under version control together, and treat a matrix change as a code change.
 
 ## Limits
 

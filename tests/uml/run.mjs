@@ -412,13 +412,13 @@ test('review: next steps route to the engine checks that settle what the review 
 // was pure fabrication. A parse of such a file must now be loud and must not pass.
 const componentDiagram = [
   '@startuml',
-  'component [Motion Service] as MS',
-  'component [Locator Adapter] as LA',
+  'component [Order Service] as SVC',
+  'component [Payment Adapter] as PAY',
   'package "HAL" {',
-  '  component [AT32 Driver] as DRV',
+  '  component [Storage Driver] as DRV',
   '}',
-  'MS --> LA : request',
-  'LA --> DRV : read',
+  'SVC --> PAY : request',
+  'PAY --> DRV : read',
   '@enduml',
 ].join('\n')
 
@@ -439,7 +439,7 @@ test('parse: a component diagram reports the constructs it cannot represent', ()
     throw new Error('the message must carry the counts: ' + findings[0].message)
   }
   if (!findings[0].message.includes('2 arrow(s)')) throw new Error('the message must carry the discarded edge count')
-  if (!findings[0].detail.includes('line 2: component [Motion Service] as MS')) throw new Error('the detail must quote the source lines')
+  if (!findings[0].detail.includes('line 2: component [Order Service] as SVC')) throw new Error('the detail must quote the source lines')
 })
 
 test('review: a component diagram never passes, and echoes what it discarded', () => {
@@ -467,7 +467,7 @@ test('review: a component diagram presented as a model is a failed review too', 
 
 test('parse: another Mermaid family is refused by name, with a code', () => {
   let refusal
-  try { parseUml(['classDiagram', '  class MotionService', '  MotionService --> LocatorAdapter'].join('\n')) } catch (error) { refusal = error }
+  try { parseUml(['classDiagram', '  class OrderService', '  OrderService --> PaymentAdapter'].join('\n')) } catch (error) { refusal = error }
   if (!(refusal instanceof UmlError)) throw new Error('expected a UmlError refusal')
   if (refusal.code !== 'UML_NOT_A_STATE_DIAGRAM') throw new Error('refusal code: ' + refusal.code)
   if (!refusal.message.includes('`classDiagram`')) throw new Error('the refusal must name the family: ' + refusal.message)

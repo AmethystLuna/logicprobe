@@ -1,0 +1,18 @@
+@startuml
+' A component diagram with two packages: two packages, a service, an adapter, the HAL driver,
+' an orphan cache that nothing uses, and one arrow into a component nobody declared.
+package "app" {
+  component [Order Service] as SVC
+  component [Payment Adapter] as PAY
+}
+package "hal" {
+  component [Storage Driver] as DRV
+}
+component [Orphan Cache] as CACHE
+component [Persistence] as DB
+SVC --> PAY : plan
+PAY --> DRV : read
+DRV --> SVC : fault
+SVC --> GHOST : unknown
+PAY --> DB : store
+@enduml

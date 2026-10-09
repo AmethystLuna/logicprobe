@@ -1,1 +1,1 @@
-I've got a UML component diagram for our new motion module (a few components, a package, and arrows for the calls between them). Can you check whether the dependencies in it make sense?
+I've got a UML component diagram for our new payment module (a few components, a package, and arrows for the calls between them). Can you check whether the dependencies in it make sense?

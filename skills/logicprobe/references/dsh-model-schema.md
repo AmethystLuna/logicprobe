@@ -67,8 +67,8 @@ it, and the report lists it under `metadataKeys`:
   "schemaVersion": 1,
   "init": "IDLE",
   "states": [{ "id": "IDLE", "_note": "power-on, not ready" }],
-  "_source": "docs/uml/motion-module.model.json",
-  "_verified": { "modelHash": "5f83e994…", "at": "2026-10-09" },
+  "_source": "docs/uml/order-service.model.json",
+  "_verified": { "modelHash": "0000000000000000…", "at": "2026-10-09" },
   "_extraction_caveats": ["guard thresholds read from the ISR, not the task"]
 }
 ```

@@ -39,13 +39,13 @@ The matrix is the single source of truth the diagram is checked against. Keep it
 ```json
 {
   "rules": [
-    { "id": "R1-app-may-use-hal", "source": "app.*", "allow": ["hal.*"], "deny": ["hal.at32_internal"] },
-    { "id": "R2-adapter-owns-hal", "source": "LA", "allow": ["DRV"], "deny": ["MS"] },
-    { "id": "R3-no-back-edges", "source": "*", "deny": ["MS"] },
-    { "id": "R4-persistence-required", "source": "LA", "allow": ["DB"], "require": true }
+    { "id": "R1-app-may-use-hal", "source": "app.*", "allow": ["hal.*"], "deny": ["hal.internal"] },
+    { "id": "R2-adapter-owns-hal", "source": "PAY", "allow": ["DRV"], "deny": ["SVC"] },
+    { "id": "R3-no-back-edges", "source": "*", "deny": ["SVC"] },
+    { "id": "R4-persistence-required", "source": "PAY", "allow": ["DB"], "require": true }
   ],
   "layers": [
-    { "name": "app", "members": ["MS", "LA"] },
+    { "name": "app", "members": ["SVC", "PAY"] },
     { "name": "hal", "members": ["DRV", "DB"] }
   ],
   "default": "deny"

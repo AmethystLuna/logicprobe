@@ -21,7 +21,7 @@ export type StructureNotation = 'plantuml' | 'mermaid';
 export type StructureNodeKind = 'component' | 'class' | 'interface' | 'actor' | 'database' | 'node' | 'package' | 'rectangle' | 'cloud' | 'queue' | 'unknown';
 export interface StructureNode {
     id: string;
-    /** Display label when the declaration carried one (`component "Motion Service" as MS`). */
+    /** Display label when the declaration carried one (`component "Order Service" as SVC`). */
     label?: string;
     kind: StructureNodeKind;
     /** True when the node is a container (package/rectangle/frame): it owns members and carries no dependency of its own. */
@@ -35,7 +35,7 @@ export interface StructureNode {
 export interface StructureEdge {
     from: string;
     to: string;
-    /** Arrow label, e.g. `read` in `LA --> DRV : read`. */
+    /** Arrow label, e.g. `read` in `PAY --> DRV : read`. */
     label?: string;
     line: number;
 }

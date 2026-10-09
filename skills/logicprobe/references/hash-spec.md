@@ -79,7 +79,7 @@ recorded value belongs to any published specification *at all*:
 python skills/logicprobe/references/logicprobe-engine.py verify model.json --hash-spec v0
 
 # ask about a recorded hash: prints {checked, matches, published[], verdict, verdictReason}
-python skills/logicprobe/references/logicprobe-engine.py verify model.json --hash-check 5f83e994153c9f53c2303029d3cfc4140f32b75f868c63b69fdbcf1586c41351
+python skills/logicprobe/references/logicprobe-engine.py verify model.json --hash-check 00000000000000000000000000000000000000000000000000000000deadbeef
 ```
 
 `--hash-check` exits `0` when a published spec reproduces the value and `2` when none

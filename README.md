@@ -157,17 +157,17 @@ pnpm 会把该版本写进 profile 的 `pnpm-workspace.yaml` 的 `minimumRelease
 ```json
 {
   "rules": [
-    { "id": "R1-app-may-use-hal", "source": "app.*", "allow": ["hal.*"], "deny": ["hal.at32_internal"] },
-    { "id": "R4-persistence-required", "source": "LA", "allow": ["DB"], "require": true }
+    { "id": "R1-app-may-use-hal", "source": "app.*", "allow": ["hal.*"], "deny": ["hal.internal"] },
+    { "id": "R4-persistence-required", "source": "PAY", "allow": ["DB"], "require": true }
   ],
-  "layers": [{ "name": "app", "members": ["MS", "LA"] }, { "name": "hal", "members": ["DRV", "DB"] }],
+  "layers": [{ "name": "app", "members": ["SVC", "PAY"] }, { "name": "hal", "members": ["DRV", "DB"] }],
   "default": "deny"
 }
 ```
 
 `source`/`allow`/`deny`/`members` 支持 glob（`*`、`?`）；**`deny` 全局优先**，结果不依赖规则书写顺序；矩阵写错（键名拼错、规则 id 重复、`require` 没有 `allow`）是硬错误 `MATRIX_INVALID`，不会静默放宽检查。每条边都会在 `edgeVerdicts` 里回显 `{from, to, matchedRules, allowed, basis}`。
 
-**它审的是图，不是代码。** 函数指针、DI、注册表、插件加载这些运行期依赖不会出现在边上；干净的 `pass` 只说明"画出来的图自洽且满足矩阵"。真正碰代码的那一步是**对账**：与源码侧的 include/依赖扫描（例如你们自己的 `arch_check.py`）用同一套规则 id 跑一遍，差异按四类定性——图漏了代码里有的边（图过期，`require` 时由 `UML025` 报出）、图画了代码里没有的边（图是愿景，或扫描范围更窄）、代码违反了图里没画出的规则（**图掩盖的架构缺陷**，这条才是要动手的）、两边一致判违规（真违规）。完整矩阵 schema、worked example 与对账表见 [`skills/logicprobe-structure/references/structure-review-guide.md`](skills/logicprobe-structure/references/structure-review-guide.md)。
+**它审的是图，不是代码。** 函数指针、DI、注册表、插件加载这些运行期依赖不会出现在边上；干净的 `pass` 只说明"画出来的图自洽且满足矩阵"。真正碰代码的那一步是**对账**：与源码侧的 include/依赖扫描（例如你们自己的 include/依赖检查脚本）用同一套规则 id 跑一遍，差异按四类定性——图漏了代码里有的边（图过期，`require` 时由 `UML025` 报出）、图画了代码里没有的边（图是愿景，或扫描范围更窄）、代码违反了图里没画出的规则（**图掩盖的架构缺陷**，这条才是要动手的）、两边一致判违规（真违规）。完整矩阵 schema、worked example 与对账表见 [`skills/logicprobe-structure/references/structure-review-guide.md`](skills/logicprobe-structure/references/structure-review-guide.md)。
 
 ## 使用
 

@@ -159,17 +159,17 @@ The dependency matrix is the single source of truth:
 ```json
 {
   "rules": [
-    { "id": "R1-app-may-use-hal", "source": "app.*", "allow": ["hal.*"], "deny": ["hal.at32_internal"] },
-    { "id": "R4-persistence-required", "source": "LA", "allow": ["DB"], "require": true }
+    { "id": "R1-app-may-use-hal", "source": "app.*", "allow": ["hal.*"], "deny": ["hal.internal"] },
+    { "id": "R4-persistence-required", "source": "PAY", "allow": ["DB"], "require": true }
   ],
-  "layers": [{ "name": "app", "members": ["MS", "LA"] }, { "name": "hal", "members": ["DRV", "DB"] }],
+  "layers": [{ "name": "app", "members": ["SVC", "PAY"] }, { "name": "hal", "members": ["DRV", "DB"] }],
   "default": "deny"
 }
 ```
 
 `source`, `allow`, `deny` and `members` accept globs (`*`, `?`); **`deny` wins globally**, so the result never depends on rule order; an invalid matrix (typo'd key, duplicate rule id, `require` without `allow`) is a hard `MATRIX_INVALID` error rather than a silently weaker check. Every edge is echoed in `edgeVerdicts` as `{from, to, matchedRules, allowed, basis}`.
 
-**It audits the diagram, not the code.** Function pointers, DI, registries and plugin loading never appear as edges; a clean `pass` only means the drawn graph is self-consistent and satisfies the matrix. The step that touches the source is the **reconciliation**: run a source-side include/dependency scan (your own `arch_check.py`, for instance) with the same rule ids and classify every difference — the diagram is stale (`UML025` when the rule is `require: true`), the diagram is aspirational or the scan scope is narrower, the code violates a rule the diagram never showed (**the architecture defect the diagram hid** — the one worth acting on), or both agree it is a violation. The full matrix schema, a worked example and the reconciliation table are in [`skills/logicprobe-structure/references/structure-review-guide.md`](skills/logicprobe-structure/references/structure-review-guide.md).
+**It audits the diagram, not the code.** Function pointers, DI, registries and plugin loading never appear as edges; a clean `pass` only means the drawn graph is self-consistent and satisfies the matrix. The step that touches the source is the **reconciliation**: run a source-side include/dependency scan (your own include or dependency checker, for instance) with the same rule ids and classify every difference — the diagram is stale (`UML025` when the rule is `require: true`), the diagram is aspirational or the scan scope is narrower, the code violates a rule the diagram never showed (**the architecture defect the diagram hid** — the one worth acting on), or both agree it is a violation. The full matrix schema, a worked example and the reconciliation table are in [`skills/logicprobe-structure/references/structure-review-guide.md`](skills/logicprobe-structure/references/structure-review-guide.md).
 
 ## Usage
 

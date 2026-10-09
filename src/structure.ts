@@ -25,7 +25,7 @@ export type StructureNodeKind = 'component' | 'class' | 'interface' | 'actor' | 
 
 export interface StructureNode {
   id: string
-  /** Display label when the declaration carried one (`component "Motion Service" as MS`). */
+  /** Display label when the declaration carried one (`component "Order Service" as SVC`). */
   label?: string
   kind: StructureNodeKind
   /** True when the node is a container (package/rectangle/frame): it owns members and carries no dependency of its own. */
@@ -40,7 +40,7 @@ export interface StructureNode {
 export interface StructureEdge {
   from: string
   to: string
-  /** Arrow label, e.g. `read` in `LA --> DRV : read`. */
+  /** Arrow label, e.g. `read` in `PAY --> DRV : read`. */
   label?: string
   line: number
 }
@@ -208,7 +208,7 @@ function readDeclarationTarget(rest: string): { id?: string; label?: string } {
   if (bare !== null) return { id: bare[1] }
   const quoted = /^"([^"]+)"\s*$/.exec(trimmed)
   if (quoted !== null) return { id: quoted[1], label: quoted[1] }
-  // `[Motion Service]` and other bracketed spellings become their own id when nothing
+  // `[Order Service]` and other bracketed spellings become their own id when nothing
   // else is available: an unnamed node still has to appear in the graph.
   const bracketed = /^\[([^\]]+)\]\s*$/.exec(trimmed)
   if (bracketed !== null) return { id: bracketed[1].trim(), label: bracketed[1].trim() }
@@ -338,7 +338,7 @@ function parseMermaidClass(text: string): StructureGraph {
       declareNode(builder, declaration[1], 'class', lineNumber, declaration[2])
       continue
     }
-    // `class MotionService { ... }` opens a member block; members are not dependency nodes.
+    // `class OrderService { ... }` opens a member block; members are not dependency nodes.
     const block = /^class\s+([A-Za-z_][A-Za-z0-9_.-]*)\s*\{$/.exec(line)
     if (block !== null) {
       declareNode(builder, block[1], 'class', lineNumber)
