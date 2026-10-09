@@ -17,6 +17,7 @@ as outside this engine and points at tooling that can handle it.
 | Execution cost / performance | A12 budget checks over declared transition `cost` (absent = 1) | "worst-case dispatch ≤ 100 cycles" | aiT, RapiTime (real WCET at binary level) | `cost` is a modeler label, not measured execution time |
 | Multi-machine composition | Single machine verified; cross-machine contract must be documented separately | "A sends E, B always handles E" | CSP (FDR), mCRL2, TLA+ (compositional models) | No composition semantics between machines |
 | Nested/hierarchical statecharts | Flat models only; flatten before verification | parent/child states, orthogonal regions | SCXML / Stateflow (native hierarchy) | Flat state list only — flatten manually and re-confirm |
+| Write-site / single-owner analysis | **Not covered, and not planned.** logicprobe reviews the diagram and the model; it does not read the source to see *who writes* a variable, a register or a field | "only the ISR writes this", "one owner per flag", "no double write to the CAN mailbox" | A source-side AST/rule check (e.g. the project's own include/arch checker), a static analyzer (clang-tidy, PC-lint, Coverity), or a model checker over the real code (CBMC) | It needs the source and a rule table about statements — a different input than a model or a diagram. `logicprobe_concurrency_scan` will flag the *claim* as unverified and route it here, which is the honest part of this plugin's answer |
 
 ## Where the routing surfaces
 

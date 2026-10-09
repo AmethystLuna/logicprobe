@@ -3,7 +3,7 @@
 // parse round trip. A diagram that does not read back as the model it was drawn
 // from is the defect this suite exists to catch, so every supported notation is
 // round-tripped rather than only asserted on its output text.
-import { renderUml, parseUml, parseFindings, reviewUml, diffModels, guardText, parseGuardText, UmlError } from '../../lib/uml.js'
+import { renderUml, parseUml, parseFindings, reviewUml, diffModels, explainLabels, guardText, parseGuardText, UmlError } from '../../lib/uml.js'
 
 let failures = 0
 function test(name, fn) {
@@ -552,6 +552,58 @@ test('review: full narrative coverage silences UML027, and absence keeps UML013'
   const absent = reviewUml({ model })
   if (findFinding(absent, 'UML013_NO_NARRATIVE').length !== 1) throw new Error('an absent narrative keeps UML013')
   if ('narrativeCoverage' in absent) throw new Error('an absent narrative has no coverage to report')
+})
+
+test('explain-labels: every documented claim is true of the parser', () => {
+  const explanation = explainLabels('mermaid')
+  const narrative = { ...model, narrative: { states: { INIT: 'power-on, not ready', STARTING: 'handshake in flight', ACTIVE: 'running', ERROR: 'retryable failure', FATAL: 'unrecoverable' }, events: { power_ready: 'a', ack: 'b', stop: 'c', timeout: 'd', cooldown: 'e' }, scenarios: [
+    { from: 'INIT', event: 'power_ready', scenario: 's1' }, { from: 'STARTING', event: 'ack', scenario: 's2' },
+    { from: 'ACTIVE', event: 'stop', scenario: 's3' }, { from: 'STARTING', event: 'timeout', scenario: 's4' },
+    { from: 'ERROR', event: 'cooldown', scenario: 's5' },
+  ] } }
+  const rendered = renderUml(narrative, 'mermaid', 'state').primary
+  if (!rendered.includes(explanation.renderedForm.replace('ID（meaning）', 'INIT（power-on, not ready）').replace(' as ID', ' as INIT'))) {
+    throw new Error('the documented rendered form is not what the renderer writes:\n' + rendered)
+  }
+
+  // Each accepted label form must be read as the same meaning (no UML015 drift).
+  const withLabel = (line) => ['%%logicprobe:init INIT', '%%logicprobe:terminal FATAL', 'stateDiagram-v2', '  [*] --> INIT', '  ' + line, '  INIT --> STARTING : power_ready', '  STARTING --> ACTIVE : ack', '  ACTIVE --> FATAL : stop', '  STARTING --> ERROR : timeout', '  ERROR --> STARTING : cooldown', '  FATAL --> [*]'].join('\n')
+  const accepted = explanation.acceptedLabelForms.filter((form) => form.form !== 'bare id' && form.form !== 'a description line' && form.form !== 'a single-line note')
+  for (const form of accepted) {
+    const report = reviewUml({ model: narrative, diagram: withLabel(form.example.replace('IDLE', 'INIT').replace('waiting for power', 'power-on, not ready')) })
+    if (findFinding(report, 'UML015_LABEL_DRIFT').length !== 0) {
+      throw new Error('the documented form "' + form.form + '" must not be drift: ' + JSON.stringify(findFinding(report, 'UML015_LABEL_DRIFT')[0]?.detail))
+    }
+  }
+  // The bare id is documented as "no meaning", i.e. undocumented rather than drift.
+  const bare = reviewUml({ model: narrative, diagram: withLabel('state "INIT" as INIT') })
+  if (findFinding(bare, 'UML014_UNDOCUMENTED_STATE').length === 0) throw new Error('a bare id must count as undocumented')
+  if (findFinding(bare, 'UML015_LABEL_DRIFT').length !== 0) throw new Error('a bare id is not drift')
+
+  // A description line and a single-line note are the same meaning in another spelling.
+  for (const line of ['INIT : power-on, not ready', 'note right of INIT : power-on, not ready']) {
+    const report = reviewUml({ model: narrative, diagram: withLabel(line) })
+    if (findFinding(report, 'UML014_UNDOCUMENTED_STATE').length !== 0 && findFinding(report, 'UML015_LABEL_DRIFT').length !== 0) {
+      throw new Error('"' + line + '" must be read as a meaning')
+    }
+  }
+
+  // Ignored lines: a plain comment warns, a multi-line note block does not.
+  const commented = reviewUml({ model: narrative, diagram: withLabel('%% this comment carries nothing') })
+  if (!commented.warnings.some((warning) => warning.includes('UML_PARSE_IGNORED_LINE'))) {
+    throw new Error('a non-directive comment must be reported: ' + JSON.stringify(commented.warnings))
+  }
+  const noted = reviewUml({ model: narrative, diagram: withLabel(['note left of INIT', '  several lines', 'end note'].join('\n')) })
+  if (noted.warnings.some((warning) => warning.includes('UML_PARSE_IGNORED_LINE'))) {
+    throw new Error('a multi-line note block must be skipped silently: ' + JSON.stringify(noted.warnings))
+  }
+
+  // The directive prefix is the one the parser consumes, in both notations.
+  if (explainLabels('mermaid').directivePrefix !== '%%logicprobe:') throw new Error('mermaid directive prefix')
+  if (explainLabels('plantuml').directivePrefix !== "'logicprobe:") throw new Error('plantuml directive prefix')
+  const plantuml = parseUml(["'logicprobe:uml v1 notation=plantuml diagram=state", "'logicprobe:init INIT", '@startuml', 'state "INIT" as INIT', 'state "DONE" as DONE', "[*] --> INIT", 'INIT --> DONE : go', 'DONE --> [*]', '@enduml'].join('\n'))
+  if (plantuml.model.init !== 'INIT') throw new Error('the documented directive form must be consumed')
+  assertNoUndefinedValues(explanation)
 })
 
 if (failures > 0) { console.log('uml tests failed:', failures); process.exit(1) }

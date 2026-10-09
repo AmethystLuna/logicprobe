@@ -913,7 +913,10 @@ function parseStateDiagram(text: string, notation: UmlNotation): UmlParseResult 
       }
     }
     if (noteEnd) { inNote = false; return }
-    if (noteStart && !/:\s*.+$/.test(line)) inNote = true
+    // A multi-line note body is prose, not a statement: skip it silently rather than
+    // reporting one ignored line per line of text.
+    if (inNote) return
+    if (noteStart && !/:\s*.+$/.test(line)) { inNote = true; return }
     const note = /^note\s+(?:over|right of|left of)\s+([A-Za-z_][A-Za-z0-9_]*)\s*:\s*(.+)$/i.exec(line)
     if (note !== null) {
       declare(note[1])
@@ -1030,6 +1033,68 @@ function mapLabels(display: Map<string, string>, directives: Directives): Record
   const out: Record<string, string> = {}
   for (const [name, label] of display) out[directives.aliases.get(name) ?? name] = label
   return out
+}
+
+/** One accepted way of writing a state's meaning into a diagram label. */
+export interface LabelForm {
+  form: string
+  example: string
+  note: string
+}
+
+export interface LabelExplanation {
+  notation: UmlNotation
+  /** The comment prefix a `logicprobe:` directive uses in this notation. */
+  directivePrefix: string
+  directiveLines: Array<{ example: string; meaning: string }>
+  /** Accepted label spellings, in the order `documentedMeaning` accepts them. */
+  acceptedLabelForms: LabelForm[]
+  /** What the renderer itself writes, so a hand-edited diagram can match it. */
+  renderedForm: string
+  ignoredLines: Array<{ pattern: string; behaviour: string }>
+  rules: string[]
+}
+
+/**
+ * What the front end expects of labels and comments, so "why does my hand-drawn diagram
+ * report label drift or ignored lines?" has a printed answer instead of a guess.
+ * `tests/uml/run.mjs` feeds every claim here back through the parser, so this text cannot
+ * drift away from the behaviour it describes.
+ */
+export function explainLabels(notation: UmlNotation = 'mermaid'): LabelExplanation {
+  const prefix = commentPrefix(notation)
+  return {
+    notation,
+    directivePrefix: prefix + DIRECTIVE_NAMESPACE,
+    directiveLines: [
+      { example: prefix + DIRECTIVE_NAMESPACE + 'uml v1 notation=' + notation + ' diagram=state', meaning: 'declares the notation and diagram kind the file was rendered for' },
+      { example: prefix + DIRECTIVE_NAMESPACE + 'init ID', meaning: 'pins the initial state (otherwise it is inferred as the only state nothing enters)' },
+      { example: prefix + DIRECTIVE_NAMESPACE + 'terminal ID', meaning: 'marks a terminal state; comma-separate several' },
+      { example: prefix + DIRECTIVE_NAMESPACE + 'alias NOTATION_ID model_id', meaning: 'restores a state id the notation cannot spell verbatim' },
+      { example: prefix + DIRECTIVE_NAMESPACE + 'variable NAME integer', meaning: 'restores a variable and its kind' },
+    ],
+    acceptedLabelForms: [
+      { form: 'bare id', example: 'state "IDLE" as IDLE', note: 'counts as NO meaning: the state stays undocumented (UML014)' },
+      { form: 'ID（meaning）', example: 'state "IDLE（waiting for power）" as IDLE', note: 'the form the renderer writes; full-width parentheses' },
+      { form: 'ID(meaning)', example: 'state "IDLE(waiting for power)" as IDLE', note: 'accepted as well' },
+      { form: 'a description line', example: 'IDLE : waiting for power', note: 'the same meaning written as a state description' },
+      { form: 'a single-line note', example: 'note right of IDLE : waiting for power', note: 'read as the state meaning, not as a comment' },
+      { form: 'any other text', example: 'state "waiting for power" as IDLE', note: 'taken as the meaning verbatim' },
+    ],
+    renderedForm: 'state "ID（meaning）" as ID',
+    ignoredLines: [
+      { pattern: 'a `' + prefix + '` comment line that is not a `logicprobe:` directive', behaviour: 'UML_PARSE_IGNORED_LINE warning: it carries no state-machine statement' },
+      { pattern: 'a `note …` block written over several lines', behaviour: 'skipped silently (a block is not a state meaning)' },
+      { pattern: 'notation chrome: @startuml/@enduml, stateDiagram-v2, direction, classDef/style/linkStyle/click, scale, skinparam, title, hide, autonumber', behaviour: 'skipped silently' },
+      { pattern: 'anything else the parser cannot read', behaviour: 'UML_PARSE_IGNORED_LINE warning, and the model is built from what it did read' },
+    ],
+    rules: [
+      'Label drift (UML015) compares the meaning inside the label with narrative.states[id]: the wrapper is stripped, the remaining text must match character for character.',
+      'A meaning that differs only in wording is still drift — one of the two is stale, and the review cannot tell which.',
+      'Keep non-directive comments out of the diagram: `logicprobe:` directives are the only comment lines the parser consumes.',
+      'A missing label is not an error: the state renders as its bare id and is reported as undocumented (UML014).',
+    ],
+  }
 }
 
 /**

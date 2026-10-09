@@ -4571,8 +4571,13 @@ def _parse_state_diagram(text, notation):
         if note_end:
             in_note = False
             continue
+        # A multi-line note body is prose, not a statement: skip it silently rather than
+        # reporting one ignored line per line of text.
+        if in_note:
+            continue
         if note_start and not re.search(r':\s*.+\Z', line):
             in_note = True
+            continue
         note = _STATE_NOTE_RE.match(line)
         if note is not None:
             declare(note.group(1))
@@ -6266,7 +6271,61 @@ def _cmd_granularity(args):
     _emit_report(report, args.baseline)
 
 
+def explain_labels(notation='mermaid'):
+    """What the front end expects of labels and comments (mirror of explainLabels)."""
+    prefix = _comment_prefix(notation)
+    return {
+        'notation': notation,
+        'directivePrefix': prefix + _DIRECTIVE_NAMESPACE,
+        'directiveLines': [
+            {'example': prefix + _DIRECTIVE_NAMESPACE + 'uml v1 notation=' + notation + ' diagram=state',
+             'meaning': 'declares the notation and diagram kind the file was rendered for'},
+            {'example': prefix + _DIRECTIVE_NAMESPACE + 'init ID',
+             'meaning': 'pins the initial state (otherwise it is inferred as the only state nothing enters)'},
+            {'example': prefix + _DIRECTIVE_NAMESPACE + 'terminal ID',
+             'meaning': 'marks a terminal state; comma-separate several'},
+            {'example': prefix + _DIRECTIVE_NAMESPACE + 'alias NOTATION_ID model_id',
+             'meaning': 'restores a state id the notation cannot spell verbatim'},
+            {'example': prefix + _DIRECTIVE_NAMESPACE + 'variable NAME integer',
+             'meaning': 'restores a variable and its kind'},
+        ],
+        'acceptedLabelForms': [
+            {'form': 'bare id', 'example': 'state "IDLE" as IDLE',
+             'note': 'counts as NO meaning: the state stays undocumented (UML014)'},
+            {'form': 'ID（meaning）', 'example': 'state "IDLE（waiting for power）" as IDLE',
+             'note': 'the form the renderer writes; full-width parentheses'},
+            {'form': 'ID(meaning)', 'example': 'state "IDLE(waiting for power)" as IDLE', 'note': 'accepted as well'},
+            {'form': 'a description line', 'example': 'IDLE : waiting for power',
+             'note': 'the same meaning written as a state description'},
+            {'form': 'a single-line note', 'example': 'note right of IDLE : waiting for power',
+             'note': 'read as the state meaning, not as a comment'},
+            {'form': 'any other text', 'example': 'state "waiting for power" as IDLE',
+             'note': 'taken as the meaning verbatim'},
+        ],
+        'renderedForm': 'state "ID（meaning）" as ID',
+        'ignoredLines': [
+            {'pattern': 'a `' + prefix + '` comment line that is not a `logicprobe:` directive',
+             'behaviour': 'UML_PARSE_IGNORED_LINE warning: it carries no state-machine statement'},
+            {'pattern': 'a `note …` block written over several lines',
+             'behaviour': 'skipped silently (a block is not a state meaning)'},
+            {'pattern': 'notation chrome: @startuml/@enduml, stateDiagram-v2, direction, classDef/style/linkStyle/click, scale, skinparam, title, hide, autonumber',
+             'behaviour': 'skipped silently'},
+            {'pattern': 'anything else the parser cannot read',
+             'behaviour': 'UML_PARSE_IGNORED_LINE warning, and the model is built from what it did read'},
+        ],
+        'rules': [
+            'Label drift (UML015) compares the meaning inside the label with narrative.states[id]: the wrapper is stripped, the remaining text must match character for character.',
+            'A meaning that differs only in wording is still drift — one of the two is stale, and the review cannot tell which.',
+            'Keep non-directive comments out of the diagram: `logicprobe:` directives are the only comment lines the parser consumes.',
+            'A missing label is not an error: the state renders as its bare id and is reported as undocumented (UML014).',
+        ],
+    }
+
+
 def _cmd_uml_review(args):
+    if args.explain_labels:
+        print(json.dumps(explain_labels(args.notation if args.notation != 'auto' else 'mermaid'), indent=2))
+        sys.exit(0)
     try:
         options = {}
         if args.model:
@@ -6336,6 +6395,8 @@ def _build_parser():
     p_uml_review.add_argument('--no-round-trip', action='store_true')
     p_uml_review.add_argument('--max-steps', type=int)
     p_uml_review.add_argument('--baseline', metavar='REPORT', help='compare against an earlier report and print the diff')
+    p_uml_review.add_argument('--explain-labels', action='store_true',
+                              help='print the label/comment conventions the parser expects, then exit')
     p_uml_review.set_defaults(func=_cmd_uml_review)
     p_structure = sub.add_parser('structure', help='audit a structure/dependency diagram (UML020-UML026)')
     p_structure.add_argument('diagram')

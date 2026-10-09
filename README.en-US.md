@@ -176,6 +176,8 @@ The dependency matrix is the single source of truth:
 
 `source`, `allow`, `deny` and `members` accept globs (`*`, `?`); **`deny` wins globally**, so the result never depends on rule order; an invalid matrix (typo'd key, duplicate rule id, `require` without `allow`) is a hard `MATRIX_INVALID` error rather than a silently weaker check. Every edge is echoed in `edgeVerdicts` as `{from, to, matchedRules, allowed, basis}`.
 
+**What it does not do, stated plainly**: write-site analysis ("only the ISR writes this flag", "one writer per register") is **out of scope** — it needs the source and statement-level rules, not a model or a diagram. `logicprobe_concurrency_scan` marks such a claim unverified and routes it to a source-side check (your own include/arch checker, a static analyzer, or CBMC).
+
 **It audits the diagram, not the code.** Function pointers, DI, registries and plugin loading never appear as edges; a clean `pass` only means the drawn graph is self-consistent and satisfies the matrix. The step that touches the source is the **reconciliation**: run a source-side include/dependency scan (your own include or dependency checker, for instance) with the same rule ids and classify every difference — the diagram is stale (`UML025` when the rule is `require: true`), the diagram is aspirational or the scan scope is narrower, the code violates a rule the diagram never showed (**the architecture defect the diagram hid** — the one worth acting on), or both agree it is a violation. The full matrix schema, a worked example and the reconciliation table are in [`skills/logicprobe-structure/references/structure-review-guide.md`](skills/logicprobe-structure/references/structure-review-guide.md).
 
 ## Usage

@@ -182,6 +182,37 @@ export declare function parseUpdatesText(text: string, warnings: string[]): Upda
  * file, which is a false guarantee of exactly the kind this plugin exists to prevent.
  */
 export declare function parseFindings(parsed: UmlParseResult): UmlFinding[];
+/** One accepted way of writing a state's meaning into a diagram label. */
+export interface LabelForm {
+    form: string;
+    example: string;
+    note: string;
+}
+export interface LabelExplanation {
+    notation: UmlNotation;
+    /** The comment prefix a `logicprobe:` directive uses in this notation. */
+    directivePrefix: string;
+    directiveLines: Array<{
+        example: string;
+        meaning: string;
+    }>;
+    /** Accepted label spellings, in the order `documentedMeaning` accepts them. */
+    acceptedLabelForms: LabelForm[];
+    /** What the renderer itself writes, so a hand-edited diagram can match it. */
+    renderedForm: string;
+    ignoredLines: Array<{
+        pattern: string;
+        behaviour: string;
+    }>;
+    rules: string[];
+}
+/**
+ * What the front end expects of labels and comments, so "why does my hand-drawn diagram
+ * report label drift or ignored lines?" has a printed answer instead of a guess.
+ * `tests/uml/run.mjs` feeds every claim here back through the parser, so this text cannot
+ * drift away from the behaviour it describes.
+ */
+export declare function explainLabels(notation?: UmlNotation): LabelExplanation;
 /**
  * Parse a Mermaid or PlantUML diagram back into a LogicModelV1.
  *

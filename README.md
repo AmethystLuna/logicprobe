@@ -174,6 +174,8 @@ pnpm 会把该版本写进 profile 的 `pnpm-workspace.yaml` 的 `minimumRelease
 
 `source`/`allow`/`deny`/`members` 支持 glob（`*`、`?`）；**`deny` 全局优先**，结果不依赖规则书写顺序；矩阵写错（键名拼错、规则 id 重复、`require` 没有 `allow`）是硬错误 `MATRIX_INVALID`，不会静默放宽检查。每条边都会在 `edgeVerdicts` 里回显 `{from, to, matchedRules, allowed, basis}`。
 
+**不做的事说得清楚**:写点分析("只有 ISR 写这个标志""一个寄存器只有一个写者")**不在本插件射程**——它需要读源码与语句级规则,不是模型或图;这类声称由 `logicprobe_concurrency_scan` 标为未验证并路由到源码侧检查(自己的 include/arch 检查器、静态分析器或 CBMC)。
+
 **它审的是图，不是代码。** 函数指针、DI、注册表、插件加载这些运行期依赖不会出现在边上；干净的 `pass` 只说明"画出来的图自洽且满足矩阵"。真正碰代码的那一步是**对账**：与源码侧的 include/依赖扫描（例如你们自己的 include/依赖检查脚本）用同一套规则 id 跑一遍，差异按四类定性——图漏了代码里有的边（图过期，`require` 时由 `UML025` 报出）、图画了代码里没有的边（图是愿景，或扫描范围更窄）、代码违反了图里没画出的规则（**图掩盖的架构缺陷**，这条才是要动手的）、两边一致判违规（真违规）。完整矩阵 schema、worked example 与对账表见 [`skills/logicprobe-structure/references/structure-review-guide.md`](skills/logicprobe-structure/references/structure-review-guide.md)。
 
 ## 使用

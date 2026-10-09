@@ -228,6 +228,50 @@ Neither is a behaviour bug. Add the narrative so a reader can check the diagram 
 
 Now delete the `ERROR --cooldown--> STARTING` arrow and review again. `ACTIVE` and `ERROR` become dead ends (`UML003`), and `cooldown` becomes an event that only fires from an unreachable state (`UML007`). The diagram still looks plausible. That is the whole point.
 
+## Labels and comments: what the parser expects
+
+Two things cause most of the friction with hand-written diagrams. Both are printed by the
+tool itself: `logicprobe_uml` does not have a flag for it (it documents the convention in
+its description), and the CLI has `uml-review --explain-labels` (add `--notation
+plantuml` for that flavour), which prints exactly the table below from the same rules the
+parser applies.
+
+**1. State meanings, in the spellings the parser accepts.** A label carries a *meaning*
+when it differs from the bare id. Accepted, in this order:
+
+| Spelling | Example | Notes |
+|---|---|---|
+| bare id | `state "IDLE" as IDLE` | counts as **no** meaning: the state is reported undocumented (`UML014`) |
+| `ID（meaning）` | `state "IDLE（waiting for power）" as IDLE` | what the renderer writes; full-width parentheses |
+| `ID(meaning)` | `state "IDLE(waiting for power)" as IDLE` | accepted as well |
+| a description line | `IDLE : waiting for power` | the same meaning in the other PlantUML spelling |
+| a single-line note | `note right of IDLE : waiting for power` | read as the meaning, not as a comment |
+| any other text | `state "waiting for power" as IDLE` | taken verbatim |
+
+`UML015_LABEL_DRIFT` compares the *meaning* with `narrative.states[id]` character for
+character: the wrapper (`ID（…）`) is stripped, the rest must match. A different wording is
+still drift — the review cannot tell which side is stale. Writing no label is not drift;
+it is `UML014_UNDOCUMENTED_STATE` (info).
+
+**2. Comment lines.** The only comment lines the parser *consumes* are the `logicprobe:`
+directives the renderer writes (`%%logicprobe:` in Mermaid, `'logicprobe:` in PlantUML):
+`uml v1 …`, `init ID`, `terminal ID`, `alias X id`, `variable NAME kind`. They are
+ordinary comments to every renderer, which is why the diagram stays valid.
+
+Everything else is either notation chrome (skipped silently) or an ignored line:
+
+| Line | Behaviour |
+|---|---|
+| a `%%` / `'` comment that is not a directive | `UML_PARSE_IGNORED_LINE` warning — the line carried no statement |
+| a multi-line `note … end note` block | skipped silently (prose is not a state meaning) |
+| `@startuml`/`@enduml`, `stateDiagram-v2`, `direction`, `classDef`/`style`/`linkStyle`/`click`, `scale`, `skinparam`, `title`, `hide`, `autonumber` | skipped silently |
+| anything else the parser cannot read | `UML_PARSE_IGNORED_LINE` warning, and the model is built from what it did read |
+
+So the practical rule is: keep non-directive comments out of the diagram body (put render
+commands and explanations around the diagram, not inside it), and give every state a
+`ID（meaning）` label when the model carries a narrative — otherwise the diagram compares
+as undocumented and a later drift check has nothing to compare against.
+
 ## Limits
 
 - The review is **structural**. It evaluates no guard over any valuation. "Probably exhaustive" is a shape test, not a proof. S6 is the check that decides.

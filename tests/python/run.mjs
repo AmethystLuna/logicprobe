@@ -831,6 +831,22 @@ check('granularity parity (invented edge fails)', () => {
   if (actual.out.verdict !== 'fail' || actual.code !== 2) throw new Error('an invented dependency fails and exits 2')
 })
 
+// ---- label explanation parity ----------------------------------------------
+// `--explain-labels` documents what the parser expects; the text is part of the
+// contract, so both engines must print the same thing.
+const { explainLabels } = await import('../../lib/uml.js')
+
+check('--explain-labels parity (mermaid and plantuml)', () => {
+  for (const notation of ['mermaid', 'plantuml']) {
+    const expected = explainLabels(notation)
+    const actual = pythonRun(['uml-review', '--explain-labels', '--notation', notation])
+    if (!actual.out) throw new Error('python returned no JSON for ' + notation)
+    const diffs = deepDiff(expected, actual.out)
+    if (diffs.length) throw new Error(notation + ': ' + diffs.slice(0, 5).join(' | '))
+    if (actual.code !== 0) throw new Error('--explain-labels must exit 0')
+  }
+})
+
 rmSync(tmpDir, { recursive: true, force: true })
 if (failures > 0) { console.log('python parity failed:', failures); process.exit(1) }
 console.log('all python parity checks passed')
