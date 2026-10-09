@@ -31,7 +31,7 @@
  * @module logicprobe-uml
  */
 
-import { validateModel, modelHash } from './engine.js'
+import { validateModel, modelHash, metadataKeysOf, verdictOfFindings, DEFAULT_HASH_SPEC, type HashSpec, type Verdict } from './engine.js'
 import type { GuardNode, GuardOp, LeafGuard, LogicModelV1, StateSpec, TransitionSpec, UpdateSpec, VariableSpec } from './engine.js'
 
 export type UmlNotation = 'mermaid' | 'plantuml'
@@ -72,7 +72,29 @@ export interface UmlParseResult {
    * symbol, which the review reports.
    */
   labels: Record<string, string>
+  /**
+   * Declarations found in the text that LogicModelV1 cannot represent. A non-empty
+   * list means the parsed model is NOT this diagram: the text belongs to another
+   * diagram family (component, package, class, deployment, …), so whatever came
+   * out is a by-product of reading keywords the parser does not own.
+   */
+  discardedConstructs: DiscardedConstruct[]
+  /**
+   * Arrows whose endpoints were declared by a discarded construct. They survive
+   * parsing as state transitions, which is exactly why they are counted out loud.
+   */
+  discardedEdges: number
   warnings: string[]
+}
+
+/** One declaration the parser could not represent, with the source line that carried it. */
+export interface DiscardedConstruct {
+  /** The construct keyword, lower-cased (`component`, `package`, `classDiagram`). */
+  construct: string
+  /** 1-based line number in the diagram source. */
+  line: number
+  /** The source line, trimmed. */
+  text: string
 }
 
 export interface UmlFinding {
@@ -89,6 +111,8 @@ export interface UmlRoundTripReport {
   notation: UmlNotation
   diagram: UmlDiagram
   ok: boolean
+  /** Which published hash specification the two hashes follow (see references/hash-spec.md). */
+  hashSpec: HashSpec
   modelHash: string
   parsedHash: string
   diffs: string[]
@@ -96,7 +120,11 @@ export interface UmlRoundTripReport {
 }
 
 export interface UmlReviewReport {
+  /** The review ran and produced this report. It does NOT mean the modelling passed — read `verdict`. */
   ok: boolean
+  ran: boolean
+  verdict: Verdict
+  verdictReason: string
   source: 'model' | 'diagram' | 'model+diagram'
   summary: {
     errors: number
@@ -117,11 +145,27 @@ export interface UmlReviewReport {
   model?: LogicModelV1
   /** Diagram rendered from the model, when only a model was given. */
   primary?: string
+  /** Paths of the `_`-prefixed metadata keys found in the supplied model, when it carried any. */
+  metadataKeys?: string[]
+  /** Declarations the parser could not represent; a non-empty list fails the review. */
+  discardedConstructs?: DiscardedConstruct[]
+  /** Arrows whose endpoints came from a discarded construct. */
+  discardedEdges?: number
   warnings: string[]
   nextSteps: string[]
 }
 
-export class UmlError extends Error {}
+/**
+ * A UML front-end refusal. `code` lets the tool report *why* it refused instead of
+ * collapsing every refusal into a generic input error.
+ */
+export class UmlError extends Error {
+  readonly code: string
+  constructor(message: string, code = 'UML_INPUT') {
+    super(message)
+    this.code = code
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Shared helpers
@@ -557,9 +601,34 @@ interface DiagramLine {
   diagram: 'state' | 'activity' | 'sequence'
 }
 
+/**
+ * Mermaid diagram-family headers that are neither a state machine nor a flow.
+ * Recognizing them matters twice: the text must not be reported as "cannot tell
+ * whether this is Mermaid or PlantUML", and it must not be parsed as a state
+ * diagram — every line of it would be ignored or misread, and the empty model that
+ * comes out would be presented as if it described the file.
+ */
+const MERMAID_OTHER_FAMILIES: readonly string[] = [
+  'classDiagram', 'erDiagram', 'gantt', 'pie', 'journey', 'mindmap', 'gitGraph',
+  'C4Context', 'C4Container', 'C4Component', 'C4Dynamic', 'C4Deployment',
+  'requirementDiagram', 'timeline', 'quadrantChart', 'sankey-beta', 'block-beta',
+  'packet-beta', 'architecture-beta', 'radar-beta', 'treemap-beta', 'xychart-beta',
+]
+
+/** The other-family header this text declares, if any. */
+function otherMermaidFamily(text: string): string | undefined {
+  for (const family of MERMAID_OTHER_FAMILIES) {
+    if (new RegExp('^\\s*' + family + '\\b', 'm').test(text)) return family
+  }
+  return undefined
+}
+
 function detectNotation(text: string): UmlNotation {
   if (/^\s*@start/m.test(text)) return 'plantuml'
   if (/^\s*(stateDiagram|stateDiagram-v2|flowchart|graph|sequenceDiagram)\b/m.test(text)) return 'mermaid'
+  // A known Mermaid family is still Mermaid: say so, and let detectDiagram refuse it
+  // by name instead of blaming the notation.
+  if (otherMermaidFamily(text) !== undefined) return 'mermaid'
   throw new UmlError('cannot tell whether this is Mermaid or PlantUML text: expected `stateDiagram-v2` / `flowchart` / `sequenceDiagram`, or `@startuml`')
 }
 
@@ -567,6 +636,10 @@ function detectDiagram(text: string): 'state' | 'activity' | 'sequence' {
   if (/^\s*stateDiagram/m.test(text)) return 'state'
   if (/^\s*(flowchart|graph)\b/m.test(text)) return 'activity'
   if (/^\s*sequenceDiagram\b/m.test(text)) return 'sequence'
+  const family = otherMermaidFamily(text)
+  if (family !== undefined) {
+    throw new UmlError('`' + family + '` is not a state or activity diagram: logicprobe models state machines and flows, so this diagram family cannot be parsed into a LogicModelV1. Discarded: ' + family + ' ×1. Render the machine with logicprobe_uml action=render and keep this diagram as its own view.', 'UML_NOT_A_STATE_DIAGRAM')
+  }
   if (/^\s*@startuml/m.test(text)) {
     // PlantUML declares the diagram kind by its body; the state keyword is the only
     // structural one logicprobe emits, everything else in that family is a state diagram too.
@@ -648,6 +721,10 @@ interface RawDiagram {
   terminals: string[]
   finalMarks: string[]
   warnings: string[]
+  /** Declarations that belong to another diagram family (component, package, class, …). */
+  discarded: DiscardedConstruct[]
+  /** Node names those declarations introduced; arrows touching them are counted as discarded edges. */
+  discardedNodes: Set<string>
 }
 
 function rawToModel(raw: RawDiagram, directives: Directives, warnings: string[]): LogicModelV1 {
@@ -762,37 +839,91 @@ function inferVariables(transitions: TransitionSpec[], declared: Map<string, 'in
   return [...kinds.entries()].map(([name, kind]) => ({ name, kind, init: kind === 'boolean' ? false : 0 }))
 }
 
+/**
+ * PlantUML keywords that declare a construct LogicModelV1 has no place for. Their
+ * presence marks the text as a component, package, class, deployment or database
+ * diagram — a different diagram family. A state parser still reads *something* out of
+ * such a file (the arrows look like transitions), which is why the discarded
+ * declarations are collected and reported instead of being ignored.
+ */
+const PLANTUML_OTHER_CONSTRUCT = /^(component|package|class|interface|enum|enumeration|object|actor|usecase|node|artifact|database|rectangle|folder|frame|cloud|storage|collections|queue|stack|agent|boundary|control|entity|deployment|protocol|struct|exception|metaclass|stereotype|circle|hexagon|label|port|portin|portout)\b/i
+
+/** The node identifier a declaration introduces, when it has one (`… as ID`, or a bare `component ID`). */
+function declaredIdentifier(text: string): string | undefined {
+  const alias = /\bas\s+([A-Za-z_][A-Za-z0-9_]*)\s*;?$/.exec(text)
+  if (alias !== null) return alias[1]
+  const bare = /^[A-Za-z]+\s+([A-Za-z_][A-Za-z0-9_]*)\s*;?$/.exec(text)
+  return bare === null ? undefined : bare[1]
+}
+
+/**
+ * Findings a parse result carries on its own. A diagram from another family parses
+ * into something; without this finding that something is presented as a model of the
+ * file, which is a false guarantee of exactly the kind this plugin exists to prevent.
+ */
+export function parseFindings(parsed: UmlParseResult): UmlFinding[] {
+  if (parsed.discardedConstructs.length === 0) return []
+  const counts = new Map<string, number>()
+  for (const entry of parsed.discardedConstructs) counts.set(entry.construct, (counts.get(entry.construct) ?? 0) + 1)
+  const summary = [...counts.entries()]
+    .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
+    .map(([construct, count]) => construct + ' ×' + String(count))
+    .join(', ')
+  const shown = parsed.discardedConstructs.slice(0, 12).map((entry) => 'line ' + String(entry.line) + ': ' + entry.text).join(' | ')
+  return [{
+    code: 'UML_NOT_A_STATE_DIAGRAM',
+    severity: 'error',
+    message: 'the text is not a state or activity diagram: ' + String(parsed.discardedConstructs.length) + ' declaration(s) of unsupported construct(s) (' + summary + ') and ' + String(parsed.discardedEdges) + ' arrow(s) between them were read as states and transitions, so the parsed model is not this diagram.',
+    detail: shown + (parsed.discardedConstructs.length > 12 ? ' | … ' + String(parsed.discardedConstructs.length - 12) + ' more' : ''),
+  }]
+}
+
 function parseStateDiagram(text: string, notation: UmlNotation): UmlParseResult {
   const lines = text.split(/\r?\n/)
   const { directives, body } = readDirectives(lines, notation)
-  const raw: RawDiagram = { states: [], display: new Map(), edges: [], terminals: [], finalMarks: [], warnings: [] }
+  const raw: RawDiagram = { states: [], display: new Map(), edges: [], terminals: [], finalMarks: [], warnings: [], discarded: [], discardedNodes: new Set() }
+  let discardedEdges = 0
   const declared = new Set<string>()
   const declare = (name: string): void => { if (!declared.has(name)) { declared.add(name); raw.states.push(name) } }
   const skip = notation === 'mermaid'
     ? /^(stateDiagram|stateDiagram-v2|direction\b|classDef\b|class\b|style\b|linkStyle\b|click\b|hide\b|scale\b|title\b|accTitle\b|accDescr\b|%%\{)/
     : /^(@startuml|@enduml|scale\b|skinparam\b|title\b|hide\b|left to right direction|top to bottom direction|autonumber|!theme)/
-  for (const rawLine of body) {
+  let inNote = false
+  body.forEach((rawLine, index) => {
     const line = rawLine.trim()
-    if (line === '' || (line.startsWith('--') && !line.includes('-->'))) continue
-    if (skip.test(line)) continue
+    if (line === '' || (line.startsWith('--') && !line.includes('-->'))) return
+    if (skip.test(line)) return
+    const noteStart = /^note\b/i.test(line)
+    const noteEnd = /^end\s*note$/i.test(line)
+    if (notation === 'plantuml' && !inNote && !noteStart && !noteEnd) {
+      const other = PLANTUML_OTHER_CONSTRUCT.exec(line)
+      if (other !== null) {
+        raw.discarded.push({ construct: other[1].toLowerCase(), line: index + 1, text: line })
+        const id = declaredIdentifier(line)
+        if (id !== undefined) raw.discardedNodes.add(id)
+        return
+      }
+    }
+    if (noteEnd) { inNote = false; return }
+    if (noteStart && !/:\s*.+$/.test(line)) inNote = true
     const note = /^note\s+(?:over|right of|left of)\s+([A-Za-z_][A-Za-z0-9_]*)\s*:\s*(.+)$/i.exec(line)
     if (note !== null) {
       declare(note[1])
       const existing = raw.display.get(note[1])
       if (existing === undefined) raw.display.set(note[1], note[2].trim())
-      continue
+      return
     }
-    if (/^note\b/i.test(line) || /^end\s*note$/i.test(line)) continue
+    if (noteStart) return
     const stateDecl = /^state\s+"([^"]*)"\s+as\s+([A-Za-z_][A-Za-z0-9_]*)$/.exec(line)
-    if (stateDecl !== null) { declare(stateDecl[2]); raw.display.set(stateDecl[2], stateDecl[1]); continue }
+    if (stateDecl !== null) { declare(stateDecl[2]); raw.display.set(stateDecl[2], stateDecl[1]); return }
     const bareState = /^state\s+([A-Za-z_][A-Za-z0-9_]*)\s*\{?$/.exec(line)
-    if (bareState !== null) { declare(bareState[1]); continue }
+    if (bareState !== null) { declare(bareState[1]); return }
     const concurrency = /^\}\s*$|^--\s*$/.test(line)
-    if (concurrency) { raw.warnings.push('UML_PARSE_CONCURRENCY_FLATTENED: a concurrency region or composite block was flattened; LogicModelV1 has no region construct (use logicprobe_compose_verify for parallel machines).'); continue }
+    if (concurrency) { raw.warnings.push('UML_PARSE_CONCURRENCY_FLATTENED: a concurrency region or composite block was flattened; LogicModelV1 has no region construct (use logicprobe_compose_verify for parallel machines).'); return }
     const composite = /^state\s+(.+)\s*\{$/.exec(line)
-    if (composite !== null) { raw.warnings.push('UML_PARSE_COMPOSITE_FLATTENED: composite state "' + composite[1].trim() + '" was flattened into its members.'); continue }
+    if (composite !== null) { raw.warnings.push('UML_PARSE_COMPOSITE_FLATTENED: composite state "' + composite[1].trim() + '" was flattened into its members.'); return }
     const description = /^([A-Za-z_][A-Za-z0-9_]*)\s*:\s*(.+)$/.exec(line)
-    if (description !== null) { declare(description[1]); if (!raw.display.has(description[1])) raw.display.set(description[1], description[2].trim()); continue }
+    if (description !== null) { declare(description[1]); if (!raw.display.has(description[1])) raw.display.set(description[1], description[2].trim()); return }
     const edge = /^(.+?)\s*-->\s*(.+?)(?:\s*:\s*(.*))?$/.exec(line)
     if (edge !== null) {
       const from = edge[1].trim()
@@ -804,25 +935,26 @@ function parseStateDiagram(text: string, notation: UmlNotation): UmlParseResult 
         } else {
           raw.initialState = to
         }
-        continue
+        return
       }
-      if (to === '[*]') { raw.finalMarks.push(from); continue }
+      if (to === '[*]') { raw.finalMarks.push(from); return }
       declare(from)
       declare(to)
+      if (raw.discardedNodes.has(from) || raw.discardedNodes.has(to)) discardedEdges += 1
       raw.edges.push({ from, to, label })
-      continue
+      return
     }
     raw.warnings.push('UML_PARSE_IGNORED_LINE: "' + line + '" is not a state diagram statement; it was ignored.')
-  }
+  })
   const model = rawToModel(raw, directives, raw.warnings)
   const labels = mapLabels(raw.display, directives)
-  return { notation, diagram: 'state', model, labels, warnings: raw.warnings }
+  return { notation, diagram: 'state', model, labels, discardedConstructs: raw.discarded, discardedEdges, warnings: raw.warnings }
 }
 
 function parseActivityDiagram(text: string, notation: UmlNotation): UmlParseResult {
   const lines = text.split(/\r?\n/)
   const { directives, body } = readDirectives(lines, notation)
-  const raw: RawDiagram = { states: [], display: new Map(), edges: [], terminals: [], finalMarks: [], warnings: [] }
+  const raw: RawDiagram = { states: [], display: new Map(), edges: [], terminals: [], finalMarks: [], warnings: [], discarded: [], discardedNodes: new Set() }
   const declared = new Set<string>()
   const declare = (name: string): void => { if (!declared.has(name)) { declared.add(name); raw.states.push(name) } }
   const skip = /^(flowchart|graph)\b|^(classDef|class|style|linkStyle|click|direction)\b|^%%\{/
@@ -858,7 +990,7 @@ function parseActivityDiagram(text: string, notation: UmlNotation): UmlParseResu
   }
   const model = rawToModel(raw, directives, raw.warnings)
   const labels = mapLabels(raw.display, directives)
-  return { notation, diagram: 'activity', model, labels, warnings: raw.warnings }
+  return { notation, diagram: 'activity', model, labels, discardedConstructs: [], discardedEdges: 0, warnings: raw.warnings }
 }
 
 /**
@@ -907,7 +1039,7 @@ export function parseUml(text: string, notation: UmlNotation | 'auto' = 'auto'):
   const resolved = notation === 'auto' ? detectNotation(text) : notation
   const kind = detectDiagram(text)
   if (kind === 'sequence') {
-    throw new UmlError('a sequence diagram is a trace, not a machine: parsing it would drop every branch the trace did not walk. Render diagram "state" or "activity" and parse that instead.')
+    throw new UmlError('a sequence diagram is a trace, not a machine: parsing it would drop every branch the trace did not walk. Render diagram "state" or "activity" and parse that instead.', 'UML_NOT_A_STATE_DIAGRAM')
   }
   return kind === 'state' ? parseStateDiagram(text, resolved) : parseActivityDiagram(text, resolved)
 }
@@ -1229,7 +1361,7 @@ function compiledModel(input: unknown): LogicModelV1 {
   return validation.model
 }
 
-function roundTripOf(model: LogicModelV1, notation: UmlNotation, diagram: UmlDiagram, maxSteps: number): { report: UmlRoundTripReport; primary: string } {
+function roundTripOf(model: LogicModelV1, notation: UmlNotation, diagram: UmlDiagram, maxSteps: number): { report: UmlRoundTripReport; primary: string; parsed: UmlParseResult } {
   const rendered = renderUml(model, notation, diagram, maxSteps)
   const parsed = parseUml(rendered.primary, notation)
   const diffs = diffModels(model, parsed.model)
@@ -1238,12 +1370,14 @@ function roundTripOf(model: LogicModelV1, notation: UmlNotation, diagram: UmlDia
       notation,
       diagram,
       ok: diffs.length === 0,
+      hashSpec: DEFAULT_HASH_SPEC,
       modelHash: modelHash(model),
       parsedHash: modelHash(parsed.model),
       diffs,
       warnings: [...rendered.warnings, ...parsed.warnings],
     },
     primary: rendered.primary,
+    parsed,
   }
 }
 
@@ -1320,18 +1454,26 @@ export function reviewUml(options: UmlReviewOptions): UmlReviewReport {
   let parsed: UmlParseResult | undefined
   let primary: string | undefined
   let roundTrip: UmlRoundTripReport | null = null
+  const metadataKeys = metadataKeysOf(hasModel ? options.model : undefined)
+  const metadata = metadataKeys.length === 0 ? {} : { metadataKeys }
+  let discardedConstructs: DiscardedConstruct[] = []
+  let discardedEdges = 0
 
   if (hasDiagram) {
     try {
       parsed = parseUml(options.diagram as string, options.notation ?? 'auto')
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
+      const unreadable: UmlFinding = { code: 'UML001_DIAGRAM_UNREADABLE', severity: 'error', message, detail: 'The diagram could not be read as a Mermaid/PlantUML state or activity diagram.' }
       return {
         ok: false,
+        ran: true,
+        ...verdictOfFindings([unreadable]),
         source: hasModel ? 'model+diagram' : 'diagram',
         summary: { errors: 1, warnings: 0, info: 0, states: 0, events: 0, transitions: 0, terminalStates: 0, reachableStates: 0, documentedStates: 0 },
-        findings: [{ code: 'UML001_DIAGRAM_UNREADABLE', severity: 'error', message, detail: 'The diagram could not be read as a Mermaid/PlantUML state or activity diagram.' }],
+        findings: [unreadable],
         roundTrip: null,
+        ...metadata,
         warnings,
         nextSteps: ['Fix the diagram syntax (or render one from a model with logicprobe_uml action=render) and review again.'],
       }
@@ -1339,6 +1481,13 @@ export function reviewUml(options: UmlReviewOptions): UmlReviewReport {
     notation = parsed.notation
     labels = parsed.labels
     warnings.push(...parsed.warnings)
+    // A diagram from another family parses into something; that something must never
+    // be read as a model of this file, so the parse defects are review findings here too.
+    findings.push(...parseFindings(parsed))
+    if (parsed.discardedConstructs.length > 0) {
+      discardedConstructs = parsed.discardedConstructs
+      discardedEdges = parsed.discardedEdges
+    }
     if (hasModel) {
       model = compiledModel(options.model)
       const diffs = diffModels(model, parsed.model)
@@ -1346,6 +1495,7 @@ export function reviewUml(options: UmlReviewOptions): UmlReviewReport {
         notation: parsed.notation,
         diagram: parsed.diagram,
         ok: diffs.length === 0,
+        hashSpec: DEFAULT_HASH_SPEC,
         modelHash: modelHash(model),
         parsedHash: modelHash(parsed.model),
         diffs,
@@ -1433,11 +1583,14 @@ export function reviewUml(options: UmlReviewOptions): UmlReviewReport {
   const events = new Set(model.transitions.map((transition) => transition.event))
   const nextSteps: string[] = []
   if (errors > 0) nextSteps.push('Resolve the error findings first — a diagram that cannot be read (or that disagrees with its model) will mislead every later review.')
+  if (findings.some((finding) => finding.code === 'UML_NOT_A_STATE_DIAGRAM')) nextSteps.push('This text is not a state or activity diagram: keep it as its own view and model the machine as a state/activity diagram before reviewing it.')
   nextSteps.push('Run logicprobe_verify on this model for the behavioural checks (S1-S8 structural, A1-A14 adversarial); the review above covers modelling, not behaviour.')
   if (model.narrative === undefined) nextSteps.push('Add narrative.states/events/scenarios so the diagram is readable against the code.')
   if (findings.some((finding) => finding.code === 'UML011_UNBOUNDED_VARIABLE')) nextSteps.push('Declare min/max (or boundaryChecks) before relying on A5 boundary probes.')
   return {
     ok: true,
+    ran: true,
+    ...verdictOfFindings(findings),
     source: hasModel && hasDiagram ? 'model+diagram' : (hasDiagram ? 'diagram' : 'model'),
     summary: {
       errors,
@@ -1455,6 +1608,8 @@ export function reviewUml(options: UmlReviewOptions): UmlReviewReport {
     ...(labels === undefined ? {} : { labels }),
     ...(hasDiagram ? { model } : {}),
     ...(primary === undefined ? {} : { primary }),
+    ...metadata,
+    ...(discardedConstructs.length === 0 ? {} : { discardedConstructs, discardedEdges }),
     warnings,
     nextSteps,
   }

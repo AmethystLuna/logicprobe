@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import type { CheckResult, Finding } from './engine.js'
+import { verdictOfFindings, type CheckResult, type Finding, type Verdict } from './engine.js'
 
 export const DATA_ENGINE_SCHEMA_VERSION = 1
 
@@ -129,7 +129,11 @@ export interface DataComparisonSummary {
 }
 
 export interface DataVerificationReport {
+  /** The engine ran and the input was well-formed enough to produce this report. Read `verdict` for the review outcome. */
   ok: boolean
+  ran: boolean
+  verdict: Verdict
+  verdictReason: string
   schemaVersion: 1
   modelHash: string
   summary: {
@@ -913,8 +917,11 @@ function buildDataComparisonSummary(before: DataModelV1, after: DataModelV1, opt
 export function runDataVerification(input: unknown, options: DataVerificationOptions = {}): DataVerificationReport {
   const validation = validateDataModel(input)
   if (!validation.ok) {
+    const findings: Finding[] = validation.errors.map((message) => ({ code: 'DATA_MODEL_INVALID', severity: 'error', message }))
     return {
       ok: false,
+      ran: true,
+      ...verdictOfFindings(findings),
       schemaVersion: 1,
       modelHash: '',
       summary: { entities: 0, fields: 0, errors: validation.errors.length, warnings: 0, checksRun: 0 },
@@ -923,7 +930,7 @@ export function runDataVerification(input: unknown, options: DataVerificationOpt
         name: 'Data Model Validation',
         status: 'fail',
         detail: 'Data model schema validation failed: ' + validation.errors.length + ' errors',
-        findings: validation.errors.map((message) => ({ code: 'DATA_MODEL_INVALID', severity: 'error', message })),
+        findings,
       }],
     }
   }
@@ -950,8 +957,11 @@ export function runDataVerification(input: unknown, options: DataVerificationOpt
   if (options.beforeModel !== undefined) {
     const beforeValidation = validateDataModel(options.beforeModel)
     if (!beforeValidation.ok) {
+      const beforeFindings: Finding[] = beforeValidation.errors.map((message) => ({ code: 'BEFORE_DATA_MODEL_INVALID', severity: 'error', message }))
       return {
         ok: false,
+        ran: true,
+        ...verdictOfFindings([...checks.flatMap((check) => check.findings), ...beforeFindings]),
         schemaVersion: 1,
         modelHash: dataModelHash(model),
         summary: {
@@ -968,7 +978,7 @@ export function runDataVerification(input: unknown, options: DataVerificationOpt
             name: 'Before Data Model Validation',
             status: 'fail',
             detail: 'Before data model schema validation failed: ' + beforeValidation.errors.length + ' errors',
-            findings: beforeValidation.errors.map((message) => ({ code: 'BEFORE_DATA_MODEL_INVALID', severity: 'error', message })),
+            findings: beforeFindings,
           },
         ],
       }
@@ -986,6 +996,8 @@ export function runDataVerification(input: unknown, options: DataVerificationOpt
   const warnings = checks.reduce((sum, check) => sum + check.findings.filter((finding) => finding.severity === 'warning').length, 0)
   return {
     ok: true,
+    ran: true,
+    ...verdictOfFindings(checks.flatMap((check) => check.findings)),
     schemaVersion: 1,
     modelHash: dataModelHash(model),
     summary: {

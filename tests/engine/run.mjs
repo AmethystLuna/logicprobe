@@ -1576,6 +1576,121 @@ async function runClosedModelValidationTests() {
 await runClosedModelValidationTests()
 
 await runNarrativeValidationTests()
+
+// ---------------------------------------------------------------------------
+// Report contract (P0-1), metadata keys and hash specs (P0-3/P0-4)
+// ---------------------------------------------------------------------------
+
+function expectFail(name, report) {
+  if (report.verdict !== 'fail') throw new Error(name + ': expected verdict fail, got ' + report.verdict)
+  if (report.verdictReason === '') throw new Error(name + ': verdictReason must not be empty')
+  assertNoUndefinedValues(report)
+}
+
+async function runReportContractTests() {
+  // The exact false guarantee this contract closes: `ok: true` while a check failed.
+  const deadlocked = runVerification({ schemaVersion: 1, init: 'A', states: [{ id: 'A' }], transitions: [] })
+  if (deadlocked.ok !== true || deadlocked.ran !== true) throw new Error('the engine ran; ok/ran must both be true')
+  expectFail('deadlock', deadlocked)
+  if (deadlocked.verdictReason !== '1 error finding(s) (first: S2_NO_TRANSITIONS)') {
+    throw new Error('unexpected verdictReason: ' + deadlocked.verdictReason)
+  }
+  if (deadlocked.summary.errors !== 1) throw new Error('the summary must still count the error')
+
+  // A validation failure is a refusal of the model, not of the tool: ran stays true, verdict fail.
+  const invalid = runVerification({ schemaVersion: 2, init: 'A', states: [{ id: 'A' }], transitions: [] })
+  if (invalid.ok !== false || invalid.ran !== true) throw new Error('a rejected model still ran the validation')
+  expectFail('invalid model', invalid)
+  if (!invalid.verdictReason.startsWith('1 error finding(s) (first: MODEL_INVALID)')) {
+    throw new Error('unexpected verdictReason: ' + invalid.verdictReason)
+  }
+
+  // Warnings alone are not a failure, but they are not silence either.
+  const warnings = runVerification({
+    schemaVersion: 1,
+    init: 'A',
+    states: [{ id: 'A' }, { id: 'B', terminal: true }],
+    transitions: [{ from: 'A', event: 'go', to: 'B' }, { from: 'B', event: 'stray', to: 'B' }],
+  })
+  if (warnings.verdict !== 'pass_with_findings') throw new Error('expected pass_with_findings, got ' + warnings.verdict)
+
+  const clean = runVerification(JSON.parse(readFileSync(new URL('leads-to-direct.json', root), 'utf8')))
+  if (clean.verdict !== 'pass') throw new Error('expected pass, got ' + clean.verdict)
+  if (clean.verdictReason !== 'no error or warning findings') throw new Error('unexpected reason: ' + clean.verdictReason)
+  // A model with warnings only is not a failure — and not silence either.
+  const happy = runVerification(JSON.parse(readFileSync(new URL('happy-path.json', root), 'utf8')))
+  if (happy.verdict !== 'pass_with_findings' || happy.summary.errors !== 0) {
+    throw new Error('a warning-only model must be pass_with_findings, got ' + happy.verdict)
+  }
+
+  // Composition carries the same contract.
+  const machine = (prefix) => ({
+    schemaVersion: 1,
+    init: prefix + '0',
+    states: [{ id: prefix + '0' }, { id: prefix + '1', terminal: true }],
+    transitions: [{ from: prefix + '0', event: 'go', to: prefix + '1' }],
+  })
+  const composed = runCompositionVerification([machine('A'), machine('B')])
+  if (composed.ran !== true || composed.verdict !== 'pass') throw new Error('clean composition must pass')
+  const stuck = runCompositionVerification([{ schemaVersion: 1, init: 'S', states: [{ id: 'S' }], transitions: [] }, machine('B')])
+  expectFail('composition deadlock', stuck)
+
+  // `_`-prefixed keys anywhere are annotation metadata: ignored, echoed, and excluded
+  // from the hash — so an archived model hashes like the model with metadata stripped.
+  const bare = {
+    schemaVersion: 1,
+    init: 'A',
+    states: [{ id: 'A' }, { id: 'B', terminal: true }],
+    transitions: [{ from: 'A', event: 'go', to: 'B' }],
+  }
+  const archived = {
+    ...JSON.parse(JSON.stringify(bare)),
+    _source: 'docs/uml/axis-state-machine.model.json',
+    _verified: { modelHash: '5f83e994153c9f53c2303029d3cfc4140f32b75f868c63b69fdbcf1586c41351', at: '2026-10-09' },
+    _extraction_caveats: ['guards approximated'],
+    states: [{ id: 'A', _note: 'power-on' }, { id: 'B', terminal: true }],
+  }
+  const archivedReport = runVerification(archived)
+  if (!archivedReport.ok) throw new Error('a model with `_` metadata must validate: ' + JSON.stringify(archivedReport.checks[0]?.findings ?? []))
+  if (archivedReport.verdict !== 'pass') throw new Error('metadata must not change the verdict')
+  const expectedKeys = ['_extraction_caveats', '_source', '_verified', 'states[0]._note']
+  if (JSON.stringify(archivedReport.metadataKeys) !== JSON.stringify(expectedKeys)) {
+    throw new Error('metadataKeys mismatch: ' + JSON.stringify(archivedReport.metadataKeys))
+  }
+  if (modelHash(archived) !== modelHash(bare)) throw new Error('`_` metadata must not change the model hash')
+  if (JSON.stringify(archivedReport.checks) !== JSON.stringify(runVerification(bare).checks)) {
+    throw new Error('`_` metadata must not change a single check result')
+  }
+  // A typo without the prefix is still a rejection: the exemption is namespaced, not a loosening.
+  const typo = { ...JSON.parse(JSON.stringify(bare)), sttes: [] }
+  if (runVerification(typo).ok) throw new Error('a mistyped top-level key must still be rejected')
+
+  // hashSpec: v1 excludes metadata, v0 is the pre-0.10.0 behaviour, and both are
+  // byte-identical for a model without `_` keys (so archived hashes stay valid).
+  if (archivedReport.hashSpec !== 'v1') throw new Error('the report must name the hash spec it used')
+  if (modelHash(archived, 'v1') === modelHash(archived, 'v0')) throw new Error('v0 and v1 must differ when metadata is present')
+  if (modelHash(bare, 'v1') !== modelHash(bare, 'v0')) throw new Error('v0 and v1 must agree without metadata')
+  const legacy = runVerification(bare, { hashSpec: 'v0' })
+  if (legacy.hashSpec !== 'v0' || legacy.modelHash !== modelHash(bare, 'v0')) throw new Error('hashSpec option not honoured')
+
+  // Backward compatibility, pinned: the 0.9.0 hashes of two fixtures. A change to the
+  // normalization must be a new hashSpec, never a silent change to this one.
+  const pinned = [
+    ['happy-path.json', 'f583202888b827922ac512a312758fa2d8cf9055b102205ecad18f81a0a7d539'],
+    ['narrative-complete.json', '962e5b131c142b553286d2fba2fc49afe9783e8387402efa7d21a93a626e2a09'],
+  ]
+  for (const [file, expected] of pinned) {
+    const model = JSON.parse(readFileSync(new URL(file, root), 'utf8'))
+    const actual = modelHash(model)
+    if (actual !== expected) throw new Error(file + ' hashSpec v1 drift: ' + actual + ' != ' + expected)
+    if (modelHash(model, 'v0') !== expected) throw new Error(file + ' must hash the same under v0 (no metadata present)')
+  }
+
+  console.log('PASS report-contract')
+}
+
+await runReportContractTests()
+
 if (failures > 0) {
   console.log('engine fixtures failed:', failures)
   process.exit(1)

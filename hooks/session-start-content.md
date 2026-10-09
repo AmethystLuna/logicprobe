@@ -24,5 +24,7 @@ Plugin logicprobe is active. Documents are not truth — code is. Verify every v
 | "I'll verify while implementing" | Verification happens before implementation, not during. |
 | "I can check this with reasoning alone" | Behavioral claims are verified with code/models, not intuition. One counter-example refutes a universal claim. |
 
+**Reading the reports** — every report carries `ran`, `verdict` (`pass` / `pass_with_findings` / `fail`) and `verdictReason`. `ok: true` only means a report was produced: a deadlocked model verifies with `ok: true` and `verdict: "fail"`, so gate on `verdict`. A `UML_NOT_A_STATE_DIAGRAM` finding means the file is not a state/activity diagram and the parsed model must not be quoted as a model of it. `_`-prefixed keys are annotation metadata: ignored by the schema, excluded from `modelHash`, echoed as `metadataKeys`.
+
 **Proactive suggestion**: When a user asks code-level behavioral questions — "could this state machine deadlock", "is this retry limit safe", "check this timing sequence for bugs" — suggest logicprobe as an optional verification pass (do not auto-escalate).
 </EXTREMELY_IMPORTANT>

@@ -1,5 +1,5 @@
 {
-  "version": "0.9.0",
+  "version": "0.10.0",
   "files": {
     ".claude-plugin/plugin.json": "version",
     ".claude-plugin/marketplace.json": "plugins[0].version",
@@ -19,7 +19,12 @@
       "scripts/bump-version.mjs",
       "node_modules",
       ".git",
-      ".mypy_cache"
+      ".mypy_cache",
+      "lib/types/engine.d.ts",
+      "skills/logicprobe/references/hash-spec.md",
+      "skills/logicprobe/references/logicprobe-engine.py",
+      "src/engine.ts",
+      "tests/engine/run.mjs"
     ]
   }
 }

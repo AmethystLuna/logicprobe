@@ -3,7 +3,7 @@
 // parse round trip. A diagram that does not read back as the model it was drawn
 // from is the defect this suite exists to catch, so every supported notation is
 // round-tripped rather than only asserted on its output text.
-import { renderUml, parseUml, reviewUml, diffModels, guardText, parseGuardText, UmlError } from '../../lib/uml.js'
+import { renderUml, parseUml, parseFindings, reviewUml, diffModels, guardText, parseGuardText, UmlError } from '../../lib/uml.js'
 
 let failures = 0
 function test(name, fn) {
@@ -401,6 +401,109 @@ test('review: next steps route to the engine checks that settle what the review 
   const report = reviewUml({ model })
   if (!report.nextSteps.some((step) => step.includes('logicprobe_verify'))) throw new Error('the review must route to logicprobe_verify')
   if (!report.nextSteps.some((step) => step.includes('narrative'))) throw new Error('a model without narrative must be told to add one')
+})
+
+// ------------------------------------------- structure diagrams are not models --
+
+// The worst failure this front end can have: a component / package / class diagram
+// declares no diagram kind, so a state parser meets its keywords line by line and
+// returns a plausible-looking machine. It parsed cleanly before this contract existed —
+// `ok: true`, two states, one transition — and "the structure diagram was reviewed"
+// was pure fabrication. A parse of such a file must now be loud and must not pass.
+const componentDiagram = [
+  '@startuml',
+  'component [Motion Service] as MS',
+  'component [Locator Adapter] as LA',
+  'package "HAL" {',
+  '  component [AT32 Driver] as DRV',
+  '}',
+  'MS --> LA : request',
+  'LA --> DRV : read',
+  '@enduml',
+].join('\n')
+
+test('parse: a component diagram reports the constructs it cannot represent', () => {
+  const parsed = parseUml(componentDiagram)
+  // The by-product is still returned (callers may want to see it) — but it is labelled.
+  if (parsed.model.states.length !== 3) throw new Error('the by-product has 3 pseudo-states: ' + JSON.stringify(parsed.model.states))
+  const summary = parsed.discardedConstructs.map((entry) => entry.construct + '@' + entry.line).sort()
+  if (JSON.stringify(summary) !== JSON.stringify(['component@2', 'component@3', 'component@5', 'package@4'])) {
+    throw new Error('discarded constructs not reported with their lines: ' + JSON.stringify(summary))
+  }
+  if (parsed.discardedEdges !== 2) throw new Error('both arrows touch discarded nodes: ' + parsed.discardedEdges)
+  const findings = parseFindings(parsed)
+  if (findings.length !== 1 || findings[0].code !== 'UML_NOT_A_STATE_DIAGRAM' || findings[0].severity !== 'error') {
+    throw new Error('expected one error finding UML_NOT_A_STATE_DIAGRAM, got ' + JSON.stringify(findings))
+  }
+  if (!findings[0].message.includes('4 declaration(s)') || !findings[0].message.includes('component ×3') || !findings[0].message.includes('package ×1')) {
+    throw new Error('the message must carry the counts: ' + findings[0].message)
+  }
+  if (!findings[0].message.includes('2 arrow(s)')) throw new Error('the message must carry the discarded edge count')
+  if (!findings[0].detail.includes('line 2: component [Motion Service] as MS')) throw new Error('the detail must quote the source lines')
+})
+
+test('review: a component diagram never passes, and echoes what it discarded', () => {
+  const report = reviewUml({ diagram: componentDiagram })
+  if (report.ok !== true || report.ran !== true) throw new Error('the review ran')
+  if (report.verdict !== 'fail') throw new Error('a structure diagram must not pass: ' + report.verdict)
+  if (findFinding(report, 'UML_NOT_A_STATE_DIAGRAM').length !== 1) throw new Error('expected the parse finding in the review')
+  if (report.summary.errors < 1) throw new Error('the summary must count it as an error')
+  if ((report.discardedConstructs ?? []).length !== 4 || report.discardedEdges !== 2) {
+    throw new Error('the review must echo the discarded constructs: ' + JSON.stringify(report.discardedConstructs))
+  }
+  if (!report.nextSteps.some((step) => step.includes('not a state or activity diagram'))) {
+    throw new Error('the next steps must say the file is the wrong diagram family')
+  }
+  assertNoUndefinedValues(report)
+})
+
+test('review: a component diagram presented as a model is a failed review too', () => {
+  const report = reviewUml({ model, diagram: componentDiagram })
+  if (report.source !== 'model+diagram') throw new Error('source not reported')
+  if (report.verdict !== 'fail') throw new Error('a mismatched, non-state diagram must fail: ' + report.verdict)
+  if (report.roundTrip === null || report.roundTrip.ok) throw new Error('the round trip must fail against a real machine')
+  if (report.roundTrip.hashSpec !== 'v1') throw new Error('the round-trip report must name its hash spec')
+})
+
+test('parse: another Mermaid family is refused by name, with a code', () => {
+  let refusal
+  try { parseUml(['classDiagram', '  class MotionService', '  MotionService --> LocatorAdapter'].join('\n')) } catch (error) { refusal = error }
+  if (!(refusal instanceof UmlError)) throw new Error('expected a UmlError refusal')
+  if (refusal.code !== 'UML_NOT_A_STATE_DIAGRAM') throw new Error('refusal code: ' + refusal.code)
+  if (!refusal.message.includes('`classDiagram`')) throw new Error('the refusal must name the family: ' + refusal.message)
+})
+
+test('review: an unreadable family is an error report with a failing verdict', () => {
+  const report = reviewUml({ diagram: ['erDiagram', '  USER ||--o{ ORDER : places'].join('\n') })
+  if (report.ok !== false || report.verdict !== 'fail') throw new Error('expected ok:false and verdict fail')
+  if (findFinding(report, 'UML001_DIAGRAM_UNREADABLE').length !== 1) throw new Error('expected UML001')
+  if (!report.findings[0].message.includes('erDiagram')) throw new Error('the message must name the family: ' + report.findings[0].message)
+})
+
+test('parse: a multi-line note is not mistaken for an unsupported construct', () => {
+  // The construct keywords are ordinary English words. A note block that mentions one
+  // must not turn a legitimately parsed state diagram into a failed review.
+  const text = [
+    'stateDiagram-v2',
+    '  [*] --> IDLE',
+    '  IDLE --> BUSY : start',
+    '  BUSY --> IDLE : done',
+    '  note left of IDLE',
+    '    the component layer owns this state',
+    '    package boundaries do not apply here',
+    '  end note',
+  ].join('\n')
+  const parsed = parseUml(text)
+  if (parsed.discardedConstructs.length !== 0) throw new Error('a note body must not be read as a construct: ' + JSON.stringify(parsed.discardedConstructs))
+  const report = reviewUml({ diagram: text })
+  if (report.verdict === 'fail') throw new Error('a note mentioning a construct keyword must not fail the review: ' + report.verdictReason)
+})
+
+test('review: a well-modelled machine still passes (the contract did not overreach)', () => {
+  const report = reviewUml({ model })
+  if (report.ran !== true) throw new Error('ran must be reported')
+  if (report.verdict === 'fail') throw new Error('no error finding here: ' + report.verdictReason)
+  if (report.summary.errors !== 0) throw new Error('expected no error findings')
 })
 
 if (failures > 0) { console.log('uml tests failed:', failures); process.exit(1) }

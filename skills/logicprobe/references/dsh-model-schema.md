@@ -56,6 +56,56 @@ Declared keys per part:
 
 `boundaryChecks` is the one place where two schemas share a field name: `logicprobe_verify` uses `{ variable, values }` (a variable's boundary values for A5), while `logicprobe_datamodel_verify` uses `{ entity, field, values }` (a field's boundary values for DA2). Each validator enforces its own shape, so an `(entity, field)` check passed to the state-machine engine is rejected rather than half-understood.
 
+### `_`-prefixed keys are annotation metadata (the one exception)
+
+A key whose name starts with `_` is **not** part of the model. At any level — on the
+model, a state, a transition, inside `narrative` — the schema skips it, the hash ignores
+it, and the report lists it under `metadataKeys`:
+
+```json
+{
+  "schemaVersion": 1,
+  "init": "IDLE",
+  "states": [{ "id": "IDLE", "_note": "power-on, not ready" }],
+  "_source": "docs/uml/motion-module.model.json",
+  "_verified": { "modelHash": "5f83e994…", "at": "2026-10-09" },
+  "_extraction_caveats": ["guard thresholds read from the ISR, not the task"]
+}
+```
+
+```json
+"metadataKeys": ["_extraction_caveats", "_source", "_verified", "states[0]._note"]
+```
+
+Why it exists: provenance, verification snapshots and extraction caveats belong *with*
+the model. Pushed into a sidecar they drift away from it — nobody can say which hash
+belongs to which note. With this exemption the archive record travels inside the file
+and still cannot change the model's identity: `modelHash` excludes `_` keys, so the
+model as archived and the model with the metadata stripped hash identically.
+
+The exemption is namespaced, not a loosening of the closed schema. `_` keys are never
+*read* by any check, so ignoring them cannot produce a false result; a mistyped
+non-prefixed key (`sttes`, `gaurd`, `maximum`) is still a validation error, which is
+the whole point of the closed schema.
+
+### Reading a report: `ran`, `verdict`, `ok`
+
+`logicprobe_verify` (and `logicprobe_compose_verify`) reports separate "the tool ran"
+from "the review passed":
+
+| Field | Meaning |
+|---|---|
+| `ok` | The engine produced a report. For `verify` this is `false` only when model *validation* failed. It is **not** a verdict. |
+| `ran` | The tool executed. `false` only for a tool-level refusal (`errorCode`/`error` present). |
+| `verdict` | `pass` \| `pass_with_findings` \| `fail`. Any `severity: "error"` finding — or a validation failure — makes this `fail`. |
+| `verdictReason` | e.g. `1 error finding(s) (first: S2_NO_TRANSITIONS)`, `no error findings; 3 warning finding(s)`, `no error or warning findings`. |
+| `hashSpec` | The published hash specification `modelHash` follows — see [hash-spec.md](hash-spec.md). |
+| `metadataKeys` | Present only when the input carried `_` keys (see above). |
+
+A caller that reads `ok` sees `true` for a model with a deadlock; the verdict is what
+says so. Report the verdict, quote the counterexample path from the finding, and never
+describe a `fail` as "the tool ran fine".
+
 ### References must resolve
 
 The same reasoning applies to every id a check names. A reference to a state, event, or variable that the model does not declare cannot be satisfied, and because the engine copies each check's target into its findings (`"target": "DONE"`), an unresolvable id reads as authoritative in the report:

@@ -373,6 +373,28 @@ Probe: explore residency — a `tick` step that keeps the machine resident past 
 
 `references/logicprobe-engine.py` is an exact Python mirror of the DSH tools: `verify model.json` runs all 22 checks + D1-D4 with a `--before-model`/optional `--state-mapping`; `compose m1.json m2.json ... --rendezvous a,b` runs C1/C2 composition; `export model.json --format uppaal|tla|prism|spin` reproduces the four exporters byte-for-byte. It reads the same LogicModelV1 JSON as DSH, so a model verified in one host verifies identically in the other (checked by tests/python/run.mjs).
 
+#### Report contract and exit codes
+
+Every report carries `ran`, `verdict` (`pass` / `pass_with_findings` / `fail`),
+`verdictReason` and, where a hash is reported, `hashSpec`. `ok` only says a report was
+produced — a model with a deadlock reports `ok: true` with `verdict: "fail"`, so gate on
+the verdict, never on `ok`:
+
+| Outcome | Exit code |
+|---|---|
+| `verdict: "pass"` or `pass_with_findings` | `0` |
+| `verdict: "fail"` (an error finding, or `MODEL_INVALID`) | `2` |
+| Refused before the engine ran (`ok: false` with `errorCode`/`error`) | `2` |
+
+`uml-parse` exits `2` when the text is not a state or activity diagram (see [uml-modeling-guide.md](uml-modeling-guide.md)), and `uml-review` follows its own verdict.
+
+`_`-prefixed keys anywhere in the model are annotation metadata: ignored by the schema,
+excluded from `modelHash`, and echoed as `metadataKeys` — so an archive record
+(`_source`, `_verified`, `_extraction_caveats`) can live inside the model file without
+changing its identity. `--hash-spec v0|v1` selects the hash specification to report
+(default `v1`), and `--hash-check <hex>` answers whether a recorded hash belongs to any
+published specification at all — see [hash-spec.md](hash-spec.md).
+
 ## Counter-Example Interpretation
 
 When a probe finds a counter-example, classify it:

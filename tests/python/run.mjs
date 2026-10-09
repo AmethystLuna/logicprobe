@@ -499,6 +499,111 @@ check('uml render refuses an invalid model', () => {
   compareUml(() => renderUml(bad, 'mermaid', 'state'), ['uml-render', f])
 })
 
+// ---- report contract, metadata keys, hash specs and exit codes -------------
+// The verdict/ran/hashSpec/metadataKeys contract and the `_`-metadata exemption must
+// be identical on both sides, and the process exit code must follow the verdict: a
+// report that ran and failed is a failure, whatever `ok` says.
+const archivedModel = {
+  schemaVersion: 1,
+  init: 'A',
+  states: [{ id: 'A', _note: 'power-on' }, { id: 'B', terminal: true }],
+  transitions: [{ from: 'A', event: 'go', to: 'B' }],
+  _source: 'docs/uml/axis-state-machine.model.json',
+  _verified: { modelHash: '5f83e994153c9f53c2303029d3cfc4140f32b75f868c63b69fdbcf1586c41351' },
+}
+
+check('metadata keys + hashSpec parity', () => {
+  const [f] = writeTmp(archivedModel)
+  const expected = runVerification(archivedModel)
+  const actual = pythonRun(['verify', f])
+  if (!actual.out) throw new Error('python returned no JSON')
+  const diffs = deepDiff(expected, actual.out)
+  if (diffs.length) throw new Error(diffs.slice(0, 6).join(' | '))
+  if (JSON.stringify(actual.out.metadataKeys) !== JSON.stringify(['_source', '_verified', 'states[0]._note'])) {
+    throw new Error('python metadataKeys: ' + JSON.stringify(actual.out.metadataKeys))
+  }
+  if (actual.out.hashSpec !== 'v1' || actual.out.verdict !== 'pass') throw new Error('python contract fields: ' + JSON.stringify(actual.out).slice(0, 200))
+})
+
+check('hashSpec v0 parity (legacy archived hashes)', () => {
+  const [f] = writeTmp(archivedModel)
+  const expected = runVerification(archivedModel, { hashSpec: 'v0' })
+  const actual = pythonRun(['verify', f, '--hash-spec', 'v0'])
+  if (!actual.out) throw new Error('python returned no JSON')
+  const diffs = deepDiff(expected, actual.out)
+  if (diffs.length) throw new Error(diffs.slice(0, 6).join(' | '))
+  if (actual.out.modelHash === runVerification(archivedModel).modelHash) {
+    throw new Error('v0 must differ from v1 while metadata is present')
+  }
+})
+
+check('exit code follows the verdict, not ok', () => {
+  const deadlocked = { schemaVersion: 1, init: 'A', states: [{ id: 'A' }], transitions: [] }
+  const clean = { schemaVersion: 1, init: 'A', states: [{ id: 'A' }, { id: 'B', terminal: true }], transitions: [{ from: 'A', event: 'go', to: 'B' }] }
+  const [fDead, fClean] = writeTmp(deadlocked, clean)
+  const failed = pythonRun(['verify', fDead])
+  if (failed.out?.ok !== true || failed.out?.verdict !== 'fail') throw new Error('expected ok:true with verdict fail')
+  if (failed.code !== 2) throw new Error('a failed verification must exit 2, got ' + failed.code)
+  const passed = pythonRun(['verify', fClean])
+  if (passed.out?.verdict !== 'pass' || passed.code !== 0) throw new Error('expected exit 0 for pass, got ' + passed.code)
+})
+
+check('--hash-check answers for a published hash and for an unrecorded one', () => {
+  const [f] = writeTmp(archivedModel)
+  const published = runVerification(archivedModel).modelHash
+  const hit = pythonRun(['verify', f, '--hash-check', published])
+  if (!hit.out || hit.out.matches.join(',') !== 'v1' || hit.code !== 0) {
+    throw new Error('a v1 hash must be recognised: ' + JSON.stringify(hit.out))
+  }
+  const miss = pythonRun(['verify', f, '--hash-check', '5f83e994153c9f53c2303029d3cfc4140f32b75f868c63b69fdbcf1586c41351'])
+  if (!miss.out || miss.out.matches.length !== 0 || miss.code !== 2) {
+    throw new Error('an unrecorded hash must be reported as such: ' + JSON.stringify(miss.out))
+  }
+  if (!miss.out.verdictReason.includes('no published hash spec reproduces')) {
+    throw new Error('the answer must be explicit: ' + miss.out.verdictReason)
+  }
+})
+
+const structureDiagram = [
+  '@startuml',
+  'component [Motion Service] as MS',
+  'component [Locator Adapter] as LA',
+  'package "HAL" {',
+  '  component [AT32 Driver] as DRV',
+  '}',
+  'MS --> LA : request',
+  'LA --> DRV : read',
+  '@enduml',
+].join('\n')
+
+check('structure-diagram parse parity (discarded constructs are reported, not dropped)', () => {
+  const expected = parseUml(structureDiagram)
+  const actual = pythonRun(['uml-parse', writeDiagram(structureDiagram)])
+  if (!actual.out) throw new Error('python returned no JSON')
+  const diffs = deepDiff(expected, actual.out)
+  if (diffs.length) throw new Error(diffs.slice(0, 6).join(' | '))
+  if (actual.code !== 2) throw new Error('parsing a component diagram is an error, exit 2, got ' + actual.code)
+})
+
+check('structure-diagram review parity + failing exit code', () => {
+  const expected = reviewUml({ diagram: structureDiagram })
+  const actual = pythonRun(['uml-review', '--diagram', writeDiagram(structureDiagram)])
+  if (!actual.out) throw new Error('python returned no JSON')
+  const diffs = deepDiff(expected, actual.out)
+  if (diffs.length) throw new Error(diffs.slice(0, 6).join(' | '))
+  if (actual.out.verdict !== 'fail' || actual.code !== 2) throw new Error('expected verdict fail and exit 2')
+})
+
+check('another Mermaid family refusal parity', () => {
+  const text = ['classDiagram', '  class MotionService', '  MotionService --> LocatorAdapter'].join('\n')
+  const actual = pythonRun(['uml-parse', writeDiagram(text)])
+  if (!actual.out || actual.out.ok !== false) throw new Error('python did not refuse the family')
+  if (actual.out.errorCode !== 'UML_NOT_A_STATE_DIAGRAM') throw new Error('python errorCode: ' + actual.out.errorCode)
+  let message = ''
+  try { parseUml(text) } catch (error) { message = error instanceof Error ? error.message : String(error) }
+  if (message !== actual.out.error) throw new Error('refusal message differs: TS "' + message + '" vs python ' + JSON.stringify(actual.out.error))
+})
+
 rmSync(tmpDir, { recursive: true, force: true })
 if (failures > 0) { console.log('python parity failed:', failures); process.exit(1) }
 console.log('all python parity checks passed')

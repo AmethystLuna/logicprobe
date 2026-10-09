@@ -160,6 +160,35 @@ UML modelling variant (the task is to draw a flow, not to check a claim):
 
 `references/logicprobe-engine.py` mirrors the same checks and carries `compose` and `export` subcommands for hosts without the native tools.
 
+### Reading a Report: `ok` Is Not a Verdict
+
+Every tool report carries the same outcome contract. **`ok` says a report was produced; `verdict` says how the review went.** A report may be `ok: true` and still be a failed review — gating on `ok` is how a failing verification gets read as a passing one.
+
+| Field | Meaning |
+|-------|---------|
+| `ran` | The tool executed and produced this report. `false` only when the tool refused the request before running (see `errorCode`/`error`). |
+| `verdict` | `pass` \| `pass_with_findings` \| `fail`. **This is the outcome you act on.** |
+| `verdictReason` | Why, e.g. `2 error finding(s) (first: S2_NO_TRANSITIONS)` or `no error findings; 3 warning finding(s)`. |
+| `findings[]` | `{code, severity, message, detail?, path?, evidence?}`. Any `severity: "error"` forces `verdict: "fail"`. |
+| `hashSpec` | Which published model-hash specification `modelHash` follows — see `references/hash-spec.md`. |
+| `metadataKeys[]` | Paths of the `_`-prefixed annotation keys the schema ignored, e.g. `["_source", "_verified", "states[0]._note"]` (present only when the input carried any). |
+
+Turn the verdict into an answer, never into a summary of `ok`:
+
+- `verdict: "pass"` — no error and no warning finding. Safe to report as verified, still with the scope the model covered.
+- `verdict: "pass_with_findings"` — verification ran clean, but warnings exist (e.g. `S5` implicit-ignore events, `UML012_NO_TERMINAL`). Report the pass **and** the warnings; do not silently upgrade it to "no issues".
+- `verdict: "fail"` — an error-severity finding exists, or the input was rejected (`MODEL_INVALID`). Say plainly that the claim is **not** verified, quote the counterexample path the finding carries, and only then propose a correction. Never describe a `fail` as "the tool ran successfully".
+
+Exit codes (non-DSH CLI `references/logicprobe-engine.py`): `0` for `pass`/`pass_with_findings`, `2` for `fail`, a refusal, or an unreadable input. In DSH the native tools return the report as data — read `verdict`, and treat `errorCode`/`error` as the refusal path.
+
+### Archiving a Model: `_`-Prefixed Metadata
+
+Keep provenance with the model instead of in a sidecar that drifts:
+
+- Any key starting with `_` at any level (`_source`, `_verified`, `_uml`, `_extraction_caveats`, `states[0]._note`) is **annotation metadata**: the schema ignores it, `modelHash` excludes it, and the report echoes it as `metadataKeys`.
+- Everything else stays closed — a mistyped `sttes` is still a validation error, and that is deliberate.
+- Because the hash ignores `_` keys, "the model as archived" and "the model with metadata stripped" hash identically; record the reported `hashSpec` next to the hash so a later reader can reproduce it (`verify model.json --hash-check <hex>` answers whether a recorded hash belongs to a published spec at all).
+
 ### Refactoring Verification Mode
 
 When the document under review is a refactoring plan (modifying existing state machine logic, not designing from scratch), adapt the pipeline:
@@ -340,8 +369,10 @@ code flow → model (citation per element) → logicprobe_uml action=render → 
 ```
 
 - **render** — model to diagram. Mermaid covers `state`, `activity` and `sequence`. PlantUML covers `state` and `sequence`. Any construct the notation cannot carry becomes a warning, never a silent drop. PlantUML activity is refused instead of approximated.
-- **parse** — diagram to model. It reads Mermaid and PlantUML state or activity text, so a hand-drawn diagram can be verified like any other model. A sequence diagram is refused, because a trace cannot reconstruct a machine.
+- **parse** — diagram to model. It reads Mermaid and PlantUML state or activity text, so a hand-drawn diagram can be verified like any other model. Two inputs are refused because they cannot become a machine: a sequence diagram (a trace cannot reconstruct a machine) and a different Mermaid family (`classDiagram`, `erDiagram`, `gantt`, `mindmap`, …) — both come back as `errorCode: "UML_NOT_A_STATE_DIAGRAM"` with the discarded construct named.
 - **review** — it answers one of three questions. Give it a model: is the machine well-modelled? Give it a diagram: what does the diagram say? Give it both: does the diagram match the model?
+
+**A structure diagram is the dangerous case, because it parses.** PlantUML component, package, class and deployment diagrams declare no diagram kind, so the parser meets their keywords line by line. It still returns *something* — the arrows look like transitions — so `parse` reports the by-product model **plus** an error finding `UML_NOT_A_STATE_DIAGRAM`, the declarations it could not represent in `discardedConstructs` (with line and text), the arrows that were misread in `discardedEdges`, and `verdict: "fail"`. Read that as: **there is no model of this file; the diagram was not checked.** Do not feed that model to `logicprobe_verify` and call the result a review of the architecture, and do not present a component diagram as evidence about dependencies — for that, see the structural checks in `references/uml-modeling-guide.md`.
 
 The review reports structural defects and documentation gaps. The structural defects are unreachable states, dead ends, ambiguous or non-exhaustive branches, self-loops with no exit, and duplicate transitions. The documentation gaps are a missing narrative, unbounded variables, states the reader cannot map back to code, and label drift. It also runs the fidelity check. Any structural difference between the diagram and its model is `UML017_ROUND_TRIP_MISMATCH`.
 
@@ -349,10 +380,11 @@ Rules for this mode:
 
 1. **A diagram is not evidence.** Every state, event, guard and action needs a citation. Use `file:line` for code and a section reference for a document. Present the citations with the diagram.
 2. **Review before you present.** Run `logicprobe_uml action=review` and fix the error findings first. An ambiguous or dead-ended diagram misleads every later reader.
-3. **The review never replaces verification.** It covers the modelling. S1-S8 and A1-A14 cover the behaviour, and each finding names the check that settles it.
-4. **Keep the narrative with the model.** Write `narrative.states`, `narrative.events` and `narrative.scenarios`. Then the diagram stays readable against the code, and label drift shows up as a finding instead of as a stale picture.
+3. **Check the verdict before the picture.** `ok: true` with `verdict: "fail"` means the review failed; a diagram whose review failed is not something to show as if it were checked.
+4. **The review never replaces verification.** It covers the modelling. S1-S8 and A1-A14 cover the behaviour, and each finding names the check that settles it.
+5. **Keep the narrative with the model.** Write `narrative.states`, `narrative.events` and `narrative.scenarios`. Then the diagram stays readable against the code, and label drift shows up as a finding instead of as a stale picture.
 
-The full checklist (codes `UML001` to `UML019`), the directive format generated diagrams carry, a worked example, and the limits of each view are in `references/uml-modeling-guide.md`.
+The full checklist (codes `UML001` to `UML019` plus `UML_NOT_A_STATE_DIAGRAM`), the directive format generated diagrams carry, a worked example, and the limits of each view are in `references/uml-modeling-guide.md`.
 
 ### When NOT to Escalate
 

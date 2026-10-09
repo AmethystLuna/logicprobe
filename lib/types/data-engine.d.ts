@@ -1,4 +1,4 @@
-import type { CheckResult } from './engine.js';
+import { type CheckResult, type Verdict } from './engine.js';
 export declare const DATA_ENGINE_SCHEMA_VERSION = 1;
 export type DataValue = number | string | boolean | null;
 export type DataType = 'string' | 'integer' | 'number' | 'boolean' | 'uuid' | 'date' | 'datetime' | 'timestamp' | 'json' | 'enum' | 'array' | 'object' | 'binary';
@@ -174,7 +174,11 @@ export interface DataComparisonSummary {
     removedRelationships: string[];
 }
 export interface DataVerificationReport {
+    /** The engine ran and the input was well-formed enough to produce this report. Read `verdict` for the review outcome. */
     ok: boolean;
+    ran: boolean;
+    verdict: Verdict;
+    verdictReason: string;
     schemaVersion: 1;
     modelHash: string;
     summary: {

@@ -84,6 +84,25 @@ The tools:
 
 Transition `cost` (default 1) plus a `budget` invariant makes A12 check the worst-case path cost. A reachable cycle with positive cost counts as unbounded. Transition `weight` (default 1) plus a `probability` invariant makes A13 compute probability reachability. State `onEntry`/`onExit` actions enter A4 pair symmetry automatically, and `maxTicks` plus `tickEvents` drive the A14 deadline check.
 
+### How to read a report (`ok` is not a verdict)
+
+Every report separates "the tool ran" from "the review passed":
+
+| Field | Meaning |
+|-------|---------|
+| `ok` | The engine produced a report. For `verify` it is `false` only when model *validation* failed. It is **not** a verdict. |
+| `ran` | The tool executed. `false` only for a tool-level refusal (which carries `errorCode`/`error`). |
+| `verdict` | `pass` / `pass_with_findings` / `fail`. Any `severity: "error"` finding — or a validation failure — makes it `fail`. |
+| `verdictReason` | One line, e.g. `1 error finding(s) (first: S2_NO_TRANSITIONS)`. |
+| `hashSpec` | The published specification `modelHash` follows — see [`hash-spec.md`](skills/logicprobe/references/hash-spec.md). |
+| `metadataKeys` | Paths of the `_`-prefixed annotation keys the input carried. |
+
+Reading `ok` turns a model with a deadlock into a pass; the verdict is the judgement. The non-DSH Python CLI follows the verdict with its exit code: `pass`/`pass_with_findings` → `0`, `fail` or a refusal → `2`.
+
+### The model carries its own archive record (`_`-prefixed keys)
+
+Any key starting with `_` — at any level: `_source`, `_verified`, `_extraction_caveats`, `states[0]._note` — is **annotation metadata**: the schema skips it, `modelHash` excludes it, and the report echoes it as `metadataKeys`. Provenance and verification snapshots can therefore live inside the model file instead of a sidecar that drifts away from it, without changing the model's hash identity. Every other key stays closed: a mistyped `sttes` is still an error. `verify model.json --hash-check <hex>` answers whether a recorded hash belongs to any published specification.
+
 Install (native bundle, recommended):
 
 ```bash
@@ -112,12 +131,14 @@ pnpm records that version in a `minimumReleaseAgeExclude` entry in the profile's
 `logicprobe_uml` draws a LogicModelV1 as UML. It also reads a hand-drawn UML diagram back into a model, and it reviews the modelling itself. It has three actions:
 
 - **render**: model to diagram. Mermaid covers state, activity flowchart and sequence views. PlantUML covers state and sequence. Any construct the notation cannot express becomes a warning instead of a silent drop. PlantUML activity is refused, because that syntax cannot carry a graph with merges or cycles faithfully.
-- **parse**: diagram to model. It reads Mermaid and PlantUML state or activity diagrams, so a hand-drawn diagram can go straight into `logicprobe_verify`. A sequence diagram is a trace, not a machine, so parsing one is refused.
+- **parse**: diagram to model. It reads Mermaid and PlantUML state or activity diagrams, so a hand-drawn diagram can go straight into `logicprobe_verify`. Two inputs are refused because they cannot become a machine: a sequence diagram (a trace cannot reconstruct a machine), and any other Mermaid family (`classDiagram`, `erDiagram`, `gantt`, `mindmap`, …), which comes back as `errorCode: "UML_NOT_A_STATE_DIAGRAM"` naming the family.
 - **review**: audits the modelling. It reports structural defects and documentation gaps. The structural defects are unreachable states, dead ends, ambiguous branches, self-loops with no exit, and duplicate transitions. The documentation gaps are a missing narrative, unbounded variables, states a reader cannot map back to code, and label drift between diagram and narrative. It also runs the fidelity check: it parses the diagram back into a model and reports every structural difference.
+
+**A structure diagram is the dangerous case, because it parses.** A PlantUML component, package, class or deployment diagram declares no diagram kind, so the parser meets its keywords line by line. The arrows look like transitions, so `parse` returns a by-product model — now together with an error finding `UML_NOT_A_STATE_DIAGRAM`, `discardedConstructs` (every declaration it could not represent, with line and text), `discardedEdges` (the arrows misread as transitions) and `verdict: "fail"`. Read that as: **this file has no model and this diagram was not reviewed.** Do not feed the by-product to `logicprobe_verify` and call the result an architecture review. Structural checks over a real dependency graph (allowed-edge matrices, cycles, isolated nodes) do not exist yet; the codes `UML020`+ are reserved for them.
 
 Fidelity is the core of the feature. Generated diagrams carry `logicprobe:` comment directives for the initial state, the terminal states, aliases and variable kinds. Mermaid and PlantUML ignore those lines; the parser reads them. That is what makes the diagram-versus-model comparison exact.
 
-The review covers the modelling, never the behaviour. Every finding names the engine check that settles the behavioural half. The full list (`UML001`-`UML019`), the directive format, a worked example and the limits of each view are in [`skills/logicprobe/references/uml-modeling-guide.md`](skills/logicprobe/references/uml-modeling-guide.md).
+The review covers the modelling, never the behaviour. Every finding names the engine check that settles the behavioural half. The verdict — not `ok` — says whether the review passed: `fail` means error findings exist and the diagram did **not** pass. The full list (`UML001`-`UML019` plus `UML_NOT_A_STATE_DIAGRAM`), the directive format, a worked example and the limits of each view are in [`skills/logicprobe/references/uml-modeling-guide.md`](skills/logicprobe/references/uml-modeling-guide.md).
 
 ## Usage
 

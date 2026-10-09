@@ -81,8 +81,76 @@ def stable_stringify(value):
     return js_stringify(value, sort_keys=True)
 
 
-def model_hash(model):
-    return hashlib.sha256(stable_stringify(model).encode('utf-8')).hexdigest()
+# ---------------------------------------------------------------------------
+# Report contract: ran / verdict (P0-1) and metadata keys + hash specs (P0-3/P0-4)
+# ---------------------------------------------------------------------------
+
+# Published model-hash specifications. The full normalization rules, the excluded
+# keys and a one-line recompute command are in references/hash-spec.md.
+#   v1 (0.10.0) drops every `_`-prefixed metadata key at every level before hashing.
+#   v0 is the pre-0.10.0 behaviour (no metadata filtering), kept for archived hashes.
+# For a model without `_` keys the two are byte-identical.
+PUBLISHED_HASH_SPECS = ('v0', 'v1')
+DEFAULT_HASH_SPEC = 'v1'
+
+
+def _without_metadata(value):
+    if value is None or not isinstance(value, (dict, list, tuple)):
+        return value
+    if isinstance(value, (list, tuple)):
+        return [_without_metadata(item) for item in value]
+    return {key: _without_metadata(item) for key, item in value.items() if not str(key).startswith('_')}
+
+
+def hash_payload(model, spec=DEFAULT_HASH_SPEC):
+    """The exact payload a hash spec hashes."""
+    return _without_metadata(model) if spec == 'v1' else model
+
+
+def model_hash(model, spec=DEFAULT_HASH_SPEC):
+    return hashlib.sha256(stable_stringify(hash_payload(model, spec)).encode('utf-8')).hexdigest()
+
+
+def metadata_keys_of(input_value):
+    """Paths of every `_`-prefixed key in the input, sorted."""
+    keys = []
+
+    def walk(value, path):
+        if value is None or not isinstance(value, (dict, list, tuple)):
+            return
+        if isinstance(value, (list, tuple)):
+            for index, item in enumerate(value):
+                walk(item, path + '[' + str(index) + ']')
+            return
+        for key, item in value.items():
+            child = key if path == '' else path + '.' + key
+            if str(key).startswith('_'):
+                keys.append(child)
+            walk(item, child)
+
+    walk(input_value, '')
+    keys.sort()
+    return keys
+
+
+def verdict_of(errors, warnings, first_code=None):
+    """Decide the verdict from finding counts. `ok` says the tool ran; this says how it went."""
+    if errors > 0:
+        return {'verdict': 'fail',
+                'verdictReason': str(errors) + ' error finding(s)' + ('' if first_code is None else ' (first: ' + first_code + ')')}
+    if warnings > 0:
+        return {'verdict': 'pass_with_findings', 'verdictReason': 'no error findings; ' + str(warnings) + ' warning finding(s)'}
+    return {'verdict': 'pass', 'verdictReason': 'no error or warning findings'}
+
+
+def verdict_of_findings(findings):
+    errors = [f for f in findings if f.get('severity') == 'error']
+    warnings = [f for f in findings if f.get('severity') == 'warning']
+    return verdict_of(len(errors), len(warnings), errors[0].get('code') if errors else None)
+
+
+def refusal_verdict(reason):
+    return {'verdict': 'fail', 'verdictReason': 'the tool did not run: ' + reason}
 
 
 # ---------------------------------------------------------------------------
@@ -123,7 +191,10 @@ def validate_model(input_value):
 
     def reject_unknown_keys(value, part, path):
         allowed = model_keys[part]
-        unexpected = [k for k in value.keys() if k not in allowed]
+        # `_`-prefixed keys are annotation metadata (provenance, verification
+        # snapshots, extraction caveats): ignored here and excluded from the hash, so a
+        # model can carry its own archive record instead of a sidecar that drifts.
+        unexpected = [k for k in value.keys() if k not in allowed and not str(k).startswith('_')]
         if unexpected:
             bad(path + '.' + unexpected[0], 'unknown field (allowed: ' + ', '.join(allowed) + ')')
 
@@ -331,7 +402,7 @@ def validate_model(input_value):
                 kind = entry.get('kind')
                 if kind in invariant_keys:
                     allowed_keys = invariant_keys[kind]
-                    unexpected = [k for k in entry.keys() if k not in allowed_keys]
+                    unexpected = [k for k in entry.keys() if k not in allowed_keys and not str(k).startswith('_')]
                     if unexpected:
                         bad(p + '.' + unexpected[0], 'unknown field for kind ' + str(kind) + ' (allowed: ' + ', '.join(allowed_keys) + ')')
                 if kind == 'never-states':
@@ -360,7 +431,7 @@ def validate_model(input_value):
                             bad(p + '.when', 'must be an object')
                         elif 'state' in when:
                             for key in when.keys():
-                                if key != 'state':
+                                if key != 'state' and not str(key).startswith('_'):
                                     bad(p + '.when.' + key, 'unknown field for a state scope (allowed: state)')
                             scope_state = when.get('state')
                             if not isinstance(scope_state, str) or len(scope_state) == 0:
@@ -2622,20 +2693,28 @@ def run_verification(input_value, options=None):
         options = {}
     max_states = options.get('maxStates', DEFAULT_MAX_STATES)
     max_permutation_events = options.get('maxPermutationEvents', DEFAULT_MAX_PERMUTATION_EVENTS)
+    hash_spec = options.get('hashSpec', DEFAULT_HASH_SPEC)
+    metadata_keys = metadata_keys_of(input_value)
+    metadata = {} if not metadata_keys else {'metadataKeys': metadata_keys}
     ok_model, model_or_errors = validate_model(input_value)
     if not ok_model:
         errors = model_or_errors
+        findings = [{'code': 'MODEL_INVALID', 'severity': 'error', 'message': message} for message in errors]
         return {
             'ok': False,
+            'ran': True,
+            **verdict_of_findings(findings),
             'schemaVersion': 1,
+            'hashSpec': hash_spec,
             'modelHash': '',
+            **metadata,
             'summary': {'states': 0, 'transitions': 0, 'errors': len(errors), 'warnings': 0, 'checksRun': 0},
             'checks': [{
                 'id': 'MODEL',
                 'name': 'Model Validation',
                 'status': 'fail',
                 'detail': 'Model schema validation failed: ' + str(len(errors)) + ' errors',
-                'findings': [{'code': 'MODEL_INVALID', 'severity': 'error', 'message': message} for message in errors],
+                'findings': findings,
             }],
         }
     model = model_or_errors
@@ -2670,10 +2749,16 @@ def run_verification(input_value, options=None):
         before_ok, before_or_errors = validate_model(before_model)
         if not before_ok:
             before_errors = before_or_errors
+            before_findings = [{'code': 'BEFORE_MODEL_INVALID', 'severity': 'error', 'message': message} for message in before_errors]
+            all_findings = [f for check in checks for f in check['findings']] + before_findings
             return {
                 'ok': False,
+                'ran': True,
+                **verdict_of_findings(all_findings),
                 'schemaVersion': 1,
-                'modelHash': model_hash(model),
+                'hashSpec': hash_spec,
+                'modelHash': model_hash(model, hash_spec),
+                **metadata,
                 'summary': {
                     'states': len(model.get('states') or []),
                     'transitions': len(model.get('transitions') or []),
@@ -2687,7 +2772,7 @@ def run_verification(input_value, options=None):
                     'name': 'Before Model Validation',
                     'status': 'fail',
                     'detail': 'Before model schema validation failed: ' + str(len(before_errors)) + ' errors',
-                    'findings': [{'code': 'BEFORE_MODEL_INVALID', 'severity': 'error', 'message': message} for message in before_errors],
+                    'findings': before_findings,
                 }],
             }
         before = before_or_errors
@@ -2702,8 +2787,12 @@ def run_verification(input_value, options=None):
     coverage_notes = compute_coverage_notes(model)
     report = {
         'ok': True,
+        'ran': True,
+        **verdict_of_findings([f for check in checks for f in check['findings']]),
         'schemaVersion': 1,
-        'modelHash': model_hash(model),
+        'hashSpec': hash_spec,
+        'modelHash': model_hash(model, hash_spec),
+        **metadata,
         'summary': {
             'states': len(model.get('states') or []),
             'transitions': len(model.get('transitions') or []),
@@ -2732,6 +2821,7 @@ def run_composition_verification(machines_input, options=None):
         options = {}
     rendezvous_set = set(options.get('rendezvous') or [])
     max_states = options.get('maxStates', DEFAULT_MAX_STATES)
+    hash_spec = options.get('hashSpec', DEFAULT_HASH_SPEC)
     models = []
     hashes = []
     model_findings = []
@@ -2742,7 +2832,7 @@ def run_composition_verification(machines_input, options=None):
                                    'message': 'machine ' + str(index) + ' invalid: ' + '; '.join(model_or_errors)})
         else:
             models.append(model_or_errors)
-            hashes.append(model_hash(model_or_errors))
+            hashes.append(model_hash(model_or_errors, hash_spec))
     machine_summary = [{'modelHash': hashes[i] if i < len(hashes) else '', 'states': len(m['states'] or []), 'transitions': len(m['transitions'] or [])}
                        for i, m in enumerate(models)]
     if model_findings or len(models) < 2:
@@ -2751,6 +2841,9 @@ def run_composition_verification(machines_input, options=None):
                                    'message': 'composition requires at least two machines'})
         return {
             'ok': False,
+            'ran': True,
+            **verdict_of_findings(model_findings),
+            'hashSpec': hash_spec,
             'summary': {'machineCount': len(models), 'machines': machine_summary, 'compositeStates': 0,
                         'errors': len(model_findings), 'warnings': 0, 'truncated': False},
             'checks': [{'id': 'MODEL', 'name': 'Machine Validation', 'status': 'fail',
@@ -2859,6 +2952,9 @@ def run_composition_verification(machines_input, options=None):
     ]
     return {
         'ok': errors == 0,
+        'ran': True,
+        **verdict_of(errors, warnings, (c1_findings[0]['code'] if c1_findings else (c2_findings[0]['code'] if c2_findings else None))),
+        'hashSpec': hash_spec,
         'summary': {'machineCount': len(models), 'machines': machine_summary, 'compositeStates': composite_states,
                     'errors': errors, 'warnings': warnings, 'truncated': truncated},
         'checks': checks,
@@ -3818,13 +3914,77 @@ _STRIP_NODE_RE = re.compile(r'^([A-Za-z_][A-Za-z0-9_.-]*)\s*(\(\[|\[\(|\{\{|\[|\
 _QUOTED_ONLY_RE = re.compile(r'^"([^"]+)"\Z')
 _QUOTED_IN_RE = re.compile(r'"([^"]*)"')
 
+# PlantUML keywords that declare a construct LogicModelV1 has no place for. Their
+# presence marks the text as a component/package/class/deployment/database diagram —
+# a different diagram family. A state parser still reads *something* out of such a
+# file (the arrows look like transitions), which is why the discarded declarations
+# are collected and reported instead of being ignored.
+_PLANTUML_OTHER_CONSTRUCT_RE = re.compile(
+    r'(component|package|class|interface|enum|enumeration|object|actor|usecase|node|artifact|database|'
+    r'rectangle|folder|frame|cloud|storage|collections|queue|stack|agent|boundary|control|entity|deployment|'
+    r'protocol|struct|exception|metaclass|stereotype|circle|hexagon|label|port|portin|portout)\b', re.I)
+
+# Mermaid diagram-family headers that are neither a state machine nor a flow.
+_MERMAID_OTHER_FAMILIES = (
+    'classDiagram', 'erDiagram', 'gantt', 'pie', 'journey', 'mindmap', 'gitGraph',
+    'C4Context', 'C4Container', 'C4Component', 'C4Dynamic', 'C4Deployment',
+    'requirementDiagram', 'timeline', 'quadrantChart', 'sankey-beta', 'block-beta',
+    'packet-beta', 'architecture-beta', 'radar-beta', 'treemap-beta', 'xychart-beta',
+)
+
+def _other_mermaid_family(text):
+    for family in _MERMAID_OTHER_FAMILIES:
+        if re.search(r'^\s*' + family + r'\b', text, re.M):
+            return family
+    return None
+
+
+def _declared_identifier(text):
+    """The node identifier a declaration introduces (`… as ID`, or a bare `component ID`)."""
+    alias = re.search(r'\bas\s+([A-Za-z_][A-Za-z0-9_]*)\s*;?\Z', text)
+    if alias is not None:
+        return alias.group(1)
+    bare = re.match(r'^[A-Za-z]+\s+([A-Za-z_][A-Za-z0-9_]*)\s*;?\Z', text)
+    return None if bare is None else bare.group(1)
+
+
+class UmlRefusal(ValueError):
+    """A UML front-end refusal; `code` lets the CLI report why instead of a generic input error."""
+
+    def __init__(self, message, code='UML_INPUT'):
+        super().__init__(message)
+        self.code = code
+
+
+def parse_findings(parsed):
+    """Findings a parse result carries on its own (mirror of the TypeScript parseFindings)."""
+    if not parsed['discardedConstructs']:
+        return []
+    counts = {}
+    for entry in parsed['discardedConstructs']:
+        counts[entry['construct']] = counts.get(entry['construct'], 0) + 1
+    summary = ', '.join(name + ' ×' + str(counts[name]) for name in sorted(counts))
+    shown = ' | '.join('line ' + str(entry['line']) + ': ' + entry['text'] for entry in parsed['discardedConstructs'][:12])
+    return [{
+        'code': 'UML_NOT_A_STATE_DIAGRAM',
+        'severity': 'error',
+        'message': 'the text is not a state or activity diagram: ' + str(len(parsed['discardedConstructs']))
+                   + ' declaration(s) of unsupported construct(s) (' + summary + ') and ' + str(parsed['discardedEdges'])
+                   + ' arrow(s) between them were read as states and transitions, so the parsed model is not this diagram.',
+        'detail': shown + (' | … ' + str(len(parsed['discardedConstructs']) - 12) + ' more' if len(parsed['discardedConstructs']) > 12 else ''),
+    }]
+
 
 def _detect_notation(text):
     if re.search(r'^\s*@start', text, re.M):
         return 'plantuml'
     if re.search(r'^\s*(stateDiagram|stateDiagram-v2|flowchart|graph|sequenceDiagram)\b', text, re.M):
         return 'mermaid'
-    raise ValueError('cannot tell whether this is Mermaid or PlantUML text: '
+    # A known Mermaid family is still Mermaid: say so, and let _detect_diagram refuse
+    # it by name instead of blaming the notation.
+    if _other_mermaid_family(text) is not None:
+        return 'mermaid'
+    raise UmlRefusal('cannot tell whether this is Mermaid or PlantUML text: '
                      'expected `stateDiagram-v2` / `flowchart` / `sequenceDiagram`, or `@startuml`')
 
 
@@ -3835,13 +3995,19 @@ def _detect_diagram(text):
         return 'activity'
     if re.search(r'^\s*sequenceDiagram\b', text, re.M):
         return 'sequence'
+    family = _other_mermaid_family(text)
+    if family is not None:
+        raise UmlRefusal('`' + family + '` is not a state or activity diagram: logicprobe models state machines and flows, '
+                         'so this diagram family cannot be parsed into a LogicModelV1. Discarded: ' + family + ' ×1. '
+                         'Render the machine with logicprobe_uml action=render and keep this diagram as its own view.',
+                         'UML_NOT_A_STATE_DIAGRAM')
     if re.search(r'^\s*@startuml', text, re.M):
         # PlantUML declares the diagram kind by its body; the state keyword is the only
         # structural one logicprobe emits, everything else in that family is a state diagram too.
         if re.search(r'^\s*participant\b', text, re.M) or re.search(r'->>\s*', text):
             return 'sequence'
         return 'state'
-    raise ValueError('cannot tell which diagram kind this text declares')
+    raise UmlRefusal('cannot tell which diagram kind this text declares')
 
 
 def _comment_prefix(notation):
@@ -4069,7 +4235,9 @@ def _raw_to_model(raw, directives, warnings):
 def _parse_state_diagram(text, notation):
     lines = re.split(r'\r?\n', text)
     directives, body = _read_directives(lines, notation)
-    raw = {'states': [], 'display': {}, 'edges': [], 'initialState': None, 'terminals': [], 'finalMarks': [], 'warnings': []}
+    raw = {'states': [], 'display': {}, 'edges': [], 'initialState': None, 'terminals': [], 'finalMarks': [],
+           'warnings': [], 'discarded': [], 'discardedNodes': set()}
+    discarded_edges = 0
     declared = set()
 
     def declare(name):
@@ -4078,19 +4246,35 @@ def _parse_state_diagram(text, notation):
             raw['states'].append(name)
 
     skip = _MERMAID_STATE_SKIP_RE if notation == 'mermaid' else _PLANTUML_STATE_SKIP_RE
-    for raw_line in body:
+    in_note = False
+    for index, raw_line in enumerate(body):
         line = _js_trim(raw_line)
         if line == '' or (line.startswith('--') and '-->' not in line):
             continue
         if skip.match(line):
             continue
+        note_start = _NOTE_RE.match(line) is not None
+        note_end = _END_NOTE_RE.match(line) is not None
+        if notation == 'plantuml' and not in_note and not note_start and not note_end:
+            other = _PLANTUML_OTHER_CONSTRUCT_RE.match(line)
+            if other is not None:
+                raw['discarded'].append({'construct': other.group(1).lower(), 'line': index + 1, 'text': line})
+                identifier = _declared_identifier(line)
+                if identifier is not None:
+                    raw['discardedNodes'].add(identifier)
+                continue
+        if note_end:
+            in_note = False
+            continue
+        if note_start and not re.search(r':\s*.+\Z', line):
+            in_note = True
         note = _STATE_NOTE_RE.match(line)
         if note is not None:
             declare(note.group(1))
             if note.group(1) not in raw['display']:
                 raw['display'][note.group(1)] = _js_trim(note.group(2))
             continue
-        if _NOTE_RE.match(line) or _END_NOTE_RE.match(line):
+        if note_start:
             continue
         state_decl = _STATE_DECL_RE.match(line)
         if state_decl is not None:
@@ -4133,12 +4317,15 @@ def _parse_state_diagram(text, notation):
                 continue
             declare(frm)
             declare(to)
+            if frm in raw['discardedNodes'] or to in raw['discardedNodes']:
+                discarded_edges += 1
             raw['edges'].append({'from': frm, 'to': to, 'label': label})
             continue
         raw['warnings'].append('UML_PARSE_IGNORED_LINE: "' + line + '" is not a state diagram statement; it was ignored.')
     model = _raw_to_model(raw, directives, raw['warnings'])
     labels = _map_labels(raw['display'], directives)
-    return {'notation': notation, 'diagram': 'state', 'model': model, 'labels': labels, 'warnings': raw['warnings']}
+    return {'notation': notation, 'diagram': 'state', 'model': model, 'labels': labels,
+            'discardedConstructs': raw['discarded'], 'discardedEdges': discarded_edges, 'warnings': raw['warnings']}
 
 
 def _strip_quotes(text):
@@ -4221,7 +4408,8 @@ def _parse_activity_diagram(text, notation):
             raw['warnings'].append('UML_PARSE_IGNORED_LINE: "' + line + '" is not a flowchart statement; it was ignored.')
     model = _raw_to_model(raw, directives, raw['warnings'])
     labels = _map_labels(raw['display'], directives)
-    return {'notation': notation, 'diagram': 'activity', 'model': model, 'labels': labels, 'warnings': raw['warnings']}
+    return {'notation': notation, 'diagram': 'activity', 'model': model, 'labels': labels,
+            'discardedConstructs': [], 'discardedEdges': 0, 'warnings': raw['warnings']}
 
 
 def _map_labels(display, directives):
@@ -4236,8 +4424,8 @@ def parse_uml(text, notation='auto'):
     resolved = _detect_notation(text) if notation == 'auto' else notation
     kind = _detect_diagram(text)
     if kind == 'sequence':
-        raise ValueError('a sequence diagram is a trace, not a machine: parsing it would drop every branch the trace did not walk. '
-                         'Render diagram "state" or "activity" and parse that instead.')
+        raise UmlRefusal('a sequence diagram is a trace, not a machine: parsing it would drop every branch the trace did not walk. '
+                         'Render diagram "state" or "activity" and parse that instead.', 'UML_NOT_A_STATE_DIAGRAM')
     return _parse_state_diagram(text, resolved) if kind == 'state' else _parse_activity_diagram(text, resolved)
 
 
@@ -4575,12 +4763,13 @@ def _round_trip_of(model, notation, diagram, max_steps):
         'notation': notation,
         'diagram': diagram,
         'ok': len(diffs) == 0,
+        'hashSpec': DEFAULT_HASH_SPEC,
         'modelHash': model_hash(model),
         'parsedHash': model_hash(parsed['model']),
         'diffs': diffs,
         'warnings': list(rendered['warnings']) + list(parsed['warnings']),
     }
-    return {'report': report, 'primary': rendered['primary']}
+    return {'report': report, 'primary': rendered['primary'], 'parsed': parsed}
 
 
 def diff_models(left, right):
@@ -4644,25 +4833,39 @@ def review_uml(options):
     labels = None
     primary = None
     round_trip = None
+    metadata_keys = metadata_keys_of(options['model']) if has_model else []
+    metadata = {} if not metadata_keys else {'metadataKeys': metadata_keys}
+    discarded_constructs = []
+    discarded_edges = 0
 
     if has_diagram:
         try:
             parsed = parse_uml(options['diagram'], options['notation'] if options.get('notation') is not None else 'auto')
         except ValueError as exc:
+            unreadable = {'code': 'UML001_DIAGRAM_UNREADABLE', 'severity': 'error', 'message': str(exc),
+                          'detail': 'The diagram could not be read as a Mermaid/PlantUML state or activity diagram.'}
             return {
                 'ok': False,
+                'ran': True,
+                **verdict_of_findings([unreadable]),
                 'source': 'model+diagram' if has_model else 'diagram',
                 'summary': {'errors': 1, 'warnings': 0, 'info': 0, 'states': 0, 'events': 0, 'transitions': 0,
                             'terminalStates': 0, 'reachableStates': 0, 'documentedStates': 0},
-                'findings': [{'code': 'UML001_DIAGRAM_UNREADABLE', 'severity': 'error', 'message': str(exc),
-                              'detail': 'The diagram could not be read as a Mermaid/PlantUML state or activity diagram.'}],
+                'findings': [unreadable],
                 'roundTrip': None,
+                **metadata,
                 'warnings': warnings,
                 'nextSteps': ['Fix the diagram syntax (or render one from a model with logicprobe_uml action=render) and review again.'],
             }
         notation = parsed['notation']
         labels = parsed['labels']
         warnings.extend(parsed['warnings'])
+        # A diagram from another family parses into something; that something must never
+        # be read as a model of this file, so the parse defects are review findings too.
+        findings.extend(parse_findings(parsed))
+        if parsed['discardedConstructs']:
+            discarded_constructs = parsed['discardedConstructs']
+            discarded_edges = parsed['discardedEdges']
         if has_model:
             model = _compiled_model(options['model'])
             diffs = diff_models(model, parsed['model'])
@@ -4670,6 +4873,7 @@ def review_uml(options):
                 'notation': parsed['notation'],
                 'diagram': parsed['diagram'],
                 'ok': len(diffs) == 0,
+                'hashSpec': DEFAULT_HASH_SPEC,
                 'modelHash': model_hash(model),
                 'parsedHash': model_hash(parsed['model']),
                 'diffs': diffs,
@@ -4761,6 +4965,9 @@ def review_uml(options):
     if errors > 0:
         next_steps.append('Resolve the error findings first — a diagram that cannot be read (or that disagrees with its model) '
                           'will mislead every later review.')
+    if any(finding['code'] == 'UML_NOT_A_STATE_DIAGRAM' for finding in findings):
+        next_steps.append('This text is not a state or activity diagram: keep it as its own view and model the machine as a '
+                          'state/activity diagram before reviewing it.')
     next_steps.append('Run logicprobe_verify on this model for the behavioural checks (S1-S8 structural, A1-A14 adversarial); '
                       'the review above covers modelling, not behaviour.')
     if 'narrative' not in model:
@@ -4769,6 +4976,8 @@ def review_uml(options):
         next_steps.append('Declare min/max (or boundaryChecks) before relying on A5 boundary probes.')
     report = {
         'ok': True,
+        'ran': True,
+        **verdict_of_findings(findings),
         'source': 'model+diagram' if (has_model and has_diagram) else ('diagram' if has_diagram else 'model'),
         'summary': {
             'errors': errors,
@@ -4790,6 +4999,10 @@ def review_uml(options):
         report['model'] = model
     if primary is not None:
         report['primary'] = primary
+    report.update(metadata)
+    if discarded_constructs:
+        report['discardedConstructs'] = discarded_constructs
+        report['discardedEdges'] = discarded_edges
     report['warnings'] = warnings
     report['nextSteps'] = next_steps
     return report
@@ -4804,9 +5017,35 @@ def _load_json_file(file_path):
         return json.load(handle)
 
 
+def _refusal_json(exc):
+    return {'ok': False, 'ran': False, **refusal_verdict(str(exc)),
+            'errorCode': getattr(exc, 'code', 'UML_INPUT'), 'error': str(exc)}
+
+
+def _hash_check(model, target):
+    """Answer "which published hash spec reproduces this archived hash?" (never guesses)."""
+    published = [{'hashSpec': spec, 'modelHash': model_hash(model, spec)} for spec in PUBLISHED_HASH_SPECS]
+    matches = [entry['hashSpec'] for entry in published if entry['modelHash'] == target]
+    return {
+        'ran': True,
+        'verdict': 'pass' if matches else 'fail',
+        'verdictReason': ('hash reproduced by spec(s) ' + ', '.join(matches)) if matches
+                         else ('no published hash spec reproduces ' + target),
+        'checked': target,
+        'matches': matches,
+        'hashSpec': DEFAULT_HASH_SPEC,
+        'modelHash': model_hash(model),
+        'published': published,
+    }
+
+
 def _cmd_verify(args):
     model = _load_json_file(args.model)
-    options = {}
+    if args.hash_check:
+        report = _hash_check(model, args.hash_check)
+        print(json.dumps(report, indent=2))
+        sys.exit(0 if report['matches'] else 2)
+    options = {'hashSpec': args.hash_spec}
     if args.max_states:
         options['maxStates'] = args.max_states
     if args.max_permutation_events:
@@ -4817,19 +5056,20 @@ def _cmd_verify(args):
         options['stateMapping'] = _load_json_file(args.state_mapping)
     report = run_verification(model, options)
     print(json.dumps(report, indent=2))
-    sys.exit(0 if report['ok'] and report['summary'].get('errors', 0) == 0 else 2)
+    # The exit code follows the verdict, not `ok`: a report that ran and failed is a failure.
+    sys.exit(0 if report['verdict'] != 'fail' else 2)
 
 
 def _cmd_compose(args):
     machines = [_load_json_file(m) for m in args.machines]
-    options = {}
+    options = {'hashSpec': args.hash_spec}
     if args.rendezvous:
         options['rendezvous'] = [e for e in args.rendezvous.split(',') if e]
     if args.max_states:
         options['maxStates'] = args.max_states
     report = run_composition_verification(machines, options)
     print(json.dumps(report, indent=2))
-    sys.exit(0 if report['ok'] else 2)
+    sys.exit(0 if report['verdict'] != 'fail' else 2)
 
 
 def _cmd_export(args):
@@ -4837,7 +5077,7 @@ def _cmd_export(args):
     try:
         result = export_model(model, args.format)
     except ValueError as exc:
-        print(json.dumps({'ok': False, 'error': str(exc)}))
+        print(json.dumps(_refusal_json(exc)))
         sys.exit(2)
     out = {'format': result['format'], 'primary': result['primary'],
            'extras': result['extras'], 'warnings': result['warnings']}
@@ -4849,7 +5089,7 @@ def _cmd_uml_render(args):
         model = _load_json_file(args.model)
         result = render_uml(model, args.notation, args.diagram, args.max_steps)
     except (OSError, ValueError) as exc:
-        print(json.dumps({'ok': False, 'error': str(exc)}))
+        print(json.dumps(_refusal_json(exc)))
         sys.exit(2)
     out = {'notation': result['notation'], 'diagram': result['diagram'],
            'primary': result['primary'], 'warnings': result['warnings']}
@@ -4862,11 +5102,14 @@ def _cmd_uml_parse(args):
             text = handle.read()
         result = parse_uml(text, args.notation)
     except (OSError, ValueError) as exc:
-        print(json.dumps({'ok': False, 'error': str(exc)}))
+        print(json.dumps(_refusal_json(exc)))
         sys.exit(2)
     out = {'notation': result['notation'], 'diagram': result['diagram'], 'model': result['model'],
-           'labels': result['labels'], 'warnings': result['warnings']}
+           'labels': result['labels'], 'discardedConstructs': result['discardedConstructs'],
+           'discardedEdges': result['discardedEdges'], 'warnings': result['warnings']}
     print(json.dumps(out, indent=2))
+    # A diagram from another family parses into something; that is an error, not a success.
+    sys.exit(2 if any(finding['severity'] == 'error' for finding in parse_findings(result)) else 0)
 
 
 def _cmd_uml_review(args):
@@ -4887,9 +5130,10 @@ def _cmd_uml_review(args):
             options['maxSteps'] = args.max_steps
         report = review_uml(options)
     except (OSError, ValueError) as exc:
-        print(json.dumps({'ok': False, 'error': str(exc)}))
+        print(json.dumps(_refusal_json(exc)))
         sys.exit(2)
     print(json.dumps(report, indent=2))
+    sys.exit(0 if report['verdict'] != 'fail' else 2)
 
 
 def _build_parser():
@@ -4902,11 +5146,16 @@ def _build_parser():
     p_verify.add_argument('--state-mapping')
     p_verify.add_argument('--max-states', type=int)
     p_verify.add_argument('--max-permutation-events', type=int)
+    p_verify.add_argument('--hash-spec', choices=list(PUBLISHED_HASH_SPECS), default=DEFAULT_HASH_SPEC,
+                          help='model-hash specification to report (default v1; v0 = pre-0.10.0 behaviour)')
+    p_verify.add_argument('--hash-check', metavar='HEX',
+                          help='report which published hash spec reproduces this archived hash, then exit')
     p_verify.set_defaults(func=_cmd_verify)
     p_compose = sub.add_parser('compose', help='compose two or more machines (C1/C2)')
     p_compose.add_argument('machines', nargs='+')
     p_compose.add_argument('--rendezvous', help='comma-separated handshake events')
     p_compose.add_argument('--max-states', type=int)
+    p_compose.add_argument('--hash-spec', choices=list(PUBLISHED_HASH_SPECS), default=DEFAULT_HASH_SPEC)
     p_compose.set_defaults(func=_cmd_compose)
     p_export = sub.add_parser('export', help='export a model to UPPAAL/TLA+/PRISM/SPIN')
     p_export.add_argument('model')

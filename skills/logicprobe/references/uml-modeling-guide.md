@@ -99,6 +99,7 @@ Four input shapes, four different questions:
 | Code | Severity | What it means |
 |---|---|---|
 | `UML001_DIAGRAM_UNREADABLE` | error | The text is not readable as a Mermaid or PlantUML state or activity diagram. |
+| `UML_NOT_A_STATE_DIAGRAM` | error | The text belongs to another diagram family. Numbers are reserved for `UML0xx` modelling findings, so this one carries a name instead; see [Structure diagrams are not models](#structure-diagrams-are-not-models). |
 | `UML002_UNREACHABLE_STATE` | error | No transition can enter this state from init. The diagram draws flow nobody can reach. The check is structural and ignores guards; S1 is the guard-aware check. |
 | `UML003_DEAD_END_STATE` | error | A non-terminal state has no outgoing transition. Either it is terminal, or the outgoing flow was never modelled. |
 | `UML004_AMBIGUOUS_BRANCH` | error | Two unconditional arrows share one state and event. No reader and no implementation can resolve that. S4 is the authoritative check. |
@@ -118,7 +119,73 @@ Four input shapes, four different questions:
 | `UML018_FIDELITY_UNCHECKED` | info | Only a diagram was supplied, so nothing here proves it matches the code. |
 | `UML019_ROUND_TRIP_SKIPPED` | warning | The fidelity check could not run, either because the view is not round-trippable or because it was switched off. |
 
-`ok: true` means the review ran. It does not mean the model is good. Read the findings and the `summary` counts.
+`ok: true` means the review ran. It does not mean the model is good. Read `verdict`, not `ok`:
+
+| `verdict` | What it means | What to do |
+|---|---|---|
+| `pass` | No error and no warning finding. | Safe to present, with the scope the model covers. |
+| `pass_with_findings` | No error finding, but warnings exist (e.g. `UML012_NO_TERMINAL`, `UML006`). | Present the pass **and** the warnings; do not upgrade it to "no issues". |
+| `fail` | An error finding exists (`UML002`, `UML003`, `UML004`, `UML017`, `UML_NOT_A_STATE_DIAGRAM`, …) or the diagram could not be read (`ok: false`). | The diagram is **not** reviewed. Fix the error findings, or stop calling the file a model. |
+
+`verdictReason` states why in one line (`2 error finding(s) (first: UML002_UNREACHABLE_STATE)`).
+The non-DSH CLI (`uml-review`, `uml-parse`) exits `2` when the verdict is `fail` or the
+input is refused, `0` otherwise.
+
+### Structure diagrams are not models
+
+This is the failure mode worth a section of its own, because it does not look like a failure.
+
+A PlantUML component, package, class or deployment diagram declares no diagram kind —
+it simply starts with `@startuml`. A state parser therefore meets its keywords line by
+line, ignores the words it does not know, and reads the arrows as state transitions:
+
+```plantuml
+@startuml
+component [Motion Service] as MS
+component [Locator Adapter] as LA
+package "HAL" {
+  component [AT32 Driver] as DRV
+}
+MS --> LA : request
+LA --> DRV : read
+@enduml
+```
+
+Before this contract existed, that parsed to `ok: true` with three "states" and two
+"transitions", and "the structure diagram was reviewed" was pure fabrication. Now the
+same input returns the by-product **plus**:
+
+```json
+{
+  "verdict": "fail",
+  "findings": [{ "code": "UML_NOT_A_STATE_DIAGRAM", "severity": "error",
+                 "message": "the text is not a state or activity diagram: 4 declaration(s) of unsupported construct(s) (component ×3, package ×1) and 2 arrow(s) between them were read as states and transitions, so the parsed model is not this diagram." }],
+  "discardedConstructs": [{ "construct": "component", "line": 2, "text": "component [Motion Service] as MS" }, "…"],
+  "discardedEdges": 2
+}
+```
+
+Read that as: **there is no model of this file.** Do not feed the by-product to
+`logicprobe_verify` and call the result an architecture review, and do not quote its
+"states" as dependencies. `discardedConstructs` lists every declaration that could not
+be represented (with its line and text), and `discardedEdges` counts the arrows between
+them that were misread.
+
+Mermaid families with an explicit header — `classDiagram`, `erDiagram`, `gantt`,
+`journey`, `mindmap`, `gitGraph`, `C4*`, `requirementDiagram`, `timeline`,
+`quadrantChart`, `sankey-beta`, `block-beta`, `packet-beta`, `architecture-beta`,
+`radar-beta`, `treemap-beta`, `xychart-beta` — are refused instead, because an empty
+model would be worse than no model: the tool returns `ok: false` with
+`errorCode: "UML_NOT_A_STATE_DIAGRAM"` naming the family, and `review` reports it as
+`UML001_DIAGRAM_UNREADABLE`. Sequence diagrams are in the same class of refusal, for a
+different reason (a trace cannot reconstruct a machine).
+
+Both routes are non-pass and both name what was discarded. What the tool will **not**
+do is hand back a plausible model with no verdict — that is the false guarantee.
+
+Structural checks over a genuine dependency graph (allowed-edge matrices, cycles,
+isolated nodes) are **not** implemented; the codes `UML020`+ are reserved for them, and
+until they exist a component diagram must be audited by other means.
 
 ### What the round trip proves
 

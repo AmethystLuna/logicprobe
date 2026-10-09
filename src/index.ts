@@ -93,7 +93,9 @@ Plugin logicprobe is active. Documents are not truth — code is. Verify every v
 - \`logicprobe_compose_verify\` — two or more machines checked together (rendezvous handshake semantics): C1 composition deadlock, C2 rendezvous that never fires.
 - \`logicprobe_concurrency_scan\` — mine concurrency claims (thread-safe, lock-free, race condition, mutex, ISR-safe) and route them to dedicated verification; logicprobe does not prove concurrency safety.
 - \`logicprobe_export\` — emit external-checker input from a verified model: UPPAAL, TLA+, PRISM, SPIN.
-- \`logicprobe_uml\` — model a code flow as UML (render), read a diagram back into a model (parse), or audit the modelling (review: UML001-UML019 structural defects, documentation gaps, diagram-versus-model round-trip fidelity).
+- \`logicprobe_uml\` — model a code flow as UML (render), read a diagram back into a model (parse), or audit the modelling (review: UML001-UML019 structural defects plus \`UML_NOT_A_STATE_DIAGRAM\`, documentation gaps, diagram-versus-model round-trip fidelity).
+
+**How to read a report**: every report carries \`ran\` (the tool executed), \`verdict\` (\`pass\` / \`pass_with_findings\` / \`fail\`) and \`verdictReason\`. \`ok: true\` only means a report was produced — a report with error findings is a FAILED verification, so read \`verdict\`, never \`ok\`. \`hashSpec\` names the published specification \`modelHash\` follows (\`references/hash-spec.md\`); \`_source\`/\`_verified\`-style \`_\`-prefixed keys are accepted annotation metadata, echoed as \`metadataKeys\` and excluded from the hash.
 
 Python harnesses in the skill references remain the fallback for non-dsh hosts.
 

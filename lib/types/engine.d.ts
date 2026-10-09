@@ -167,6 +167,8 @@ export interface VerificationOptions {
     maxPermutationEvents?: number;
     beforeModel?: unknown;
     stateMapping?: Record<string, string>;
+    /** Hash specification used for modelHash. Defaults to the current published spec (`v1`). */
+    hashSpec?: HashSpec;
 }
 export interface PathStep {
     from: string;
@@ -188,9 +190,23 @@ export interface CheckResult {
     findings: Finding[];
 }
 export interface VerificationReport {
+    /**
+     * The engine ran and the input was well-formed enough to produce this report.
+     * It does NOT mean the review passed — read `verdict` for that.
+     */
     ok: boolean;
+    /** The tool executed and produced a report. False only when a tool refused the request before the engine ran. */
+    ran: boolean;
+    /** The review outcome. `ok: true` with `verdict: "fail"` is a failing review, not a passing one. */
+    verdict: Verdict;
+    /** Why the verdict came out that way, e.g. `2 error finding(s) (first: S2_NO_TRANSITIONS)`. */
+    verdictReason: string;
     schemaVersion: 1;
+    /** Which published specification `modelHash` follows (see references/hash-spec.md). */
+    hashSpec: HashSpec;
     modelHash: string;
+    /** Paths of the `_`-prefixed metadata keys found in the input and ignored by the schema. */
+    metadataKeys?: string[];
     /** Echo of the model's natural-language narrative, when present. */
     narrative?: ModelNarrative;
     summary: {
@@ -226,7 +242,53 @@ export interface RuntimeState {
     state: string;
     vars: Record<string, VarValue>;
 }
-export declare function modelHash(model: LogicModelV1): string;
+export declare function modelHash(model: LogicModelV1, spec?: HashSpec): string;
+/**
+ * Published model-hash specifications. The full normalization rules, the list of
+ * excluded keys and a one-line recompute command are in `references/hash-spec.md`.
+ *
+ * - `v1` (0.10.0) drops every `_`-prefixed metadata key at every level before hashing,
+ *   so archiving `_source` / `_verified` next to a model cannot change its hash.
+ * - `v0` is the pre-0.10.0 behaviour (no metadata filtering), kept so an archived hash
+ *   can still be checked against the old engine.
+ *
+ * For a model that carries no `_` keys the two specs are byte-identical.
+ */
+export type HashSpec = 'v0' | 'v1';
+export declare const PUBLISHED_HASH_SPECS: readonly HashSpec[];
+export declare const DEFAULT_HASH_SPEC: HashSpec;
+/**
+ * The review outcome, kept separate from `ok` (= "the tool ran"). Collapsing the two
+ * is how a failed review gets read as a passing one.
+ */
+export type Verdict = 'pass' | 'pass_with_findings' | 'fail';
+export interface VerdictSummary {
+    verdict: Verdict;
+    verdictReason: string;
+}
+/** A tool that refused the request before running anything: it neither passed nor failed a review. */
+export declare function refusalVerdict(reason: string): VerdictSummary;
+/**
+ * Decide the verdict from finding counts. Any error-severity finding fails the review
+ * even though the tool ran successfully — that gap is exactly what `verdict` closes.
+ */
+export declare function verdictOf(errors: number, warnings: number, firstCode?: string): VerdictSummary;
+export declare function verdictOfFindings(findings: Array<{
+    code: string;
+    severity: string;
+}>): VerdictSummary;
+/**
+ * Paths of every `_`-prefixed key in the input, sorted (`_source`, `_verified`,
+ * `states[0]._note`; a metadata key's own children are not listed, since the subtree is
+ * metadata as a whole). The schema ignores these keys as annotation metadata; echoing
+ * them in the report makes the ignored metadata auditable instead of invisible.
+ */
+export declare function metadataKeysOf(input: unknown): string[];
+/**
+ * The exact payload a hash spec hashes. Exported so the specification has one
+ * implementation and the documentation can be checked against it.
+ */
+export declare function hashPayload(model: unknown, spec?: HashSpec): unknown;
 export declare function validateModel(input: unknown): {
     ok: true;
     model: LogicModelV1;
@@ -245,6 +307,8 @@ export interface CompositionOptions {
     /** Events that require a synchronized multi-machine step (handshake). */
     rendezvous?: string[];
     maxStates?: number;
+    /** Hash specification used for the per-machine modelHash. Defaults to the current published spec (`v1`). */
+    hashSpec?: HashSpec;
 }
 export interface CompositionSummary {
     machineCount: number;
@@ -259,7 +323,13 @@ export interface CompositionSummary {
     truncated: boolean;
 }
 export interface CompositionReport {
+    /** Historical meaning: the composition has no error-severity finding. Read `verdict` for the review outcome. */
     ok: boolean;
+    ran: boolean;
+    verdict: Verdict;
+    verdictReason: string;
+    /** Which published specification the per-machine `modelHash` values follow. */
+    hashSpec: HashSpec;
     summary: CompositionSummary;
     checks: CheckResult[];
 }

@@ -82,6 +82,25 @@ git clone https://github.com/AmethystLuna/logicprobe.git ~/.claude/plugins/dev/l
 
 迁移代价用 `cost`（缺省 1），配 `budget` 不变量即由 A12 检查最坏路径代价，正成本环会被判为无界。迁移权重用 `weight`（缺省 1），配 `probability` 不变量即由 A13 计算概率可达。状态上的 `onEntry`/`onExit` 动作由 A4 自动纳入配对检查，`maxTicks` 加 `tickEvents` 由 A14 检查期限。
 
+### 怎么读报告（`ok` 不是结论）
+
+所有报告都同时给「工具跑成功」与「审查通过」两件事：
+
+| 字段 | 含义 |
+|------|------|
+| `ok` | 引擎产出了报告。对 `verify` 只在**模型校验失败**时为 `false`；它**不是**结论。 |
+| `ran` | 工具确实执行了。仅在工具层拒绝请求（带 `errorCode`/`error`）时为 `false`。 |
+| `verdict` | `pass` / `pass_with_findings` / `fail`。任何 `severity: "error"` 的发现、或校验失败，都会是 `fail`。 |
+| `verdictReason` | 一行说明，例如 `1 error finding(s) (first: S2_NO_TRANSITIONS)`。 |
+| `hashSpec` | `modelHash` 依据的已发布规范（见 [`hash-spec.md`](skills/logicprobe/references/hash-spec.md)）。 |
+| `metadataKeys` | 输入里带 `_` 前缀的注记键路径（仅当存在时出现）。 |
+
+只看 `ok` 会把「有死锁」的模型读成通过——判据是 `verdict`。非 DSH 的 Python CLI 退出码跟随 verdict：`pass`/`pass_with_findings` → `0`，`fail` 或拒绝 → `2`。
+
+### 模型自带的归档记录（`_` 前缀键）
+
+任何以 `_` 开头的键（任意层级，如 `_source`、`_verified`、`_extraction_caveats`、`states[0]._note`）都是**注记元数据**：schema 跳过、`modelHash` 排除、报告以 `metadataKeys` 回显。这样来源与验证快照可以跟模型放在同一个文件里，不必再维护一个会漂移的 sidecar，而模型的哈希身份不变。其余键仍然闭合——拼错的 `sttes` 依旧报错。用 `verify model.json --hash-check <hex>` 可回答某个历史哈希是否属于任何已发布规范。
+
 安装（原生 bundle，推荐）：
 
 ```bash
@@ -110,12 +129,14 @@ pnpm 会把该版本写进 profile 的 `pnpm-workspace.yaml` 的 `minimumRelease
 `logicprobe_uml` 把一份 LogicModelV1 画成 UML，也可以把手绘的 UML 读回模型，还可以审查建模本身。它有 3 个动作：
 
 - **render**：模型 → 图。Mermaid 支持状态图、活动流程图、时序图；PlantUML 支持状态图与时序图。notation 表达不了的构造会变成 warning，不会被悄悄丢掉。PlantUML 活动图直接拒绝，因为它的语法无法忠实承载带合流或环的图。
-- **parse**：图 → 模型。支持 Mermaid 与 PlantUML 的状态图、活动图，因此手绘的图也能送进 `logicprobe_verify` 验证。时序图是迹而不是机，解析会被拒绝。
+- **parse**：图 → 模型。支持 Mermaid 与 PlantUML 的状态图、活动图，因此手绘的图也能送进 `logicprobe_verify` 验证。两类输入会被拒绝，因为它们无法变成状态机：时序图（迹无法重建机），以及**其它 Mermaid 图族**（`classDiagram`、`erDiagram`、`gantt`、`mindmap`…），返回 `errorCode: "UML_NOT_A_STATE_DIAGRAM"` 并点名该图族。
 - **review**：审查建模。它报告两类问题。结构缺陷包括不可达状态、死端、歧义分支、无出口自环、重复迁移。文档缺口包括缺 narrative、变量无界、状态无可读标注、图与 narrative 标签漂移。它还会做保真度检查：把图重新解析回模型，任何结构性差异都报出来。
+
+**结构图是最危险的一类，因为它「能解析」。** PlantUML 的组件图 / 包图 / 类图 / 部署图不声明图类型，解析器会逐行碰上它的关键字。箭头看起来就是迁移，于是 `parse` 会返回一个副产品模型——但现在同时给出 error 级发现 `UML_NOT_A_STATE_DIAGRAM`、`discardedConstructs`（每条无法表达的声明及其行号与原文）、`discardedEdges`（被误读成迁移的箭头数），以及 `verdict: "fail"`。意思是：**这份文件没有被建模，这张图没有被审查。** 不要把那个副产品喂给 `logicprobe_verify` 当作架构审查结论。针对真正依赖图的结构检查（允许依赖矩阵、环、孤立节点）尚未实现，编号 `UML020`+ 已为其保留。
 
 保真度是这套功能的核心。生成的图带有 `logicprobe:` 注释指令（init、终态、别名、变量类型），Mermaid 与 PlantUML 会忽略它们，而解析器会读取它们。因此「图 ↔ 模型」的比较是精确的。
 
-审查只覆盖建模，不覆盖行为。每条发现都会指明应该跑哪一项引擎检查。完整清单（`UML001`-`UML019`）、指令格式、示例与各视图局限见 [`skills/logicprobe/references/uml-modeling-guide.md`](skills/logicprobe/references/uml-modeling-guide.md)。
+审查只覆盖建模，不覆盖行为。每条发现都会指明应该跑哪一项引擎检查。判据是 `verdict`（`fail` 表示有 error 级发现，图**未**通过审查），不是 `ok`。完整清单（`UML001`-`UML019` 加 `UML_NOT_A_STATE_DIAGRAM`）、指令格式、示例与各视图局限见 [`skills/logicprobe/references/uml-modeling-guide.md`](skills/logicprobe/references/uml-modeling-guide.md)。
 
 ## 使用
 

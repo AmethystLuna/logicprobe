@@ -194,6 +194,8 @@ export interface VerificationOptions {
   maxPermutationEvents?: number
   beforeModel?: unknown
   stateMapping?: Record<string, string>
+  /** Hash specification used for modelHash. Defaults to the current published spec (`v1`). */
+  hashSpec?: HashSpec
 }
 
 export interface PathStep {
@@ -219,9 +221,23 @@ export interface CheckResult {
 }
 
 export interface VerificationReport {
+  /**
+   * The engine ran and the input was well-formed enough to produce this report.
+   * It does NOT mean the review passed — read `verdict` for that.
+   */
   ok: boolean
+  /** The tool executed and produced a report. False only when a tool refused the request before the engine ran. */
+  ran: boolean
+  /** The review outcome. `ok: true` with `verdict: "fail"` is a failing review, not a passing one. */
+  verdict: Verdict
+  /** Why the verdict came out that way, e.g. `2 error finding(s) (first: S2_NO_TRANSITIONS)`. */
+  verdictReason: string
   schemaVersion: 1
+  /** Which published specification `modelHash` follows (see references/hash-spec.md). */
+  hashSpec: HashSpec
   modelHash: string
+  /** Paths of the `_`-prefixed metadata keys found in the input and ignored by the schema. */
+  metadataKeys?: string[]
   /** Echo of the model's natural-language narrative, when present. */
   narrative?: ModelNarrative
   summary: {
@@ -272,8 +288,110 @@ function stableStringify(value: unknown): string {
   return '{' + Object.keys(record).sort().map((key) => JSON.stringify(key) + ':' + stableStringify(record[key])).join(',') + '}'
 }
 
-export function modelHash(model: LogicModelV1): string {
-  return createHash('sha256').update(stableStringify(model)).digest('hex')
+export function modelHash(model: LogicModelV1, spec: HashSpec = DEFAULT_HASH_SPEC): string {
+  return createHash('sha256').update(stableStringify(hashPayload(model, spec))).digest('hex')
+}
+
+// ---------------------------------------------------------------------------
+// Report contract: ran / verdict (P0-1) and metadata keys + hash specs (P0-3/P0-4)
+// ---------------------------------------------------------------------------
+
+/**
+ * Published model-hash specifications. The full normalization rules, the list of
+ * excluded keys and a one-line recompute command are in `references/hash-spec.md`.
+ *
+ * - `v1` (0.10.0) drops every `_`-prefixed metadata key at every level before hashing,
+ *   so archiving `_source` / `_verified` next to a model cannot change its hash.
+ * - `v0` is the pre-0.10.0 behaviour (no metadata filtering), kept so an archived hash
+ *   can still be checked against the old engine.
+ *
+ * For a model that carries no `_` keys the two specs are byte-identical.
+ */
+export type HashSpec = 'v0' | 'v1'
+
+export const PUBLISHED_HASH_SPECS: readonly HashSpec[] = ['v0', 'v1']
+export const DEFAULT_HASH_SPEC: HashSpec = 'v1'
+
+/**
+ * The review outcome, kept separate from `ok` (= "the tool ran"). Collapsing the two
+ * is how a failed review gets read as a passing one.
+ */
+export type Verdict = 'pass' | 'pass_with_findings' | 'fail'
+
+export interface VerdictSummary {
+  verdict: Verdict
+  verdictReason: string
+}
+
+/** A tool that refused the request before running anything: it neither passed nor failed a review. */
+export function refusalVerdict(reason: string): VerdictSummary {
+  return { verdict: 'fail', verdictReason: 'the tool did not run: ' + reason }
+}
+
+/**
+ * Decide the verdict from finding counts. Any error-severity finding fails the review
+ * even though the tool ran successfully — that gap is exactly what `verdict` closes.
+ */
+export function verdictOf(errors: number, warnings: number, firstCode?: string): VerdictSummary {
+  if (errors > 0) {
+    return {
+      verdict: 'fail',
+      verdictReason: String(errors) + ' error finding(s)' + (firstCode === undefined ? '' : ' (first: ' + firstCode + ')'),
+    }
+  }
+  if (warnings > 0) {
+    return { verdict: 'pass_with_findings', verdictReason: 'no error findings; ' + String(warnings) + ' warning finding(s)' }
+  }
+  return { verdict: 'pass', verdictReason: 'no error or warning findings' }
+}
+
+export function verdictOfFindings(findings: Array<{ code: string; severity: string }>): VerdictSummary {
+  const errors = findings.filter((finding) => finding.severity === 'error')
+  const warnings = findings.filter((finding) => finding.severity === 'warning')
+  return verdictOf(errors.length, warnings.length, errors[0]?.code)
+}
+
+/**
+ * Paths of every `_`-prefixed key in the input, sorted (`_source`, `_verified`,
+ * `states[0]._note`; a metadata key's own children are not listed, since the subtree is
+ * metadata as a whole). The schema ignores these keys as annotation metadata; echoing
+ * them in the report makes the ignored metadata auditable instead of invisible.
+ */
+export function metadataKeysOf(input: unknown): string[] {
+  const keys: string[] = []
+  const walk = (value: unknown, path: string): void => {
+    if (value === null || typeof value !== 'object') return
+    if (Array.isArray(value)) {
+      value.forEach((entry, index) => walk(entry, path + '[' + String(index) + ']'))
+      return
+    }
+    for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
+      const child = path === '' ? key : path + '.' + key
+      if (key.startsWith('_')) keys.push(child)
+      walk(entry, child)
+    }
+  }
+  walk(input, '')
+  return keys.sort()
+}
+
+function withoutMetadata(value: unknown): unknown {
+  if (value === null || typeof value !== 'object') return value
+  if (Array.isArray(value)) return value.map((entry) => withoutMetadata(entry))
+  const out: Record<string, unknown> = {}
+  for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
+    if (key.startsWith('_')) continue
+    out[key] = withoutMetadata(entry)
+  }
+  return out
+}
+
+/**
+ * The exact payload a hash spec hashes. Exported so the specification has one
+ * implementation and the documentation can be checked against it.
+ */
+export function hashPayload(model: unknown, spec: HashSpec = DEFAULT_HASH_SPEC): unknown {
+  return spec === 'v1' ? withoutMetadata(model) : model
 }
 
 export function validateModel(input: unknown): { ok: true; model: LogicModelV1 } | { ok: false; errors: string[] } {
@@ -285,8 +403,12 @@ export function validateModel(input: unknown): { ok: true; model: LogicModelV1 }
     return { ok: false, errors: ['model: must be an object'] }
   }
   const root = input as Record<string, unknown>
+  // `_`-prefixed keys are annotation metadata (provenance, verification snapshots,
+  // extraction caveats). They are ignored here and excluded from the hash, so a model
+  // can carry its own archive record without a sidecar that drifts away from it.
+  // Everything else stays closed: a mistyped `sttes` must still be an error.
   const rejectUnknownKeys = (value: Record<string, unknown>, allowed: Set<string>, path: string): void => {
-    const unexpected = Object.keys(value).filter((key) => !allowed.has(key))
+    const unexpected = Object.keys(value).filter((key) => !allowed.has(key) && !key.startsWith('_'))
     if (unexpected.length > 0) {
       bad(path + '.' + unexpected[0], 'unknown field (allowed: ' + [...allowed].join(', ') + ')')
     }
@@ -422,7 +544,7 @@ export function validateModel(input: unknown): { ok: true; model: LogicModelV1 }
       // older reader may not know are skipped so they still fail on `.kind` alone.
       if (KNOWN_INVARIANT_KINDS.has(invariant.kind as string)) {
         const allowed = INVARIANT_KEYS[invariant.kind as string]
-        const unexpected = Object.keys(invariant).filter((key) => !allowed.has(key))
+        const unexpected = Object.keys(invariant).filter((key) => !allowed.has(key) && !key.startsWith('_'))
         if (unexpected.length > 0) {
           bad(path + '.' + unexpected[0], 'unknown field for kind ' + String(invariant.kind) + ' (allowed: ' + [...allowed].join(', ') + ')')
         }
@@ -445,7 +567,7 @@ export function validateModel(input: unknown): { ok: true; model: LogicModelV1 }
           } else if ('state' in when) {
             const scope = when as Record<string, unknown>
             for (const key of Object.keys(scope)) {
-              if (key !== 'state') bad(path + '.when.' + key, 'unknown field for a state scope (allowed: state)')
+              if (key !== 'state' && !key.startsWith('_')) bad(path + '.when.' + key, 'unknown field for a state scope (allowed: state)')
             }
             const state = scope.state
             if (typeof state !== 'string' || state.length === 0) bad(path + '.when.state', 'must be a non-empty string')
@@ -2646,19 +2768,27 @@ export function runVerification(input: unknown, options: VerificationOptions = {
     maxStates: options.maxStates ?? DEFAULT_MAX_STATES,
     maxPermutationEvents: options.maxPermutationEvents ?? DEFAULT_MAX_PERMUTATION_EVENTS,
   }
+  const hashSpec = options.hashSpec ?? DEFAULT_HASH_SPEC
+  const metadataKeys = metadataKeysOf(input)
+  const metadata = metadataKeys.length === 0 ? {} : { metadataKeys }
   const validation = validateModel(input)
   if (!validation.ok) {
+    const findings: Finding[] = validation.errors.map((message) => ({ code: 'MODEL_INVALID', severity: 'error', message }))
     return {
       ok: false,
+      ran: true,
+      ...verdictOfFindings(findings),
       schemaVersion: 1,
+      hashSpec,
       modelHash: '',
+      ...metadata,
       summary: { states: 0, transitions: 0, errors: validation.errors.length, warnings: 0, checksRun: 0 },
       checks: [{
         id: 'MODEL',
         name: 'Model Validation',
         status: 'fail',
         detail: 'Model schema validation failed: ' + validation.errors.length + ' errors',
-        findings: validation.errors.map((message) => ({ code: 'MODEL_INVALID', severity: 'error', message })),
+        findings,
       }],
     }
   }
@@ -2692,10 +2822,16 @@ export function runVerification(input: unknown, options: VerificationOptions = {
   if (options.beforeModel !== undefined) {
     const beforeValidation = validateModel(options.beforeModel)
     if (!beforeValidation.ok) {
+      const beforeFindings: Finding[] = beforeValidation.errors.map((message) => ({ code: 'BEFORE_MODEL_INVALID', severity: 'error', message }))
+      const allFindings: Finding[] = [...checks.flatMap((check) => check.findings), ...beforeFindings]
       return {
         ok: false,
+        ran: true,
+        ...verdictOfFindings(allFindings),
         schemaVersion: 1,
-        modelHash: modelHash(model),
+        hashSpec,
+        modelHash: modelHash(model, hashSpec),
+        ...metadata,
         summary: {
           states: model.states.length,
           transitions: model.transitions.length,
@@ -2711,7 +2847,7 @@ export function runVerification(input: unknown, options: VerificationOptions = {
             name: 'Before Model Validation',
             status: 'fail',
             detail: 'Before model schema validation failed: ' + beforeValidation.errors.length + ' errors',
-            findings: beforeValidation.errors.map((message) => ({ code: 'BEFORE_MODEL_INVALID', severity: 'error', message })),
+            findings: beforeFindings,
           },
         ],
       }
@@ -2731,8 +2867,12 @@ export function runVerification(input: unknown, options: VerificationOptions = {
   const coverageNotes = computeCoverageNotes(model)
   return {
     ok: true,
+    ran: true,
+    ...verdictOfFindings(checks.flatMap((check) => check.findings)),
     schemaVersion: 1,
-    modelHash: modelHash(model),
+    hashSpec,
+    modelHash: modelHash(model, hashSpec),
+    ...metadata,
     summary: {
       states: model.states.length,
       transitions: model.transitions.length,
@@ -2762,6 +2902,8 @@ export interface CompositionOptions {
   /** Events that require a synchronized multi-machine step (handshake). */
   rendezvous?: string[]
   maxStates?: number
+  /** Hash specification used for the per-machine modelHash. Defaults to the current published spec (`v1`). */
+  hashSpec?: HashSpec
 }
 
 export interface CompositionSummary {
@@ -2774,7 +2916,13 @@ export interface CompositionSummary {
 }
 
 export interface CompositionReport {
+  /** Historical meaning: the composition has no error-severity finding. Read `verdict` for the review outcome. */
   ok: boolean
+  ran: boolean
+  verdict: Verdict
+  verdictReason: string
+  /** Which published specification the per-machine `modelHash` values follow. */
+  hashSpec: HashSpec
   summary: CompositionSummary
   checks: CheckResult[]
 }
@@ -2802,6 +2950,7 @@ interface CompositionMove {
  * least one is not terminal) and C2 rendezvous that can never fire.
  */
 export function runCompositionVerification(machinesInput: unknown[], options: CompositionOptions = {}): CompositionReport {
+  const hashSpec = options.hashSpec ?? DEFAULT_HASH_SPEC
   const models: LogicModelV1[] = []
   const hashes: string[] = []
   const modelFindings: Finding[] = []
@@ -2811,7 +2960,7 @@ export function runCompositionVerification(machinesInput: unknown[], options: Co
       modelFindings.push({ code: 'MODEL_INVALID', severity: 'error', message: 'machine ' + index + ' invalid: ' + validation.errors.join('; ') })
     } else {
       models.push(validation.model)
-      hashes.push(modelHash(validation.model))
+      hashes.push(modelHash(validation.model, hashSpec))
     }
   })
   const machineSummary = models.map((m, i) => ({ modelHash: hashes[i] ?? '', states: m.states.length, transitions: m.transitions.length }))
@@ -2821,6 +2970,9 @@ export function runCompositionVerification(machinesInput: unknown[], options: Co
     }
     return {
       ok: false,
+      ran: true,
+      ...verdictOfFindings(modelFindings),
+      hashSpec,
       summary: { machineCount: models.length, machines: machineSummary, compositeStates: 0, errors: modelFindings.length, warnings: 0, truncated: false },
       checks: [{ id: 'MODEL', name: 'Machine Validation', status: 'fail', detail: 'composition input validation failed', findings: modelFindings }],
     }
@@ -2931,6 +3083,9 @@ export function runCompositionVerification(machinesInput: unknown[], options: Co
   ]
   return {
     ok: errors === 0,
+    ran: true,
+    ...verdictOf(errors, warnings, c1Findings[0]?.code ?? c2Findings[0]?.code),
+    hashSpec,
     summary: { machineCount: models.length, machines: machineSummary, compositeStates, errors, warnings, truncated },
     checks,
   }

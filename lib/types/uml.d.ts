@@ -30,6 +30,7 @@
  *
  * @module logicprobe-uml
  */
+import { type HashSpec, type Verdict } from './engine.js';
 import type { GuardNode, LogicModelV1, UpdateSpec } from './engine.js';
 export type UmlNotation = 'mermaid' | 'plantuml';
 export type UmlDiagram = 'state' | 'activity' | 'sequence';
@@ -52,7 +53,28 @@ export interface UmlParseResult {
      * symbol, which the review reports.
      */
     labels: Record<string, string>;
+    /**
+     * Declarations found in the text that LogicModelV1 cannot represent. A non-empty
+     * list means the parsed model is NOT this diagram: the text belongs to another
+     * diagram family (component, package, class, deployment, …), so whatever came
+     * out is a by-product of reading keywords the parser does not own.
+     */
+    discardedConstructs: DiscardedConstruct[];
+    /**
+     * Arrows whose endpoints were declared by a discarded construct. They survive
+     * parsing as state transitions, which is exactly why they are counted out loud.
+     */
+    discardedEdges: number;
     warnings: string[];
+}
+/** One declaration the parser could not represent, with the source line that carried it. */
+export interface DiscardedConstruct {
+    /** The construct keyword, lower-cased (`component`, `package`, `classDiagram`). */
+    construct: string;
+    /** 1-based line number in the diagram source. */
+    line: number;
+    /** The source line, trimmed. */
+    text: string;
 }
 export interface UmlFinding {
     code: string;
@@ -71,13 +93,19 @@ export interface UmlRoundTripReport {
     notation: UmlNotation;
     diagram: UmlDiagram;
     ok: boolean;
+    /** Which published hash specification the two hashes follow (see references/hash-spec.md). */
+    hashSpec: HashSpec;
     modelHash: string;
     parsedHash: string;
     diffs: string[];
     warnings: string[];
 }
 export interface UmlReviewReport {
+    /** The review ran and produced this report. It does NOT mean the modelling passed — read `verdict`. */
     ok: boolean;
+    ran: boolean;
+    verdict: Verdict;
+    verdictReason: string;
     source: 'model' | 'diagram' | 'model+diagram';
     summary: {
         errors: number;
@@ -98,10 +126,22 @@ export interface UmlReviewReport {
     model?: LogicModelV1;
     /** Diagram rendered from the model, when only a model was given. */
     primary?: string;
+    /** Paths of the `_`-prefixed metadata keys found in the supplied model, when it carried any. */
+    metadataKeys?: string[];
+    /** Declarations the parser could not represent; a non-empty list fails the review. */
+    discardedConstructs?: DiscardedConstruct[];
+    /** Arrows whose endpoints came from a discarded construct. */
+    discardedEdges?: number;
     warnings: string[];
     nextSteps: string[];
 }
+/**
+ * A UML front-end refusal. `code` lets the tool report *why* it refused instead of
+ * collapsing every refusal into a generic input error.
+ */
 export declare class UmlError extends Error {
+    readonly code: string;
+    constructor(message: string, code?: string);
 }
 /** Canonical guard text. Rendering wraps every composite node in parentheses, and the parser flattens same-operator chains, so render∘parse is the identity. */
 export declare function guardText(node: GuardNode): string;
@@ -124,6 +164,12 @@ export declare function renderUml(input: unknown, notation?: UmlNotation, diagra
 export declare function parseGuardText(text: string): GuardNode;
 /** Parse a UML action clause such as `retry := retry + 1, armed := true`. */
 export declare function parseUpdatesText(text: string, warnings: string[]): UpdateSpec[];
+/**
+ * Findings a parse result carries on its own. A diagram from another family parses
+ * into something; without this finding that something is presented as a model of the
+ * file, which is a false guarantee of exactly the kind this plugin exists to prevent.
+ */
+export declare function parseFindings(parsed: UmlParseResult): UmlFinding[];
 /**
  * Parse a Mermaid or PlantUML diagram back into a LogicModelV1.
  *
