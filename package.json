@@ -76,7 +76,7 @@
     "build": "tsc -p tsconfig.json && node scripts/build-client.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "bump": "node scripts/bump-version.mjs",
-    "test:engine": "npm run build && node tests/engine/run.mjs && node tests/data-engine/run.mjs && node tests/concurrency/run.mjs && node tests/uml/run.mjs && node tests/apply-smoke.mjs && node tests/dsh-client-half.test.mjs && node tests/dsh-volatile-fallback.test.mjs && node tests/exporters/run.mjs && node tests/external/run.mjs && node tests/python/run.mjs",
+    "test:engine": "npm run build && node tests/engine/run.mjs && node tests/data-engine/run.mjs && node tests/concurrency/run.mjs && node tests/uml/run.mjs && node tests/apply-smoke.mjs && node tests/dsh-client-half.test.mjs && node tests/dsh-volatile-fallback.test.mjs && node tests/skills/run.mjs && node tests/exporters/run.mjs && node tests/external/run.mjs && node tests/python/run.mjs",
     "test:full": "npm run build && node tests/full-suite.mjs",
     "test:python": "npm run build && node tests/python/run.mjs"
   },

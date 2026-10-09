@@ -1,11 +1,29 @@
 ---
 name: logicprobe
-description: "Use when reviewing design documents, architecture specs, technical proposals, or refactoring plans that make claims about API names, file locations, enum values, or mechanism feasibility. Escalate into logic-primitive verification — generate and run an executable model before trusting the claim — when the document asserts state-machine or protocol behaviour (≥3 states, ACK/NACK/retry sequences, guards, lock/unlock pairing), a quantitative or temporal guarantee (worst-case path cost ≤ budget, P(reach SAFE) ≥ p, 'must leave within 2 ticks'), a cross-machine handshake (req/ack, power-up sequencing between two components), concurrency guarantees ('thread-safe', 'lock-free', 'ISR-safe' — mined and routed, never proven here), or a refactoring that changes state topology or guard conditions, where the pipeline compares before/after models for behavioral preservation and regression freedom. ALSO use when the task is to model a code flow as UML, or to audit a diagram somebody drew: the skill renders the model as a state, activity or sequence diagram, reads a hand-drawn diagram back into a model, and reviews the modelling — unreachable states, dead ends, ambiguous branches, documentation gaps, diagram-versus-model round-trip fidelity. Data-model, schema and migration claims belong to the sibling logicprobe-datamodel skill. ALSO proactively SUGGEST this skill (do not require) when a user asks code-level behavioral questions — 'check this timing for bugs', 'could this state machine deadlock', 'is this retry limit safe' — since plan-level verification has usually already been done."
+description: "Use when reviewing design docs, specs, plans, refactorings making verifiable claims (API names, paths, enums). Escalates to executable models for state machines/protocols (guards, ACK/retry, lock pairs), guarantees (cost vs budget, P(reach SAFE), deadlines), cross-machine handshakes, concurrency claims (mined, never proven), and topology-changing refactors. Also UML: draw a code flow, parse a hand-drawn diagram, audit the modelling (dead ends, unreachable states, round-trip fidelity)."
 ---
 
 # Logic Probe
 
 Documents are not truth — code is. Verify every verifiable claim before accepting or acting on any design.
+
+## When This Skill Applies
+
+The catalog entry is a summary; this is the full trigger list. Any one row is enough to load the skill.
+
+| The task involves… | What it does |
+|---|---|
+| A design doc, spec, proposal or plan claiming API names, file paths, enum values, or mechanism feasibility | Enumerate the verifiable claims (Phase 1), verify each against the codebase with `file:line` evidence (Phase 2) |
+| A state machine or protocol — ≥3 states, guards, ACK/NACK/retry, lock/unlock, start/stop ordering | Build an executable model: S1-S8 structural checks, A1-A14 adversarial probes |
+| A quantitative or temporal guarantee — worst-case path cost ≤ budget, "≥90% of runs reach SAFE", "must leave within 2 ticks" | A12 budget, A13 probabilistic reachability, A14 deadlines, each with a counterexample path |
+| A handshake or power-up sequencing across two or more components | `logicprobe_compose_verify`: C1 composition deadlock, C2 rendezvous that never fires |
+| A concurrency guarantee — "thread-safe", "lock-free", "no data race", "ISR-safe" | Mined and routed to dedicated verification; never proven here |
+| A refactoring that changes state topology or guard conditions | BEFORE/AFTER models compared for behavioral preservation, invariant continuity and deadlock regression (D1-D4) |
+| Modelling a code flow as UML, or auditing a diagram somebody drew | `logicprobe_uml` render / parse / review, with render-parse round-trip fidelity; a component, package or class diagram is refused rather than modelled |
+| Entities, fields, relationships, data invariants, schema migrations | The sibling `logicprobe-datamodel` skill (DS1-DS4, DA1-DA12, DD1-DD4) |
+| A code-level behavioural question — "could this deadlock", "is this retry limit safe" | Suggest an optional verification pass; do not escalate automatically |
+
+**Catalog budget**: DSH renders only the frontmatter `description`, and truncates it at 500 characters (`dsh-tool-skill`, `DEFAULT_CATALOG_DESCRIPTION_MAX_LENGTH`). The description is therefore written to fit that budget, and the triggers that do not fit live in this table. `tests/skills/run.mjs` fails when either skill's catalog line would be cut, or would lose one of its use-case triggers.
 
 <HARD-GATE>
 
