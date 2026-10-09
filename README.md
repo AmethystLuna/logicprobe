@@ -2,7 +2,9 @@
 
 <p align="center"><a href="README.en-US.md">English</a> · <strong>中文</strong></p>
 
-文档不是事实，代码才是。本技能逐条核验设计文档、架构规格与重构计划里的可验证声称，再把每一条对照到代码库的真实实现。遇到行为类声称时，它升级为可执行模型验证。
+没验证过的设计，翻车只是时间问题；再复杂的代码，建模再跑就清楚了。
+
+logicprobe 核验声称与实物是否一致。事实类对着源码查。行为类跑模型：状态机、协议、组合、数据模型、迁移。图按依赖图读，单层或多层。改动前后用基线对比。验不了的维度明说，并指出该用哪个工具。
 
 **跨平台**：支持 Claude Code、Codex CLI、Cursor、Kimi CLI、OpenCode、ZCode。技能基于 [Agent Skills](https://agentskills.io) 开放标准。
 
@@ -192,14 +194,14 @@ pnpm 会把该版本写进 profile 的 `pnpm-workspace.yaml` 的 `minimumRelease
 
 行为类问题仍按"主动建议、不自动升级"处理:先建议一次可选验证,由你决定是否跑。技能在 Phase 0 依据计划特征自动分级(LIGHTWEIGHT / STANDARD / ESCALATED),并在计划文件追加 `## Plan Verification` 摘要块作为审计痕迹。
 
-Python 可选。已有 LogicModelV1 JSON 时，可直接运行独立引擎 `skills/logicprobe/references/logicprobe-engine.py`：
+在 dsh 之外（Claude Code、Cursor、Codex、终端、CI），装的是**仓库**（marketplace / git），随仓库带 `tools/python/logicprobe-engine.py`：只需 Python 3.8+ 标准库。dsh 安装包（npm / bundle）不含它。已有 LogicModelV1 JSON 时直接运行：
 
 - `verify` 跑 S1-S8 / A1-A14 / D1-D4
 - `compose` 跑 C1 / C2 组合
 - `export` 生成 UPPAAL、TLA+、PRISM、SPIN 输入
 - `uml-render`、`uml-parse`、`uml-review` 覆盖 UML 前端
 
-它与 dsh 工具逐字节一致，对照见 `tests/python/run.mjs`。模型只有抽取出的状态表时，填充模板 `skills/logicprobe/references/verification-harness.py`。数据模型验证使用 `skills/logicprobe-datamodel/references/data-model-harness.py`。Python 不可用（例如离线开发机）时，对应 guide 提供手动验证模式。
+它与 dsh 工具逐字节一致，对照见 `tests/python/run.mjs`。模型只有抽取出的状态表时，填充模板 `tools/python/verification-harness.py`。数据模型验证使用 `tools/python/data-model-harness.py`。Python 不可用（例如离线开发机）时，对应 guide 提供手动验证模式。
 
 示例模型见 [`examples/`](examples/README.md)：订单状态机 before/after、电商数据模型、User 字段迁移。
 
@@ -282,7 +284,7 @@ cp -r logicprobe/skills/* .zcode/skills/
 - 宿主：Claude Code v2.1+ / Codex CLI 最新 / Cursor 2.5+ / Kimi CLI 最新 / OpenCode 最新 / ZCode 3.0+
 - DeepSeek Harness (dsh)：dev preview，声明支持 `>= 0.1.0-rc.7`。最新一轮在 0.2.1-alpha.1 上实测了安装、挂载、启动与卸载；更早一轮实测覆盖 0.1.5-rc.2 到 0.2.0-rc.2。逐版本证据见 [DSH-COMPATIBILITY.md](DSH-COMPATIBILITY.md)。
 - Web 端的「Gate 注入」开关需要 **dsh ≥ 0.1.7-alpha.1**，因为设置服务必须能投影即时字段。更早的 dsh 上插件照常加载、照常注入，只是开关不出现，也不报错。
-- Python 3.6+ 可选，仅自动验证工具需要。手动兜底模式不需要任何依赖。
+- Python 3.8+（标准库），在 dsh 之外运行验证所需；手动兜底模式不需要任何依赖。
 
 ## 配置
 
@@ -341,7 +343,7 @@ npm run build
 
 | 命令 | 内容 |
 |---|---|
-| `npm run test:engine` | 状态机与数据模型引擎回归（`tests/engine`、`tests/data-engine`、`tests/concurrency`、`tests/uml`、`tests/apply-smoke`、`tests/dsh-client-half`、`tests/exporters`、`tests/external`），再加 Python 逐字节一致性对照。对照脚本是 `tests/python/run.mjs`，它把同一批 fixture 在 TS 引擎与 `skills/logicprobe/references/logicprobe-engine.py` 之间比对报告、组合与导出产物。无 Python 时自动 SKIP。 |
+| `npm run test:engine` | 状态机与数据模型引擎回归（`tests/engine`、`tests/data-engine`、`tests/concurrency`、`tests/uml`、`tests/apply-smoke`、`tests/dsh-client-half`、`tests/exporters`、`tests/external`），再加 Python 逐字节一致性对照。对照脚本是 `tests/python/run.mjs`，它把同一批 fixture 在 TS 引擎与 `tools/python/logicprobe-engine.py` 之间比对报告、组合与导出产物。无 Python 时自动 SKIP。 |
 | `npm run test:full` | `tests/full-suite.mjs` 端到端合并套件 |
 | `npm run test:python` | 仅 Python parity（构建 + `tests/python/run.mjs`） |
 | `bash tests/skill-triggering/run-all.sh` | 触发测试，位于 `tests/skill-triggering/` |

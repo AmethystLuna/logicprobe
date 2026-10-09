@@ -1,7 +1,7 @@
 {
   "name": "logicprobe",
   "version": "1.0.0",
-  "description": "Design document & plan claim verification — logic primitives + adversarial probing for behavioral claims. State machines, data models, protocol logic, and refactoring plans get executable-model verification (state machine S1-S8/A1-A11, data model DS/DA/DD) with before/after regression detection.",
+  "description": "Verifies claims about designs and code. Facts go against the source. Behaviour goes through an executable model. Structure diagrams are checked for dependency and layering rules. Two reports can be compared for regression.",
   "author": {
     "name": "Amethyst Luna",
     "url": "https://github.com/AmethystLuna"
@@ -22,8 +22,8 @@
   "skills": "./skills/",
   "interface": {
     "displayName": "Logic Probe",
-    "shortDescription": "Claim verification for design docs & plans — logic primitives + adversarial probing",
-    "longDescription": "Documents are not truth — code is. Verifies every verifiable claim in design documents, architecture specs, and refactoring plans against the actual codebase, then escalates to executable-model verification for behavioral claims: 8 structural checks (reachability, deadlock, liveness, determinism, guard/invariant completeness, monotonicity) and 11 adversarial probes (unexpected events, race interleaving, order permutation, pair symmetry, boundary blast, resource injection, minimal counter-example, idempotent replay, leads-to, sequence, atomicity). Data-model verification adds DS/DA/DD checks for schemas, migrations, copy consistency, and data invariants. Before/after model comparison catches regressions. Python harnesses included, with manual fallback for air-gapped machines.",
+    "shortDescription": "Claim and behaviour verification for designs and code",
+    "longDescription": "Verifies the claims that designs, diagrams and code make. Facts go against the source. Behaviour goes through a model: state machines, protocols, composition, data models, migrations. Structure diagrams are read as dependency graphs, at one level or several. Two reports can be compared for regression. Dimensions it cannot verify are named, not implied.",
     "developerName": "Amethyst Luna",
     "category": "Development",
     "capabilities": [

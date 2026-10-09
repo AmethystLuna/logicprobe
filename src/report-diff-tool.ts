@@ -13,7 +13,7 @@ export const LOGICPROBE_REPORT_DIFF_TOOL_NAME = 'logicprobe_report_diff'
 export const logicProbeReportDiffTool = defineTool({
   name: LOGICPROBE_REPORT_DIFF_TOOL_NAME,
   description:
-    'Compare two logicprobe reports of the same family (baseline vs current) and report what the change added, removed or altered (logicprobe). Use it for the "no new findings" acceptance criterion of a slice: pass the earlier report as `baseline` and the new one as `current`. Findings are matched by a stable identity — the check id + code + a canonical locator built from `evidence` and `path` (falling back to the message only when a finding carries neither) — so prose edits show up as `changed`, never as new findings. Returns {schema, verdict, verdictReason, currentVerdict, added[], removed[], changed[], summary}; the verdict describes the DELTA (a newly added error finding fails it) while `currentVerdict` keeps the absolute result visible, and a clean delta over a still-failing report says so in nextSteps. Two runs over the same input add zero findings.',
+    'Compare two logicprobe reports of the same family: `baseline` (earlier) against `current` (newer). Use it to accept a slice by "no new findings". Findings match on a stable identity: check id, code, and a locator built from `evidence` and `path`. Reworded prose counts as `changed`, not as new. Returns added, removed and changed findings, plus `summary`. The `verdict` is about the delta: a newly added error finding fails it. `currentVerdict` keeps the run\'s own verdict, so a clean delta over a failing report still shows as failing. Two runs over the same input add nothing.',
   parameters: {
     baseline: {
       type: 'json',

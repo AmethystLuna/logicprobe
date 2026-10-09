@@ -12,7 +12,7 @@ lists below; leave them empty to skip the corresponding probe.
 
 For multi-machine composition (C1/C2) and external-tool export (UPPAAL/TLA+/
 PRISM/SPIN), use the standalone JSON-driven engine instead:
-  references/logicprobe-engine.py  (verify | compose | export)
+  tools/python/logicprobe-engine.py  (verify | compose | export)
 """
 import sys
 from collections import deque

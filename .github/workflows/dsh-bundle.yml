@@ -63,6 +63,12 @@ jobs:
         # machine — and an unconditional `.volatile()` throws during import there,
         # which takes the whole host's boot down.
         run: node tests/dsh-volatile-fallback.test.mjs
+      - name: SessionStart hook payload
+        # The hook resolves the engine path and JSON-escapes the payload in pure
+        # bash; this is what catches a control character, a CRLF file, or a
+        # milliseconds-vs-seconds timeout in hooks.json. Skips itself (exit 0)
+        # when bash is not on PATH.
+        run: node tests/claude-session-start-hook.test.mjs
       # The suites below ship in `npm run test:engine` but were never run here, so
       # exporter output, the data-model checks, and the byte-for-byte parity between
       # the TypeScript and Python engines were unexercised in CI.

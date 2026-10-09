@@ -4,7 +4,9 @@
 
 [![HOL Guard Scanner](https://img.shields.io/badge/HOL%20Guard-passing-00a67e)](https://github.com/hashgraph-online/hol-guard)
 
-Design documents are not truth. Code is. This skill checks every verifiable claim in a design document, an architecture spec, or a refactoring plan against the real codebase. For behavioral claims it escalates to executable-model verification.
+For an unverified design, failure is only a matter of time. However complex the code, model it and run it — then it becomes clear.
+
+logicprobe checks a claim against the thing it describes. Facts go against the source. Behaviour goes through a model: state machines, protocols, composition, data models, migrations. Diagrams are read as dependency graphs, at one level or several. Two reports can be compared to see whether a change made things worse. Dimensions it cannot verify are named, and routed.
 
 **Cross-platform**: works with Claude Code, Codex CLI, Cursor, Kimi CLI, OpenCode, and ZCode. Built on the [Agent Skills](https://agentskills.io) open standard.
 
@@ -194,14 +196,14 @@ The plugin injects a capability notification into the first model step. There is
 
 Behavioural questions still follow the suggest-don't-escalate rule: offer an optional verification pass and let the user decide. The skill classifies depth (LIGHTWEIGHT / STANDARD / ESCALATED) from plan features in Phase 0, and appends a `## Plan Verification` summary block as the audit trail.
 
-Python is optional. When a LogicModelV1 JSON already exists, run the standalone engine at `skills/logicprobe/references/logicprobe-engine.py`:
+Outside dsh (Claude Code, Cursor, Codex, a terminal, CI) the install is the **repository** (marketplace or git), which carries `tools/python/logicprobe-engine.py`. Python 3.8+ standard library only. The dsh bundle (npm or profile install) does not include it. With a LogicModelV1 JSON at hand, run it directly:
 
 - `verify` runs S1-S8 / A1-A14 / D1-D4
 - `compose` runs the C1 / C2 composition
 - `export` emits UPPAAL, TLA+, PRISM and SPIN input
 - `uml-render`, `uml-parse` and `uml-review` cover the UML front end
 
-Its output is byte-identical to the dsh tools, cross-checked by `tests/python/run.mjs`. When the model exists only as extracted tables, fill in `skills/logicprobe/references/verification-harness.py`. Data-model checks use `skills/logicprobe-datamodel/references/data-model-harness.py`. When Python is unavailable, for example on an air-gapped machine, the matching guide describes a manual verification mode.
+Its output is byte-identical to the dsh tools, cross-checked by `tests/python/run.mjs`. When the model exists only as extracted tables, fill in `tools/python/verification-harness.py`. Data-model checks use `tools/python/data-model-harness.py`. When Python is unavailable, for example on an air-gapped machine, the matching guide describes a manual verification mode.
 
 Sample models live under [`examples/`](examples/README.md): an order state machine before/after, an e-commerce data model, and a User field migration.
 
@@ -284,7 +286,7 @@ Skills are invoked with `$logicprobe`. See `.zcode/INSTALL.md`.
 - Host: Claude Code v2.1+ / Codex CLI latest / Cursor 2.5+ / Kimi CLI latest / OpenCode latest / ZCode 3.0+
 - DeepSeek Harness (dsh): dev preview, declared support for `>= 0.1.0-rc.7`. The latest round measured install, mount, boot and uninstall on 0.2.1-alpha.1. The earlier round measured 0.1.5-rc.2 through 0.2.0-rc.2. Per-release evidence is in [DSH-COMPATIBILITY.md](DSH-COMPATIBILITY.md).
 - The Web Plugins-page "Gate injection" switch requires **dsh ≥ 0.1.7-alpha.1**, because its settings service must be able to project live fields. On older dsh the plugin still loads and still injects. The switch is simply absent, with no error.
-- Python 3.6+ optional, needed only by the automated tools. The manual fallback mode needs no dependencies.
+- Python 3.8+ (standard library), needed to run the checks outside dsh. The manual mode needs no dependencies.
 
 ## Configuration
 
@@ -344,7 +346,7 @@ Test chain:
 
 | Command | What it covers |
 |---|---|
-| `npm run test:engine` | State-machine and data-model engine regression (`tests/engine`, `tests/data-engine`, `tests/concurrency`, `tests/uml`, `tests/apply-smoke`, `tests/dsh-client-half`, `tests/exporters`, `tests/external`), plus byte-for-byte Python parity. The parity script `tests/python/run.mjs` compares the same fixtures between the TS engine and `skills/logicprobe/references/logicprobe-engine.py` across reports, composition and exporter output. It SKIPs when Python is absent. |
+| `npm run test:engine` | State-machine and data-model engine regression (`tests/engine`, `tests/data-engine`, `tests/concurrency`, `tests/uml`, `tests/apply-smoke`, `tests/dsh-client-half`, `tests/exporters`, `tests/external`), plus byte-for-byte Python parity. The parity script `tests/python/run.mjs` compares the same fixtures between the TS engine and `tools/python/logicprobe-engine.py` across reports, composition and exporter output. It SKIPs when Python is absent. |
 | `npm run test:full` | `tests/full-suite.mjs` combined end-to-end suite |
 | `npm run test:python` | Python parity only (build + `tests/python/run.mjs`) |
 | `bash tests/skill-triggering/run-all.sh` | Trigger tests under `tests/skill-triggering/` |

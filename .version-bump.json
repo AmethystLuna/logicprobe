@@ -22,7 +22,7 @@
       ".mypy_cache",
       "lib/types/engine.d.ts",
       "skills/logicprobe/references/hash-spec.md",
-      "skills/logicprobe/references/logicprobe-engine.py",
+      "tools/python/logicprobe-engine.py",
       "src/engine.ts",
       "tests/engine/run.mjs"
     ]

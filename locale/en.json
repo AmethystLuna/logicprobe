@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Logic Probe",
+    "description": "Verifies claims about designs and code. Facts go against the source. Behaviour goes through an executable model."
+  }
+}

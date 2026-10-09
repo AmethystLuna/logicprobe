@@ -1,6 +1,6 @@
 # DataModelV1 — logicprobe-datamodel Schema
 
-The `logicprobe_datamodel_verify` tool accepts a structured JSON data model. The engine runs DS/DA checks, and DD1-DD4 when `beforeModel` is supplied. It is host-agnostic; DSH uses the native tool, non-DSH hosts use `data-model-harness.py`.
+The `logicprobe_datamodel_verify` tool accepts a structured JSON data model. The engine runs DS/DA checks, and DD1-DD4 when `beforeModel` is supplied. The schema is host-agnostic: the native tool and the repository engine take the same JSON.
 
 ## Top-level model
 

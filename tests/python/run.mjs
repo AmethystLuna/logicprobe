@@ -14,7 +14,7 @@ import { exportModel } from '../../lib/exporters.js'
 import { renderUml, parseUml, reviewUml } from '../../lib/uml.js'
 
 const python = process.env.LOGICPROBE_PYTHON || 'python'
-const enginePath = fileURLToPath(new URL('../../skills/logicprobe/references/logicprobe-engine.py', import.meta.url))
+const enginePath = fileURLToPath(new URL('../../tools/python/logicprobe-engine.py', import.meta.url))
 const fixturesRoot = fileURLToPath(new URL('../engine/fixtures/', import.meta.url))
 const examplesRoot = fileURLToPath(new URL('../../examples/', import.meta.url))
 const tmpDir = join(tmpdir(), 'logicprobe-pypar-' + process.pid)

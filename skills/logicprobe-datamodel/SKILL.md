@@ -5,7 +5,7 @@ description: "Use when reviewing design docs, specs, plans or migrations claimin
 
 # Logic Probe Data
 
-Documents are not truth — data models are. Verify every verifiable data claim before accepting or acting on a design.
+An unverified data model fails later. Model the schema and the migration, run them, and it becomes clear. Check every data claim before you act on it.
 
 ## Methodology
 
@@ -44,8 +44,7 @@ Escalate immediately if the document contains ANY of:
 ```text
 Document claims → Extract DataModelV1 → Runtime check:
   ├── DSH + `logicprobe_datamodel_verify` tool available → build DataModelV1 → call tool → structured report
-  ├── Python available → fill references/data-model-harness.py → run → report
-  └── No Python → Manual Verification Mode (references/data-model-guide.md)
+  └── No engine available → Manual Verification Mode (references/data-model-guide.md)
 
 Refactoring variant:
   Extract BEFORE DataModelV1 + AFTER DataModelV1
@@ -53,6 +52,8 @@ Refactoring variant:
     → Compare BEFORE vs AFTER (DD1-DD4)
     → Flag any invariant that held in BEFORE but fails in AFTER
 ```
+
+The **DataModelV1 shape** is in [`references/data-model-schema.md`](references/data-model-schema.md): entities, fields, keys, relationships, invariants, boundary checks, and the optional before/mapping/copy/migration/backup blocks. Those field names are the tool contract. A hand-written model that disagrees with them is rejected, not guessed at.
 
 ## Checks
 

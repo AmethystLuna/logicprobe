@@ -30,7 +30,7 @@ code flow → model (citation per element) → logicprobe_uml action=render → 
 - **parse** — diagram to model. It reads Mermaid and PlantUML state or activity text, so a hand-drawn diagram can be verified like any other model. Two inputs are refused because they cannot become a machine: a sequence diagram (a trace cannot reconstruct a machine) and a different Mermaid family (`classDiagram`, `erDiagram`, `gantt`, `mindmap`, …) — both come back as `errorCode: "UML_NOT_A_STATE_DIAGRAM"` with the discarded construct named.
 - **review** — it answers one of three questions. Give it a model: is the machine well-modelled? Give it a diagram: what does the diagram say? Give it both: does the diagram match the model?
 
-Non-DSH hosts run the same three actions through the shared engine in the `logicprobe` skill: `python skills/logicprobe/references/logicprobe-engine.py uml-render|uml-parse|uml-review` (an exact mirror, cross-checked byte-for-byte by `tests/python/run.mjs`). The engine is deliberately single-source — do not copy it into this skill.
+A host without the tools runs the same three actions through the repository engine. The engine is deliberately single-source — do not copy it into this skill.
 
 ## A Structure Diagram Is the Dangerous Case, Because It Parses
 

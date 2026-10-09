@@ -19,7 +19,7 @@ The claim-verification doctrine it inherits — cite evidence, read `verdict` an
 | One architecture drawn at several levels (repository / module / subdirectory) | `diagrams: [{name, diagram, parent}]`: each level is checked on its own, then against its declared parent, with the per-pair node/edge/expansion counts (`UML028`-`UML031`) |
 | A diagram that must be reconciled with an include/graph check over the source | The per-edge rule ids are the meeting point: a difference between the two is the finding worth chasing |
 
-Non-DSH hosts run the same engine: `python skills/logicprobe/references/logicprobe-engine.py structure diagram.puml --matrix matrix.json` (an exact mirror, cross-checked by `tests/python/run.mjs`), and `… granularity manifest.json` for a multi-level set.
+A host without the tools runs the repository engine on the same diagram text, and on a `granularity` manifest for a multi-level set.
 
 ## What It Checks
 

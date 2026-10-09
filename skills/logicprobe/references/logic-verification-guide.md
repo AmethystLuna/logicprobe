@@ -90,340 +90,67 @@ which wastes more time than no verification at all.
 
 ## Probe Design Patterns
 
+Every probe below is implemented by `logicprobe_verify`. These patterns are here to read a finding, not to reimplement it.
+
 ### A1: Unexpected Event Injection
 
-```python
-# For each state S, list all events defined anywhere in the machine
-# For each event E not handled by S, test: what happens?
-def unexpected_event_probe(states):
-    all_events = set()
-    for trans in states.values():
-        all_events.update(trans.keys())
-    
-    findings = []
-    for state, transitions in states.items():
-        unhandled = all_events - set(transitions.keys())
-        if unhandled:
-            findings.append({
-                "state": state,
-                "unhandled_events": list(unhandled),
-                "risk": "Silent ignore or undefined behavior"
-            })
-    return findings
-```
+For every state, list the events declared anywhere in the machine that this state does not handle. An unhandled event is a silent ignore or undefined behaviour.
 
 ### A2: Race Interleaving
 
-For pairs of events that can arrive within the same tick (e.g., timer expiry + message reception):
-
-```python
-def race_interleaving(states, init, event_pairs):
-    # event_pairs = [("timeout", "ack"), ("error", "done"), ...]
-    findings = []
-    for e1, e2 in event_pairs:
-        # Path 1: e1 then e2
-        s1 = step(init, [e1, e2])
-        # Path 2: e2 then e1
-        s2 = step(init, [e2, e1])
-        if s1 != s2:
-            findings.append({
-                "events": (e1, e2),
-                "order_e1_e2_ends_in": s1,
-                "order_e2_e1_ends_in": s2,
-                "risk": "Order-dependent outcome not documented"
-            })
-    return findings
-```
+For event pairs that can arrive in the same tick, compare `e1` then `e2` against `e2` then `e1`. A different outcome is order dependence the design must state.
 
 ### A3: Order Permutation
 
-Extends A2 to N events. For small N (≤5), do full permutation. For larger N, sample:
-
-```python
-from itertools import permutations
-
-def order_permutation_probe(states, init, events, invariant_check=None):
-    findings = []
-    terminals = set()
-    for perm in permutations(events):
-        final = step(init, list(perm))
-        terminals.add(final)
-        if invariant_check and not invariant_check(final):
-            findings.append({
-                "sequence": list(perm),
-                "final_state": final,
-                "violates": "invariant"
-            })
-    if len(terminals) > 1:
-        findings.append({
-            "terminal_states": list(terminals),
-            "risk": f"Same events produce {len(terminals)} different outcomes depending on order"
-        })
-    return findings
-```
+The same question at N events. Up to 5 events permute fully; beyond that the probe samples. More than one terminal state means the outcome depends on arrival order.
 
 ### A4: Pair Symmetry
 
-```python
-# Define paired operations
-PAIRS = [
-    ("lock", "unlock"),
-    ("start", "stop"),
-    ("alloc", "free"),
-    ("enable_irq", "disable_irq"),
-    ("open", "close"),
-]
-
-def pair_symmetry_probe(states, init):
-    findings = []
-    for acquire, release in PAIRS:
-        if acquire not in all_events(states) and release not in all_events(states):
-            continue  # This pair type is not used
-        # DFS from init: every path that calls acquire must eventually call release
-        # before reaching a terminal state (or acquire again)
-        unbalanced = find_unbalanced_paths(states, init, acquire, release)
-        if unbalanced:
-            findings.append({
-                "pair": (acquire, release),
-                "unbalanced_paths": unbalanced,
-                "risk": "Resource leak or deadlock"
-            })
-    return findings
-```
+For paired operations (lock/unlock, start/stop, alloc/free, enable_irq/disable_irq, open/close), search from the initial state for a path that acquires without releasing before it terminates or acquires again. That is a leak or a deadlock.
 
 ### A5: Boundary Blast
 
-```python
-def boundary_blast(counters, timestamps):
-    findings = []
-    for name, val in counters.items():
-        test_values = [0, 1, val-1, val, val+1, 2**32-1, 2**32]
-        for tv in test_values:
-            if tv < 0 or tv > val:
-                findings.append({
-                    "variable": name,
-                    "value": tv,
-                    "risk": f"Counter overflow/underflow at {tv} (max defined: {val})"
-                })
-    # Timestamp wraparound (millis() / sys_tick())
-    # On 32-bit ARM: wraparound at ~49.7 days for 1ms tick
-    for name, val in timestamps.items():
-        findings.append({
-            "variable": name,
-            "risk": f"Timestamp wraparound not handled — check elapsed_ms() / elapsed_ticks() pattern"
-        })
-    return findings
-```
+Test each counter at 0, 1, max-1, max and max+1. Flag overflow and underflow. Timestamps wrap too: a 32-bit millisecond clock wraps after about 49.7 days, so check every `elapsed_*()` pattern.
 
 ### A6: Resource Injection
 
-```python
-RESOURCE_FAILURES = {
-    "malloc": "returns NULL",
-    "queue_send": "queue full",
-    "semaphore_take": "timeout",
-    "message_alloc": "pool exhausted",
-}
-
-def resource_injection_probe(states):
-    findings = []
-    for state, transitions in states.items():
-        for event in transitions:
-            for resource, failure in RESOURCE_FAILURES.items():
-                if resource in event.lower() or resource in state.lower():
-                    # Simulate: what if this resource call fails in this state?
-                    # Does the machine have a recovery transition?
-                    has_recovery = any(
-                        "error" in t.lower() or "fail" in t.lower() or "retry" in t.lower()
-                        for t in transitions.values()
-                    )
-                    if not has_recovery:
-                        findings.append({
-                            "state": state,
-                            "resource": resource,
-                            "failure_mode": failure,
-                            "risk": f"No recovery path if {resource} {failure} in state {state}"
-                        })
-    return findings
-```
+For every state and transition, ask what happens when the resource call fails: `malloc` returns NULL, a queue is full, a semaphore times out, a pool is exhausted. No error, fail or retry transition means no recovery path.
 
 ### A7: Minimal Counter-Example
 
-```python
-from collections import deque
-
-def shortest_violating_path(states, init, invariant_check):
-    """BFS to find the shortest event sequence that violates an invariant."""
-    queue = deque([(init, [])])
-    visited = set()
-    while queue:
-        state, path = queue.popleft()
-        if state in visited:
-            continue
-        visited.add(state)
-        
-        if not invariant_check(state):
-            return path  # Shortest violating path found
-        
-        for event, next_state in states.get(state, {}).items():
-            queue.append((next_state, path + [event]))
-    
-    return None  # Invariant holds for all reachable states
-```
-
-That template decides one runtime state at a time, so it only fits the state-predicate kinds. A `leads-to`, `sequence`, `atomicity`, `budget` or `probability` invariant asserts a property of a whole run: reuse the search in its own section (A9-A13) as the witness finder, or A7 will report "all invariants hold" for a model where one of them fails.
+Breadth-first search for the shortest event sequence that violates an invariant. It decides one runtime state at a time, so it fits the state-predicate kinds only. `leads-to`, `sequence`, `atomicity`, `budget` and `probability` assert a property of a whole run and use the search in their own sections (A9-A13).
 
 ### S8: Monotonic Variables
 
-For counters or progress variables that must only move in one direction, list the events that increase/decrease them. Any event that moves against the declared direction is a finding.
-
-```python
-MONOTONIC_VARS = [
-    {"name": "retry_count", "direction": "inc", "increase_events": ["retry"], "decrease_events": []},
-]
-```
+For counters that must move one way only, list the events that change them. An event that moves against the declared direction is a finding.
 
 ### A8: Idempotent Replay
 
-For events that must be safe to retry/replay, apply the event twice from every reachable state. If the second application changes state or is not possible, flag it.
-
-```python
-IDEMPOTENT_EVENTS = {"retry", "sync", "webhook_delivery"}
-```
+Apply each retryable event twice from every reachable state. A second application that changes state, or cannot happen, is a finding.
 
 ### A9: Leads-To
 
-For progress claims ("from MIGRATING, eventually DONE"), check every path from the source state. If a path dead-ends or loops before reaching the target, flag it. When the code has several acceptable outcomes, give the invariant a target set and check every path reaches at least one member; that is still a universal claim, so a branch that reaches none of them fails.
-
-```python
-LEADS_TO = [
-    ("MIGRATING", "DONE"),
-    # or a set of acceptable outcomes
-    ("DRAINING", ["IDLE", "FAULT"]),
-]
-```
+For a progress claim ("from MIGRATING, eventually DONE"), check every path from the source state. A path that dead-ends or loops before the target fails. A target set is still a universal claim: a branch that reaches none of its members fails.
 
 ### A10: Sequence Order
 
-For ordered event sequences ("backup before modify before commit"), search for any path where a later event occurs before an earlier one.
-
-```python
-SEQUENCES = [
-    ["backup", "modify", "commit"],
-]
-```
+For an ordered sequence ("backup, then modify, then commit"), search for a path where a later event occurs before an earlier one.
 
 ### A11: Atomicity
 
-For all-or-nothing groups, track whether an atomic event has started and whether commit/rollback has occurred. Leaving the atomic scope or reaching a terminal state before commit/rollback is a violation.
-
-```python
-ATOMIC_GROUPS = [
-    {"events": ["write"], "commit": "commit", "rollback": "rollback"},
-]
-```
+For all-or-nothing groups, track whether the atomic event started and whether commit or rollback followed. Leaving the scope, or terminating, before commit or rollback is a violation.
 
 ### A12: Budget (Worst-Case Path Cost)
 
-For performance-sensitive claims ("the dispatch path stays within 100 cycles", "worst-case latency ≤ budget"), model each transition with an execution cost and declare a budget:
-
-```python
-TRANSITION_COSTS = {  # (from, event): cost; absent entries count as 1
-    ("BOOT", "calibrate_done"): 40,
-    ("IDLE", "enable"): 5,
-    ("RUN", "watchdog_expiry"): 15,
-}
-BUDGETS = [
-    {"id": "dispatch-budget", "description": "worst-case path within budget", "budget": 100},
-]
-```
-
-Probe: find the shortest path from init whose accumulated cost exceeds the budget; report it verbatim. A reachable cycle with positive total cost means cost can grow without bound — flag it as a budget violation regardless of the declared budget.
-
-In DSH (`logicprobe_verify`), `cost` is an optional field on transitions (absent = 1) and `budget` is an invariant kind; A12 runs automatically. Cost values are modeler-provided static labels — they verify the model against the declared budget, not the real WCET, which needs binary-level timing analysis.
+Give each transition a `cost` and declare a `budget`. The probe reports the shortest path whose accumulated cost exceeds it. A reachable cycle with positive cost means cost grows without bound, which is a violation whatever the budget says. Costs are modeler labels: this checks the model against its budget, not real WCET.
 
 ### A13: Probability Reachability (DTMC)
 
-For claims with a reliability/probability flavor ("at least 90% of runs reach SAFE", "P(broke first) ≥ 0.75"), attach a relative weight to each branch and declare the bound. Absent weight = 1; weight 0 means the branch never fires probabilistically.
-
-```python
-TRANSITION_WEIGHTS = {  # (from_state, event): weight; absent entries count as 1
-    ("RUN", "ok"): 9,
-    ("RUN", "bad"): 1,
-}
-PROBABILITY_INVARIANTS = [
-    {"id": "reliability", "target": "SAFE", "op": ">=", "p": 0.9},
-]
-```
-
-Probe: solve P(ever reaching `target`) from INIT by value iteration over the reachable absorbing chain; compare against the bound. In DSH (`logicprobe_verify`), `weight` on transitions plus a `probability` invariant runs A13 automatically. This is a qualitative DTMC check of the modeler's weights — real MTBF/failure-rate numbers need PRISM/Storm or fault-tree analysis.
+Give each branch a relative `weight` and declare a `probability` bound. The probe solves P(ever reaching the target) by value iteration and compares it with the bound. Absent weight is 1; weight 0 never fires. This is a qualitative check of the weights, not a measured failure rate.
 
 ### A14: Deadline (Discrete Tick Clock)
 
-For real-time-sounding claims ("must leave BUSY within 3 ticks", "watchdog resets before deadline"), declare which events advance the clock and cap per-state residency:
-
-```python
-TICK_EVENTS = {"tick"}
-STATE_MAX_TICKS = {"BUSY": 3}
-```
-
-Probe: explore residency — a `tick` step that keeps the machine resident past `maxTicks` is a deadline miss; report the over-residency path. In DSH (`logicprobe_verify`), state `maxTicks` plus top-level `tickEvents` run A14 automatically. This checks the model's declared deadlines, not real execution time (see Known Limitations below; hard real-time semantics route to UPPAAL).
-
-### Standalone engine (non-DSH, JSON models)
-
-`references/logicprobe-engine.py` is an exact Python mirror of the DSH tools: `verify model.json` runs all 22 checks + D1-D4 with a `--before-model`/optional `--state-mapping`; `compose m1.json m2.json ... --rendezvous a,b` runs C1/C2 composition; `export model.json --format uppaal|tla|prism|spin` reproduces the four exporters byte-for-byte. It reads the same LogicModelV1 JSON as DSH, so a model verified in one host verifies identically in the other (checked by tests/python/run.mjs).
-
-#### Baseline diffs (accepting a slice)
-
-The acceptance criterion of a slice is normally "violations must not increase", which is
-a comparison, not a single run. Both hosts compute it:
-
-```bash
-# any host with Python
-python skills/logicprobe/references/logicprobe-engine.py verify model.json --baseline earlier-report.json
-# also: compose … --baseline, structure … --baseline, uml-review --baseline
-```
-
-In DSH, `logicprobe_report_diff { baseline, current }` takes the two report objects.
-
-The output is `{schema: "logicprobe/baseline/v1", verdict, verdictReason,
-currentVerdict, added[], removed[], changed[], summary, nextSteps}`:
-
-- **Identity**: `check id + code + canonical locator`, where the locator is the finding's
-  `evidence` and `path` (canonical JSON, so key order does not matter). Prose is excluded
-  — a reworded message is `changed`, not added-plus-removed. A finding with neither
-  evidence nor a path falls back to its message; an engine that reports nothing
-  structured has nothing stabler to match on.
-- **Delta verdict**: a newly added `severity: "error"` finding fails it; new warnings are
-  `pass_with_findings`; removals keep it `pass` and are listed so "fixed" is confirmed
-  rather than assumed.
-- **Absolute verdict**: `currentVerdict` echoes the current report's own verdict, and a
-  clean delta over a still-failing run adds that fact to `nextSteps`. A green delta is not
-  a green run.
-- **Self-check**: diffing a report against itself must add and remove nothing. If it does
-  not, the identity is unstable for that family — fix that before trusting the baseline.
-
-#### Report contract and exit codes
-
-Every report carries `ran`, `verdict` (`pass` / `pass_with_findings` / `fail`),
-`verdictReason` and, where a hash is reported, `hashSpec`. `ok` only says a report was
-produced — a model with a deadlock reports `ok: true` with `verdict: "fail"`, so gate on
-the verdict, never on `ok`:
-
-| Outcome | Exit code |
-|---|---|
-| `verdict: "pass"` or `pass_with_findings` | `0` |
-| `verdict: "fail"` (an error finding, or `MODEL_INVALID`) | `2` |
-| Refused before the engine ran (`ok: false` with `errorCode`/`error`) | `2` |
-
-`uml-parse` exits `2` when the text is not a state or activity diagram (see [uml-modeling-guide.md](uml-modeling-guide.md)), and `uml-review` follows its own verdict.
-
-`_`-prefixed keys anywhere in the model are annotation metadata: ignored by the schema,
-excluded from `modelHash`, and echoed as `metadataKeys` — so an archive record
-(`_source`, `_verified`, `_extraction_caveats`) can live inside the model file without
-changing its identity. `--hash-spec v0|v1` selects the hash specification to report
-(default `v1`), and `--hash-check <hex>` answers whether a recorded hash belongs to any
-published specification at all — see [hash-spec.md](hash-spec.md).
+Declare which events advance the clock (`tickEvents`) and cap per-state residency with `maxTicks`. A tick that keeps the machine resident past its cap is a deadline miss, and the probe reports the over-residency path. This checks declared deadlines, not execution time.
 
 ## Counter-Example Interpretation
 
@@ -461,7 +188,7 @@ When a probe finds a counter-example, classify it:
 ### What This Method CANNOT Detect
 
 - **Implementation bugs**: The C code may have errors not present in the model
-- **Timing-dependent bugs**: Python model does not simulate real-time constraints
+- **Timing-dependent bugs**: the model does not simulate real-time constraints
 - **Compiler/optimization issues**: Volatile omission, reordering, inlining effects
 - **Hardware-specific behavior**: Memory-mapped I/O timing, DMA races, cache coherency
 - **Undocumented behavior**: If the plan doesn't describe a transition, the model can't either
@@ -475,7 +202,7 @@ When a probe finds a counter-example, classify it:
 
 ### Model Fidelity Warning
 
-The Python model is an APPROXIMATION. It models state transitions, not execution semantics. A model that passes all 22 checks (S1-S8 structural, A1-A14) means the plan's LOGIC is consistent — NOT that the implementation will work. Always follow logic verification with code-level review.
+The model is an APPROXIMATION. It models state transitions, not execution semantics. A model that passes all 22 checks (S1-S8 structural, A1-A14) means the plan's LOGIC is consistent — NOT that the implementation will work. Always follow logic verification with code-level review.
 
 ## Refactoring Verification
 
@@ -507,7 +234,7 @@ If the plan claims "simplification" but the numbers don't decrease, flag as UNSU
 
 **Deadlock regression**: A refactoring that splits one state into two should not introduce a deadlock path that didn't exist before. Run S2 on AFTER and compare to BEFORE's deadlock report.
 
-In the Python harness, set `BEFORE_STATES`, `BEFORE_INIT`, `BEFORE_TERMINALS`, and `STATE_MAPPING` to run D1-D4 automatically after the standard checks.
+For before/after comparison, pass the earlier model as `beforeModel` and an optional `stateMapping`; the D1-D4 checks then run after the standard ones.
 
 ### Common Refactoring Bugs Caught by This Method
 
@@ -518,20 +245,20 @@ In the Python harness, set `BEFORE_STATES`, `BEFORE_INIT`, `BEFORE_TERMINALS`, a
 
 ## Manual Verification Mode
 
-When Python is NOT available (air-gapped embedded dev machine, locked-down Windows), execute each check manually. The agent performs the verification using its own reasoning — the methodology is identical, only the execution engine changes.
+When no engine can run (air-gapped machine, locked-down host), execute each check manually. The agent performs the verification using its own reasoning — the methodology is identical, only the execution engine changes.
 
 ### Size Limit
 
-Manual verification is reliable for state machines with **≤ 10 states and ≤ 30 transitions**. For larger machines, manual BFS and cycle detection become error-prone. If the machine exceeds this threshold and Python is unavailable, either:
+Manual verification is reliable for state machines with **≤ 10 states and ≤ 30 transitions**. For larger machines, manual BFS and cycle detection become error-prone. If the machine exceeds this threshold and no engine can run, either:
 
 - Decompose the machine into sub-machines and verify each independently, then check cross-machine contracts manually
-- Flag the size limitation as a finding and recommend the user run the Python harness offline
+- Flag the size limitation as a finding and recommend running the engine offline from the repository
 
 ### Prerequisites
 
 - Transition table and model narrative have been extracted and confirmed with the user
 - You have the full table in context (from Phase 2 extraction step)
-- **Harness validation** (Python mode only): After filling in `verification-harness.py`, translate the Python `STATES` dict BACK into a transition table and compare it against the confirmed extraction table. If they differ, fix the harness. This catches typo and whitespace errors in manual dict construction.
+- **Model validation**: when a host with an engine becomes available, run the extracted model there and compare its findings with the hand-checked ones.
 
 ### Phase 2a — Manual Structural Checks
 
@@ -567,7 +294,7 @@ Manual verification is reliable for state machines with **≤ 10 states and ≤ 
 
 ### Manual Mode Output Format
 
-For each finding, output the same structured format as the Python harness:
+For each finding, output the engine structured format:
 
 ```text
 [CHECK] S1 Reachability
@@ -589,9 +316,7 @@ Manual verification takes longer but produces identical-quality findings. The ke
 2. Read plan → Phase 1 (enumerate claims)
 3. Detect behavioral claims → trigger logic-primitive escalation
 4. Load this guide
-5. Check Python: `python3 --version` or `python --version`
-6a. Python ≥ 3.6 → load verification-harness.py → fill in MODEL → run
-6b. No Python → use Manual Verification Mode (see above) — execute each check step by step
+5. Run the checks: the native tool when the host has it, otherwise Manual Verification Mode (see above), step by step
 7. Extract model → show transition table → GET USER CONFIRMATION
 8. Run Phase 2a (8 structural primitives) → log results
 9. Run Phase 2b (14 adversarial probes) → log results
@@ -600,4 +325,4 @@ Manual verification takes longer but produces identical-quality findings. The ke
 12. Include in Phase 5 (structured output)
 ```
 
-Never skip step 5. A verified model based on wrong extraction is worse than no verification — it creates false confidence.
+Never skip the check. A verified model based on wrong extraction is worse than no verification — it creates false confidence.

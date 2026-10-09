@@ -1067,7 +1067,7 @@ function checkResult(id: string, name: string, findings: Finding[], detail: stri
 }
 
 // ---------------------------------------------------------------------------
-// S1-S7
+// S1-S8
 // ---------------------------------------------------------------------------
 
 function S1_reachability(model: LogicModelV1, exploration: Exploration): CheckResult {
@@ -1493,7 +1493,7 @@ function S7_invariants(model: LogicModelV1, options: NormalizedOptions): CheckRe
 }
 
 // ---------------------------------------------------------------------------
-// A1-A7
+// A1-A14
 // ---------------------------------------------------------------------------
 
 function A1_unexpectedEvents(model: LogicModelV1): CheckResult {

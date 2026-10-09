@@ -1,7 +1,7 @@
 {
   "name": "dsh-logicprobe",
   "version": "1.0.0",
-  "description": "Design document & plan claim verification — enumerate claims, verify against codebase facts, then escalate to state-machine verification (S1-S8/A1-A12, including budget/worst-case path-cost checks) and data-model verification (DS/DA/DD) for behavioral claims. Supports before/after regression, idempotency/monotonic/sequence/leads-to/atomicity constraints, and concurrency risk mining. Ships a native DeepSeek Harness (dsh) bundle that injects the claim-verification gate into the first model step.",
+  "description": "Verifies claims about designs and code. Facts go against the source. Behaviour goes through an executable model: state machines, protocols, composition, data models, migrations. Structure diagrams are read as dependency graphs, at one level or several. Two reports can be compared for regression. Exports UPPAAL, TLA+, PRISM and SPIN input. Ships a native DeepSeek Harness bundle that injects the verification gate into the first model step.",
   "type": "module",
   "main": "lib/index.js",
   "types": "lib/types/index.d.ts",
@@ -12,13 +12,15 @@
     },
     "./cordis.patch.yml": "./cordis.patch.yml",
     "./client": "./lib/client.js",
-    "./package.json": "./package.json"
+    "./package.json": "./package.json",
+    "./locale/*.json": "./locale/*.json"
   },
   "files": [
     "lib",
     "src",
     "skills",
-    "cordis.patch.yml"
+    "cordis.patch.yml",
+    "locale"
   ],
   "dsh": {
     "engines": {
@@ -77,7 +79,7 @@
     "build": "tsc -p tsconfig.json && node scripts/build-client.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "bump": "node scripts/bump-version.mjs",
-    "test:engine": "npm run build && node tests/engine/run.mjs && node tests/data-engine/run.mjs && node tests/concurrency/run.mjs && node tests/uml/run.mjs && node tests/apply-smoke.mjs && node tests/dsh-client-half.test.mjs && node tests/dsh-volatile-fallback.test.mjs && node tests/skills/run.mjs && node tests/structure/run.mjs && node tests/baseline/run.mjs && node tests/granularity/run.mjs && node tests/exporters/run.mjs && node tests/external/run.mjs && node tests/python/run.mjs",
+    "test:engine": "npm run build && node tests/engine/run.mjs && node tests/data-engine/run.mjs && node tests/concurrency/run.mjs && node tests/uml/run.mjs && node tests/apply-smoke.mjs && node tests/dsh-client-half.test.mjs && node tests/dsh-volatile-fallback.test.mjs && node tests/claude-session-start-hook.test.mjs && node tests/skills/run.mjs && node tests/structure/run.mjs && node tests/baseline/run.mjs && node tests/granularity/run.mjs && node tests/exporters/run.mjs && node tests/external/run.mjs && node tests/python/run.mjs",
     "test:full": "npm run build && node tests/full-suite.mjs",
     "test:python": "npm run build && node tests/python/run.mjs"
   },

@@ -1,19 +1,70 @@
 #!/usr/bin/env bash
-# SessionStart hook for logicprobe
-# Reads session-start-content.md, wraps in JSON, outputs on stdout.
-# Robust against encoding issues — all content lives in the .md file.
-set -e
+# SessionStart hook for logicprobe.
+# Reads session-start-content.md, appends what this install's engine situation is,
+# wraps the result in the Claude Code hook JSON envelope, and prints it on stdout.
+# All payload text lives in the .md file, so none is embedded in this script.
+#
+# Escaping is pure bash parameter substitution — deliberately no sed/awk. Text
+# tools disagree across platforms: a CRLF content file survives the pipeline only
+# where sed happens to run in text mode (verified: Git for Windows strips the CR,
+# GNU sed does not), and awk dialects disagree about "\n" inside a printf format.
+# An encoder that emits invalid JSON silently loses the whole injection, so it
+# must not depend on either. tests/claude-session-start-hook.test.mjs guards it.
+#
+# hooks.json runs this as `bash <path>` for two reasons: the executable bit is
+# then irrelevant, and the extensionless name keeps Claude Code's Windows
+# auto-detection (which prepends "bash" to any command containing ".sh") from
+# adding a second interpreter.
+set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+PLUGIN_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 CONTENT_FILE="$SCRIPT_DIR/session-start-content.md"
+ENGINE="$PLUGIN_ROOT/tools/python/logicprobe-engine.py"
+
+emit() {
+    printf '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"%s"}}\n' "$1"
+}
 
 if [ ! -f "$CONTENT_FILE" ]; then
-    echo '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"logicprobe active (content file missing)"}}'
+    emit "logicprobe active (content file missing)"
     exit 0
 fi
 
-# JSON-escape and wrap: escape backslash, quote, then newlines become \n
-CONTENT=$(cat "$CONTENT_FILE")
-ESCAPED=$(printf '%s' "$CONTENT" | sed 's/\\/\\\\/g; s/"/\\"/g' | awk '{printf "%s\\n", $0}')
+# Resolve the engine here instead of asking the model to guess a
+# repository-relative path: the session's working directory is the user's
+# project, not this plugin. A plugin installed without `tools/` says so rather
+# than pointing at a file that is not there.
+if [ -f "$ENGINE" ]; then
+    ENGINE_NOTE="**This install's engine**: \`python \"$ENGINE\"\` — absolute path, Python 3.8+, no packages."
+else
+    ENGINE_NOTE="**This install has no Python engine** (the dsh bundle does not ship one): use the Manual Verification Mode in the skill references, and say the claim is unverified."
+fi
 
-printf '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"%s"}}\n' "$ESCAPED"
+# escape_for_json: one C-level pass per substitution (far faster than a character
+# loop). Order matters — backslash first, or it would re-escape the backslashes
+# the later substitutions introduce. `\n`, `\r`, `\t`, `\b` and `\f` have short
+# JSON escapes; the remaining C0 controls JSON forbids inside a string get `\u`
+# forms. A NUL cannot reach a bash string at all.
+escape_for_json() {
+    local s="$1"
+    s="${s//\\/\\\\}"
+    s="${s//\"/\\\"}"
+    s="${s//$'\n'/\\n}"
+    s="${s//$'\r'/\\r}"
+    s="${s//$'\t'/\\t}"
+    s="${s//$'\b'/\\b}"
+    s="${s//$'\f'/\\f}"
+    s="${s//$'\v'/\\u000b}"
+    s="${s//$'\a'/\\u0007}"
+    s="${s//$'\e'/\\u001b}"
+    printf '%s' "$s"
+}
+
+# Command substitution drops the file's trailing newline(s), so the injected
+# string carries no trailing "\n" — which is what the payload intends.
+CONTENT="$(cat "$CONTENT_FILE")
+
+$ENGINE_NOTE"
+emit "$(escape_for_json "$CONTENT")"
+exit 0

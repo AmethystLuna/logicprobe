@@ -7,7 +7,7 @@
   "plugins": [
     {
       "name": "logicprobe",
-      "description": "Design document & plan claim verification — state-machine and data-model logic verification with adversarial probing and before/after regression detection.",
+      "description": "Verifies claims about designs and code: facts against the source, behaviour as an executable model, plus structure review and baseline diffs.",
       "version": "1.0.0",
       "source": "./"
     }

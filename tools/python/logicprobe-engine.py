@@ -86,7 +86,7 @@ def stable_stringify(value):
 # ---------------------------------------------------------------------------
 
 # Published model-hash specifications. The full normalization rules, the excluded
-# keys and a one-line recompute command are in references/hash-spec.md.
+# keys and a one-line recompute command are in skills/logicprobe/references/hash-spec.md.
 #   v1 (1.0.0) drops every `_`-prefixed metadata key at every level before hashing.
 #   v0 is the pre-1.0.0 behaviour (no metadata filtering), kept for archived hashes.
 # For a model without `_` keys the two are byte-identical.
@@ -1130,7 +1130,7 @@ def _check_result(cid, name, findings, detail):
 
 
 # ---------------------------------------------------------------------------
-# S1-S7
+# S1-S8
 # ---------------------------------------------------------------------------
 
 def S1_reachability(model, exploration):
@@ -1568,7 +1568,7 @@ def S7_invariants(model, max_states):
 
 
 # ---------------------------------------------------------------------------
-# A1-A7
+# A1-A14
 # ---------------------------------------------------------------------------
 
 def A1_unexpected_events(model):

@@ -1,6 +1,6 @@
 # Data Model Manual Verification Mode
 
-Use this when neither the DSH `logicprobe_datamodel_verify` tool nor Python is available. It mirrors the automated DS/DA/DD checks as a structured checklist.
+Use this when the DSH `logicprobe_datamodel_verify` tool is not available. It mirrors the automated DS/DA/DD checks as a structured checklist.
 
 ## 1. Extract the DataModelV1 table
 

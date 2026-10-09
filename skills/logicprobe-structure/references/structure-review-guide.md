@@ -2,13 +2,12 @@
 
 How to audit a component, package, class or deployment diagram as a dependency graph: the matrix schema, every finding code, a worked example, and the method for reconciling the diagram with a source-side check.
 
-The tool is `logicprobe_structure_verify` (DSH) or `logicprobe-engine.py structure` (any host with Python). Both are the same engine; `tests/python/run.mjs` compares them field for field.
+The tool is `logicprobe_structure_verify`. A host without it runs the repository engine on the same diagram text; the parity test compares the two field for field.
 
 ## Inputs
 
 ```text
 logicprobe_structure_verify  { diagram: "<PlantUML or Mermaid class text>", notation?: auto|plantuml|mermaid, matrix?: {...} }
-logicprobe-engine.py structure diagram.puml [--notation auto|plantuml|mermaid] [--matrix matrix.json]
 ```
 
 **Accepted diagram families**: PlantUML `component`, `package`, `class`, `interface`, `enum`, `object`, `actor`, `usecase`, `database`, `node`, `artifact`, `deployment`, `rectangle`, `folder`, `frame`, `cloud`, `queue`, `stack`, `storage`, `collections`, `agent`, `boundary`, `control`, `entity`, `namespace`, `module`; Mermaid `classDiagram` (`class X`, `X --> Y : label`, `X ..|> Y`).
@@ -124,7 +123,7 @@ fact, and nothing keeps them in step. Declare the relation and both are checked:
 
 ```text
 logicprobe_structure_verify  { diagrams: [ { name, diagram, parent? }, … ] }
-logicprobe-engine.py granularity manifest.json     # { "diagrams": [ { "name": "L1", "file": "L1.puml", "parent": "L0" }, … ] }
+logicprobe_structure_verify { diagrams: [ { name: "L1", diagram: "…", parent: "L0" }, … ] }
 ```
 
 Per-diagram structural checks run first (UML020-UML026), and every finding is tagged with

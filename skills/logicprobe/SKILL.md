@@ -5,7 +5,7 @@ description: "Use when you want to verify something about code: a design doc, sp
 
 # Logic Probe
 
-Documents are not truth — code is. Verify every verifiable claim before accepting or acting on any design.
+For an unverified design, failure is only a matter of time. Complex code becomes clear once you model it and run it. Check every claim before you act on it.
 
 ## When This Skill Applies
 
@@ -147,9 +147,7 @@ When Phase 2 triggers escalation, do NOT proceed to Phase 3 until the verificati
 ```text
 Document claims → Extract model → Runtime check:
   ├── DSH + `logicprobe_verify` tool available → build Model schema v1 (references/dsh-model-schema.md) → call the tool → structured report
-  ├── Python available + LogicModelV1 JSON at hand → references/logicprobe-engine.py verify model.json (S1-S8/A1-A14/D1-D4; subcommands compose / export add C1-C2 and UPPAAL/TLA+/PRISM/SPIN output)
-  ├── Python available + model only as extracted dicts → fill in references/verification-harness.py → run → report
-  └── No Python → Manual Verification Mode (see references/logic-verification-guide.md#manual-verification-mode)
+  └── No engine available → Manual Verification Mode (see references/logic-verification-guide.md#manual-verification-mode)
 
 Refactoring variant:
   Old code + Refactoring plan → Extract BEFORE model + AFTER model
@@ -174,7 +172,7 @@ UML modelling variant (the task is to draw a flow, not to check a claim):
 | `logicprobe_export` | Emits external-checker input from a verified model: UPPAAL, TLA+, PRISM, SPIN. |
 | `logicprobe_uml` | render / parse / review for UML modelling — the diagram domain belongs to the `logicprobe-uml` skill. |
 
-`references/logicprobe-engine.py` mirrors the same checks and carries `compose` and `export` subcommands for hosts without the native tools.
+The repository engine mirrors the same checks and carries the `compose` and `export` subcommands for hosts without the native tools.
 
 ### Reading a Report: `ok` Is Not a Verdict
 
@@ -199,7 +197,7 @@ Turn the verdict into an answer, never into a summary of `ok`:
 - `verdict: "pass_with_findings"` — verification ran clean, but warnings exist (e.g. `S5` implicit-ignore events, `UML012_NO_TERMINAL`). Report the pass **and** the warnings; do not silently upgrade it to "no issues".
 - `verdict: "fail"` — an error-severity finding exists, or the input was rejected (`MODEL_INVALID`). Say plainly that the claim is **not** verified, quote the counterexample path the finding carries, and only then propose a correction. Never describe a `fail` as "the tool ran successfully".
 
-Exit codes (non-DSH CLI `references/logicprobe-engine.py`): `0` for `pass`/`pass_with_findings`, `2` for `fail`, a refusal, or an unreadable input. In DSH the native tools return the report as data — read `verdict`, and treat `errorCode`/`error` as the refusal path.
+Exit codes: `0` for `pass` / `pass_with_findings`, `2` for `fail`, a refusal, or an unreadable input. In DSH the native tools return the report as data — read `verdict`, and treat `errorCode`/`error` as the refusal path.
 
 ### Slice Acceptance: Baseline Diffs
 
@@ -207,7 +205,7 @@ The acceptance criterion for a refactoring slice is usually "no **new** findings
 "zero findings". Do not compare two JSON reports by eye — run the comparison:
 
 - DSH: `logicprobe_report_diff { baseline: <earlier report>, current: <new report> }`
-- Any host with Python: `logicprobe-engine.py verify model.json --baseline base.json`
+- Any host without the tools: run the repository engine against the same JSON.
   (also available on `compose`, `structure` and `uml-review`)
 
 A finding's identity is its **check id + code + canonical locator** (built from
@@ -248,15 +246,7 @@ When the document under review is a refactoring plan (modifying existing state m
 
 6. **Flag any behavioral delta not documented in the plan** — the most common refactoring bug is an unintended side effect that the plan doesn't acknowledge
 
-**Detection step**: Before generating any verification code, run `python3 --version 2>&1` or `python --version 2>&1`. Check the output:
-
-- Returns `Python 3.x.y` with x ≥ 6 → use Python harness
-- Returns anything else (command not found, "Python was not found" Windows stub, version < 3.6) → fall back to Manual Verification Mode
-- On Windows, if `python` launches the Microsoft Store, treat as unavailable
-
-Do NOT attempt to install Python — the user's embedded development machine may be air-gapped or locked down.
-
-In DSH, prefer the native `logicprobe_verify` tool (model JSON, structured guard DSL, path-aware invariants) — see `references/dsh-model-schema.md`. For non-DSH hosts: when the model is already a LogicModelV1 JSON, run the standalone JSON engine `references/logicprobe-engine.py` (verify | compose | export — an exact Python mirror of the DSH tools, cross-checked byte-for-byte by tests/python/run.mjs); when the model exists only as extracted dicts, fill in the reusable template `references/verification-harness.py`. For detailed probe patterns, model extraction methodology, and manual verification procedures, load `references/logic-verification-guide.md`.
+Run the checks with the native `logicprobe_verify` tool (model JSON, structured guard DSL, path-aware invariants) — see `references/dsh-model-schema.md`. A host without the tools can run the repository engine against the same JSON. For probe patterns, extraction methodology and manual procedures, load `references/logic-verification-guide.md`.
 
 ### Phase 2a: Structural Primitives (8 Checks)
 
@@ -420,7 +410,7 @@ This skill owns behavioural claims. Three neighbouring domains have their own sk
 4. Don't fix during review — point the way, let implementation happen after approval.
 5. **For behavioral claims: verify with code, not reasoning.** If a plan says "always", "never", or "guaranteed", generate and run a model. One counter-example is enough to refute a universal claim.
 6. **Confirm the model before running it** — unless the runtime reports `logicprobe interaction=auto`. Extraction errors are the dominant failure mode of formal verification. In auto mode, substitute evidence-cited extraction + round-trip validation and mark the report `UNCONFIRMED`.
-7. **Don't verify what the code already checks.** If the existing codebase has compile-time assertions, static analysis, or runtime checks for a property, cite those — don't re-verify in a Python model.
+7. **Don't verify what the code already checks.** If the existing codebase has compile-time assertions, static analysis, or runtime checks for a property, cite those — don't re-verify in a model.
 8. **Hand a neighbouring domain to its own skill.** A diagram is a model, not evidence: modelling or auditing one belongs to `logicprobe-uml`. A concurrency claim is mined and routed, never proven here: that is `logicprobe-concurrency`. Schema, data invariants and migrations are `logicprobe-datamodel`. This skill keeps the doctrine and the behavioural checks.
 9. **Say what this does not prove.** For dimensions logicprobe does not verify — hard real time (deadlines, periods), preemptive concurrency, hybrid-control stability, probabilistic reliability, execution-cost budgets — route to the dedicated tool named in `references/gap-routing-guide.md`. `logicprobe_verify` reports carry the same routing as informational `coverageNotes` on matching models.
 10. **Write-site analysis is out of scope, and stays there.** "Only the ISR writes this flag", "one owner per register" — logicprobe verifies models and diagrams, not *who writes what in the source*. That claim needs a source-side AST/rule check or a static analyzer; this plugin's contribution is to flag the claim as unverified and route it (`logicprobe_concurrency_scan` does exactly that). Do not imply the diagram or the model settled it.

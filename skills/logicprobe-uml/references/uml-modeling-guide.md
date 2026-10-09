@@ -55,11 +55,7 @@ In DSH:
 
 `logicprobe_uml` with `action=render` returns the diagram source plus `warnings`. Read those warnings. They list every construct the notation could not carry verbatim: a state id that needed an alias, a label containing `[` or `/`, a trace that was capped.
 
-Without the DSH tool, run the standalone engine:
-
-```bash
-python skills/logicprobe/references/logicprobe-engine.py uml-render model.json --notation mermaid --diagram state
-```
+Without the DSH tool, run the repository engine on the same model JSON.
 
 You can also write the diagram by hand. The generator is a convenience, not a requirement. A hand-written diagram is parsed and reviewed exactly like a generated one.
 

@@ -3,7 +3,7 @@
 `modelHash` is how a report, an archive record and a CI comparison agree on *which*
 model was verified. A hash nobody can recompute is decoration, so the algorithm, the
 normalization rules and the excluded keys are published here — and pinned by golden
-tests (`tests/engine/run.mjs`, `tests/python/run.mjs`).
+tests (`tests/engine/run.mjs`, and the parity test).
 
 ## Published specifications
 
@@ -38,7 +38,7 @@ sha256(json.dumps(strip_metadata(model), sort_keys=True, separators=(',', ':'), 
 ```
 
 The TypeScript engine does not call `json.dumps`; it implements the same serialization
-directly (`stableStringify`), and `tests/python/run.mjs` compares the two engines
+directly (`stableStringify`), and the parity test compares the two engines
 byte-for-byte on every fixture. The specification, not either implementation, is the
 contract.
 
@@ -51,8 +51,8 @@ order hash differently — that is intended, because the order is part of the in
 Both commands below reproduce the engine's value exactly.
 
 ```bash
-# Python
-python -c "import json,hashlib;m=json.load(open('model.json'));s=lambda v:({k:s(x) for k,x in v.items() if not k.startswith('_')} if isinstance(v,dict) else [s(x) for x in v] if isinstance(v,list) else v);print(hashlib.sha256(json.dumps(s(m),sort_keys=True,separators=(',',':'),ensure_ascii=False).encode('utf-8')).hexdigest())"
+# Node
+node -e "const m=JSON.parse(require('fs').readFileSync('model.json','utf8'));const s=(v)=>Array.isArray(v)?v.map(s):v&&typeof v==='object'?Object.fromEntries(Object.keys(v).sort().filter((k)=>!k.startsWith('_')).map((k)=>[k,s(v[k])])):v;console.log(require('crypto').createHash('sha256').update(JSON.stringify(s(m))).digest('hex'))"
 
 # Node.js
 node -e "const c=require('node:crypto'),f=require('node:fs');const s=v=>Array.isArray(v)?'['+v.map(s).join(',')+']':(v&&typeof v==='object'?'{'+Object.keys(v).filter(k=>!k.startsWith('_')).sort().map(k=>JSON.stringify(k)+':'+s(v[k])).join(',')+'}':JSON.stringify(v));console.log(c.createHash('sha256').update(s(JSON.parse(f.readFileSync('model.json','utf8')))).digest('hex'))"
@@ -90,10 +90,10 @@ recorded value belongs to any published specification *at all*:
 
 ```bash
 # verify under a named spec
-python skills/logicprobe/references/logicprobe-engine.py verify model.json --hash-spec v0
+The repository CLI takes the same flag: `verify model.json --hash-spec v0`
 
 # ask about a recorded hash: prints {checked, matches, published[], verdict, verdictReason}
-python skills/logicprobe/references/logicprobe-engine.py verify model.json --hash-check 00000000000000000000000000000000000000000000000000000000deadbeef
+The repository CLI reports which spec reproduces an archived hash: `verify model.json --hash-check 0000…deadbeef`
 ```
 
 `--hash-check` exits `0` when a published spec reproduces the value and `2` when none
@@ -101,7 +101,7 @@ does, with the explicit answer `no published hash spec reproduces <hex>`. It nev
 guesses a spec to make a number match.
 
 The in-process equivalents are `modelHash(model, spec)` (TypeScript,
-`lib/engine.js`) and `model_hash(model, spec)` (Python), plus `hashPayload(model, spec)`
+`lib/engine.js`) and `model_hash(model, spec)` in the mirror, plus `hashPayload(model, spec)`
 and `hash_payload(model, spec)` for the exact bytes that are hashed.
 
 ## When the hash changes
