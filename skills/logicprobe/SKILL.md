@@ -182,12 +182,16 @@ Every tool report carries the same outcome contract. **`ok` says a report was pr
 
 | Field | Meaning |
 |-------|---------|
+| `schema` | The versioned report contract (`logicprobe/verify/v1`, `logicprobe/uml/review/v1`, …). Branch on this instead of sniffing fields. |
 | `ran` | The tool executed and produced this report. `false` only when the tool refused the request before running (see `errorCode`/`error`). |
 | `verdict` | `pass` \| `pass_with_findings` \| `fail`. **This is the outcome you act on.** |
 | `verdictReason` | Why, e.g. `2 error finding(s) (first: S2_NO_TRANSITIONS)` or `no error findings; 3 warning finding(s)`. |
-| `findings[]` | `{code, severity, message, detail?, path?, evidence?}`. Any `severity: "error"` forces `verdict: "fail"`. |
+| `findings[]` | `{code, severity, message, detail?, evidence?, path?}`. Any `severity: "error"` forces `verdict: "fail"`. |
 | `hashSpec` | Which published model-hash specification `modelHash` follows — see `references/hash-spec.md`. |
+| `hashes` | Every hash the report carries, in one place (a model hash, a diagram hash, before/after hashes). |
+| `nextSteps[]` | What to do next, derived from the findings; never empty, and identical for two runs over the same input. |
 | `metadataKeys[]` | Paths of the `_`-prefixed annotation keys the schema ignored, e.g. `["_source", "_verified", "states[0]._note"]` (present only when the input carried any). |
+| `narrativeCoverage` | `{states: "5/5", events: "3/9", scenarios: "0/12"}` when the model carries a narrative — a partial narrative is valid, and this is how much is still undocumented. |
 
 Turn the verdict into an answer, never into a summary of `ok`:
 

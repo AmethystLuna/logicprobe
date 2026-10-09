@@ -30,7 +30,7 @@
  *
  * @module logicprobe-uml
  */
-import { type HashSpec, type Verdict } from './engine.js';
+import { type HashSpec, type NarrativeCoverage, type ReportSchema, type Verdict } from './engine.js';
 import type { GuardNode, LogicModelV1, UpdateSpec } from './engine.js';
 export type UmlNotation = 'mermaid' | 'plantuml';
 export type UmlDiagram = 'state' | 'activity' | 'sequence';
@@ -88,6 +88,8 @@ export interface UmlFinding {
         to: string;
     }>;
     detail?: string;
+    /** Machine-readable context for the finding (ids, coverage, rule matches), same shape as the engine's findings. */
+    evidence?: Record<string, unknown>;
 }
 export interface UmlRoundTripReport {
     notation: UmlNotation;
@@ -106,6 +108,8 @@ export interface UmlReviewReport {
     ran: boolean;
     verdict: Verdict;
     verdictReason: string;
+    /** The versioned report contract this result follows. */
+    schema: ReportSchema;
     source: 'model' | 'diagram' | 'model+diagram';
     summary: {
         errors: number;
@@ -128,6 +132,14 @@ export interface UmlReviewReport {
     primary?: string;
     /** Paths of the `_`-prefixed metadata keys found in the supplied model, when it carried any. */
     metadataKeys?: string[];
+    /** How much of the model the narrative documents; absent when there is no narrative. */
+    narrativeCoverage?: NarrativeCoverage;
+    /** Hashes of what was reviewed, in one place. */
+    hashes: {
+        hashSpec: HashSpec;
+        modelHash?: string;
+        parsedHash?: string;
+    };
     /** Declarations the parser could not represent; a non-empty list fails the review. */
     discardedConstructs?: DiscardedConstruct[];
     /** Arrows whose endpoints came from a discarded construct. */

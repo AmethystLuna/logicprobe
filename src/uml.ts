@@ -31,7 +31,7 @@
  * @module logicprobe-uml
  */
 
-import { validateModel, modelHash, metadataKeysOf, verdictOfFindings, DEFAULT_HASH_SPEC, type HashSpec, type Verdict } from './engine.js'
+import { REPORT_SCHEMAS, validateModel, modelHash, metadataKeysOf, narrativeComplete, narrativeCoverageOf, verdictOfFindings, DEFAULT_HASH_SPEC, type HashSpec, type NarrativeCoverage, type ReportSchema, type Verdict } from './engine.js'
 import type { GuardNode, GuardOp, LeafGuard, LogicModelV1, StateSpec, TransitionSpec, UpdateSpec, VariableSpec } from './engine.js'
 
 export type UmlNotation = 'mermaid' | 'plantuml'
@@ -105,6 +105,8 @@ export interface UmlFinding {
   events?: string[]
   transitions?: Array<{ from: string; event: string; to: string }>
   detail?: string
+  /** Machine-readable context for the finding (ids, coverage, rule matches), same shape as the engine's findings. */
+  evidence?: Record<string, unknown>
 }
 
 export interface UmlRoundTripReport {
@@ -125,6 +127,8 @@ export interface UmlReviewReport {
   ran: boolean
   verdict: Verdict
   verdictReason: string
+  /** The versioned report contract this result follows. */
+  schema: ReportSchema
   source: 'model' | 'diagram' | 'model+diagram'
   summary: {
     errors: number
@@ -147,6 +151,10 @@ export interface UmlReviewReport {
   primary?: string
   /** Paths of the `_`-prefixed metadata keys found in the supplied model, when it carried any. */
   metadataKeys?: string[]
+  /** How much of the model the narrative documents; absent when there is no narrative. */
+  narrativeCoverage?: NarrativeCoverage
+  /** Hashes of what was reviewed, in one place. */
+  hashes: { hashSpec: HashSpec; modelHash?: string; parsedHash?: string }
   /** Declarations the parser could not represent; a non-empty list fails the review. */
   discardedConstructs?: DiscardedConstruct[]
   /** Arrows whose endpoints came from a discarded construct. */
@@ -1269,8 +1277,22 @@ function structuralFindings(model: LogicModelV1, labels: Record<string, string> 
       code: 'UML013_NO_NARRATIVE',
       severity: 'info',
       message: 'the model carries no narrative block: no state, event or scenario has a natural-language meaning, so a reader must re-derive every symbol from the source.',
-      detail: 'Add narrative.states / narrative.events / narrative.scenarios — the schema requires all three and full coverage once the block is present.',
+      detail: 'Add narrative.states / narrative.events / narrative.scenarios — a partial narrative is valid and its coverage is reported; write the states first and fill the rest in later.',
     })
+  } else {
+    // A narrative that covers part of the model is valid: states first, events and
+    // scenarios later is the natural authoring order. The gap is reported as coverage
+    // (and as this info finding), never as a validation failure.
+    const coverage = narrativeCoverageOf(model)
+    if (coverage !== undefined && !narrativeComplete(coverage)) {
+      findings.push({
+        code: 'UML027_NARRATIVE_PARTIAL',
+        severity: 'info',
+        message: 'the narrative covers part of the model: states ' + coverage.states + ', events ' + coverage.events + ', scenarios ' + coverage.scenarios + '. Every uncovered symbol still has to be re-derived from the source.',
+        detail: 'narrativeCoverage carries the same numbers; complete the missing entries when the behaviour settles.',
+        evidence: { narrativeCoverage: coverage },
+      })
+    }
   }
 
   const documented = labels === undefined ? undefined : Object.keys(labels).filter((id) => documentedMeaning(labels[id], id) !== undefined)
@@ -1469,11 +1491,13 @@ export function reviewUml(options: UmlReviewOptions): UmlReviewReport {
         ok: false,
         ran: true,
         ...verdictOfFindings([unreadable]),
+        schema: REPORT_SCHEMAS.umlReview,
         source: hasModel ? 'model+diagram' : 'diagram',
         summary: { errors: 1, warnings: 0, info: 0, states: 0, events: 0, transitions: 0, terminalStates: 0, reachableStates: 0, documentedStates: 0 },
         findings: [unreadable],
         roundTrip: null,
         ...metadata,
+        hashes: { hashSpec: DEFAULT_HASH_SPEC },
         warnings,
         nextSteps: ['Fix the diagram syntax (or render one from a model with logicprobe_uml action=render) and review again.'],
       }
@@ -1581,6 +1605,7 @@ export function reviewUml(options: UmlReviewOptions): UmlReviewReport {
     ? (model.narrative?.states === undefined ? 0 : Object.keys(model.narrative.states).length)
     : Object.keys(labels).filter((id) => documentedMeaning(labels?.[id], id) !== undefined).length
   const events = new Set(model.transitions.map((transition) => transition.event))
+  const narrativeCoverage = narrativeCoverageOf(model)
   const nextSteps: string[] = []
   if (errors > 0) nextSteps.push('Resolve the error findings first — a diagram that cannot be read (or that disagrees with its model) will mislead every later review.')
   if (findings.some((finding) => finding.code === 'UML_NOT_A_STATE_DIAGRAM')) nextSteps.push('This text is not a state or activity diagram: keep it as its own view and model the machine as a state/activity diagram before reviewing it.')
@@ -1591,6 +1616,7 @@ export function reviewUml(options: UmlReviewOptions): UmlReviewReport {
     ok: true,
     ran: true,
     ...verdictOfFindings(findings),
+    schema: REPORT_SCHEMAS.umlReview,
     source: hasModel && hasDiagram ? 'model+diagram' : (hasDiagram ? 'diagram' : 'model'),
     summary: {
       errors,
@@ -1609,6 +1635,11 @@ export function reviewUml(options: UmlReviewOptions): UmlReviewReport {
     ...(hasDiagram ? { model } : {}),
     ...(primary === undefined ? {} : { primary }),
     ...metadata,
+    ...(narrativeCoverage === undefined ? {} : { narrativeCoverage }),
+    hashes: {
+      hashSpec: DEFAULT_HASH_SPEC,
+      ...(roundTrip === null ? {} : { modelHash: roundTrip.modelHash, parsedHash: roundTrip.parsedHash }),
+    },
     ...(discardedConstructs.length === 0 ? {} : { discardedConstructs, discardedEdges }),
     warnings,
     nextSteps,

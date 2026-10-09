@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { verdictOfFindings, type CheckResult, type Finding, type Verdict } from './engine.js'
+import { REPORT_SCHEMAS, verdictOfFindings, type CheckResult, type Finding, type ReportSchema, type Verdict } from './engine.js'
 
 export const DATA_ENGINE_SCHEMA_VERSION = 1
 
@@ -134,8 +134,12 @@ export interface DataVerificationReport {
   ran: boolean
   verdict: Verdict
   verdictReason: string
+  /** The versioned report contract this result follows. */
+  schema: ReportSchema
   schemaVersion: 1
   modelHash: string
+  /** Every hash this report carries, in one place. The data-model hash follows the same normalization as the published spec, but is not covered by it. */
+  hashes: { modelHash: string }
   summary: {
     entities: number
     fields: number
@@ -146,6 +150,8 @@ export interface DataVerificationReport {
   }
   checks: CheckResult[]
   comparison?: DataComparisonSummary
+  /** What to do next, derived from the findings — never empty. */
+  nextSteps: string[]
 }
 
 const KNOWN_TYPES = new Set<string>([
@@ -918,20 +924,24 @@ export function runDataVerification(input: unknown, options: DataVerificationOpt
   const validation = validateDataModel(input)
   if (!validation.ok) {
     const findings: Finding[] = validation.errors.map((message) => ({ code: 'DATA_MODEL_INVALID', severity: 'error', message }))
+    const modelCheck: CheckResult = {
+      id: 'DATA_MODEL',
+      name: 'Data Model Validation',
+      status: 'fail',
+      detail: 'Data model schema validation failed: ' + validation.errors.length + ' errors',
+      findings,
+    }
     return {
       ok: false,
       ran: true,
       ...verdictOfFindings(findings),
+      schema: REPORT_SCHEMAS.datamodel,
       schemaVersion: 1,
       modelHash: '',
+      hashes: { modelHash: '' },
       summary: { entities: 0, fields: 0, errors: validation.errors.length, warnings: 0, checksRun: 0 },
-      checks: [{
-        id: 'DATA_MODEL',
-        name: 'Data Model Validation',
-        status: 'fail',
-        detail: 'Data model schema validation failed: ' + validation.errors.length + ' errors',
-        findings,
-      }],
+      checks: [modelCheck],
+      nextSteps: dataNextSteps([modelCheck]),
     }
   }
   const model = validation.model
@@ -962,8 +972,10 @@ export function runDataVerification(input: unknown, options: DataVerificationOpt
         ok: false,
         ran: true,
         ...verdictOfFindings([...checks.flatMap((check) => check.findings), ...beforeFindings]),
+        schema: REPORT_SCHEMAS.datamodel,
         schemaVersion: 1,
         modelHash: dataModelHash(model),
+        hashes: { modelHash: dataModelHash(model) },
         summary: {
           entities: model.entities.length,
           fields: allFieldPaths(model).length,
@@ -981,6 +993,7 @@ export function runDataVerification(input: unknown, options: DataVerificationOpt
             findings: beforeFindings,
           },
         ],
+        nextSteps: dataNextSteps(checks),
       }
     }
     const before = beforeValidation.model
@@ -998,8 +1011,10 @@ export function runDataVerification(input: unknown, options: DataVerificationOpt
     ok: true,
     ran: true,
     ...verdictOfFindings(checks.flatMap((check) => check.findings)),
+    schema: REPORT_SCHEMAS.datamodel,
     schemaVersion: 1,
     modelHash: dataModelHash(model),
+    hashes: { modelHash: dataModelHash(model) },
     summary: {
       entities: model.entities.length,
       fields: allFieldPaths(model).length,
@@ -1008,6 +1023,21 @@ export function runDataVerification(input: unknown, options: DataVerificationOpt
       checksRun: checks.length,
     },
     checks,
+    nextSteps: dataNextSteps(checks),
     ...(comparison === undefined ? {} : { comparison }),
   }
+}
+
+/**
+ * The next-steps list every data report carries, derived only from the checks so two
+ * runs over the same model produce the same list.
+ */
+function dataNextSteps(checks: CheckResult[]): string[] {
+  const steps: string[] = []
+  const failed = checks.filter((check) => check.status === 'fail').map((check) => check.id + ' ' + check.name)
+  const warningCodes = [...new Set(checks.flatMap((check) => check.findings).filter((finding) => finding.severity === 'warning').map((finding) => finding.code))].sort()
+  if (failed.length > 0) steps.push('Resolve the failing checks first: ' + failed.join(', ') + '.')
+  if (warningCodes.length > 0) steps.push('Review the warning findings (' + warningCodes.join(', ') + '): a nullable field or a missing index is a decision, not silence.')
+  steps.push('Re-run with beforeModel plus the mapping/copy/migration options after the change to prove the data behaviour did not regress (DD1-DD4).')
+  return steps
 }

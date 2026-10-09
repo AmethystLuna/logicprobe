@@ -506,5 +506,53 @@ test('review: a well-modelled machine still passes (the contract did not overrea
   if (report.summary.errors !== 0) throw new Error('expected no error findings')
 })
 
+test('review: names its contract, carries its hashes and reports narrative coverage', () => {
+  const full = reviewUml({ model: narrated })
+  if (full.schema !== 'logicprobe/uml/review/v1') throw new Error('schema: ' + full.schema)
+  if (full.hashes.hashSpec !== 'v1') throw new Error('hashSpec: ' + JSON.stringify(full.hashes))
+  if (full.roundTrip !== null && (full.hashes.modelHash === undefined || full.hashes.parsedHash === undefined)) {
+    throw new Error('a round-tripped review must carry both hashes: ' + JSON.stringify(full.hashes))
+  }
+  if (full.narrativeCoverage === undefined || full.narrativeCoverage.states !== '5/5' || full.narrativeCoverage.events !== '5/5' || full.narrativeCoverage.scenarios !== '5/5') {
+    throw new Error('a present narrative always reports its coverage: ' + JSON.stringify(full.narrativeCoverage))
+  }
+  if (full.nextSteps.length === 0) throw new Error('nextSteps must not be empty')
+  assertNoUndefinedValues(full)
+
+  // P1-9: a partial narrative is valid, its gap is reported as coverage and as UML027.
+  const partial = { ...model, narrative: { states: { INIT: 'power-on, not ready' } } }
+  const report = reviewUml({ model: partial })
+  if (report.ok !== true || report.summary.errors !== 0) throw new Error('a partial narrative must not fail the review')
+  if (JSON.stringify(report.narrativeCoverage) !== JSON.stringify({ states: '1/5', events: '0/5', scenarios: '0/5' })) {
+    throw new Error('coverage: ' + JSON.stringify(report.narrativeCoverage))
+  }
+  const finding = findFinding(report, 'UML027_NARRATIVE_PARTIAL')[0]
+  if (finding === undefined || finding.severity !== 'info') throw new Error('expected an info-level UML027, got ' + JSON.stringify(codes(report)))
+  if (finding.evidence.narrativeCoverage.states !== '1/5') throw new Error('the finding must carry the coverage')
+  if (findFinding(report, 'UML013_NO_NARRATIVE').length !== 0) throw new Error('a partial narrative is not "no narrative"')
+  assertNoUndefinedValues(report)
+})
+
+test('review: full narrative coverage silences UML027, and absence keeps UML013', () => {
+  const complete = reviewUml({ model: { ...narrated, narrative: {
+    states: { INIT: 'a', STARTING: 'b', ACTIVE: 'c', ERROR: 'd', FATAL: 'e' },
+    events: { power_ready: 'a', ack: 'b', stop: 'c', timeout: 'd', cooldown: 'e' },
+    scenarios: [
+      { from: 'INIT', event: 'power_ready', scenario: 'a' },
+      { from: 'STARTING', event: 'ack', scenario: 'b' },
+      { from: 'ACTIVE', event: 'stop', scenario: 'c' },
+      { from: 'STARTING', event: 'timeout', scenario: 'd' },
+      { from: 'ERROR', event: 'cooldown', scenario: 'e' },
+    ],
+  } } })
+  if (findFinding(complete, 'UML027_NARRATIVE_PARTIAL').length !== 0) throw new Error('full coverage must not be partial')
+  if (complete.narrativeCoverage.states !== '5/5' || complete.narrativeCoverage.scenarios !== '5/5') {
+    throw new Error('coverage: ' + JSON.stringify(complete.narrativeCoverage))
+  }
+  const absent = reviewUml({ model })
+  if (findFinding(absent, 'UML013_NO_NARRATIVE').length !== 1) throw new Error('an absent narrative keeps UML013')
+  if ('narrativeCoverage' in absent) throw new Error('an absent narrative has no coverage to report')
+})
+
 if (failures > 0) { console.log('uml tests failed:', failures); process.exit(1) }
 console.log('all uml tests passed')

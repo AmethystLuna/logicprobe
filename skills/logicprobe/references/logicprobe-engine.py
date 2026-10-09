@@ -153,6 +153,62 @@ def refusal_verdict(reason):
     return {'verdict': 'fail', 'verdictReason': 'the tool did not run: ' + reason}
 
 
+# Versioned report contracts: every result carries `schema`, so a consumer can branch on
+# the contract instead of sniffing fields.
+REPORT_SCHEMAS = {
+    'verify': 'logicprobe/verify/v1',
+    'compose': 'logicprobe/compose/v1',
+    'datamodel': 'logicprobe/datamodel/v1',
+    'concurrency': 'logicprobe/concurrency/v1',
+    'export': 'logicprobe/export/v1',
+    'umlRender': 'logicprobe/uml/render/v1',
+    'umlParse': 'logicprobe/uml/parse/v1',
+    'umlReview': 'logicprobe/uml/review/v1',
+    'structure': 'logicprobe/structure/v1',
+}
+
+
+def narrative_coverage_of(model):
+    """How much of the model the narrative documents, as `covered/total` per dimension."""
+    narrative = model.get('narrative')
+    if narrative is None:
+        return None
+    transitions = model.get('transitions') or []
+    groups = set(t['from'] + '|' + t['event'] for t in transitions)
+    events = set(t['event'] for t in transitions)
+    described_states = 0 if narrative.get('states') is None else len(narrative['states'])
+    described_events = 0 if narrative.get('events') is None else len(narrative['events'])
+    described_groups = 0 if narrative.get('scenarios') is None else len(set(s['from'] + '|' + s['event'] for s in narrative['scenarios']))
+    return {
+        'states': str(described_states) + '/' + str(len(model.get('states') or [])),
+        'events': str(described_events) + '/' + str(len(events)),
+        'scenarios': str(described_groups) + '/' + str(len(groups)),
+    }
+
+
+def narrative_complete(coverage):
+    if coverage is None:
+        return False
+    return all(part.split('/')[0] == part.split('/')[1] for part in coverage.values())
+
+
+def verification_next_steps(checks, coverage):
+    """Mirror of verificationNextSteps: derived only from the checks and the coverage."""
+    steps = []
+    failed = [check['id'] + ' ' + check['name'] for check in checks if check['status'] == 'fail']
+    warning_codes = sorted(set(finding['code'] for check in checks for finding in check['findings']
+                               if finding.get('severity') == 'warning'))
+    if failed:
+        steps.append('Resolve the failing checks first: ' + ', '.join(failed) + '.')
+    if warning_codes:
+        steps.append('Review the warning findings (' + ', '.join(warning_codes) + '): they are not failures, but they are not silence either.')
+    if coverage is not None and not narrative_complete(coverage):
+        steps.append('Complete the narrative (states ' + coverage['states'] + ', events ' + coverage['events']
+                     + ', scenarios ' + coverage['scenarios'] + ') — a partial narrative is valid, but a reader still has to re-derive the missing symbols.')
+    steps.append('Re-run with beforeModel/stateMapping after the change to prove the behaviour did not regress (D1-D4).')
+    return steps
+
+
 # ---------------------------------------------------------------------------
 # Validation
 # ---------------------------------------------------------------------------
@@ -615,62 +671,64 @@ def validate_model(input_value):
                 for transition in transitions:
                     if isinstance(transition, dict) and isinstance(transition.get('from'), str) and isinstance(transition.get('event'), str):
                         from_event_groups.add(transition['from'] + '|' + transition['event'])
-            nstates = narrative.get('states')
-            if not _is_plain_object(nstates):
-                bad(np_ + '.states', 'must be an object mapping state id -> natural-language description')
-            else:
-                for sid, description in nstates.items():
-                    if sid not in state_ids:
-                        bad(np_ + '.states', 'references unknown state ' + str(sid))
-                    if not isinstance(description, str) or len(description) == 0:
-                        bad(np_ + '.states.' + str(sid), 'must be a non-empty string')
-                for sid in state_ids:
-                    if not isinstance(nstates.get(sid), str):
-                        bad(np_ + '.states', 'missing description for state ' + str(sid))
-            nevents = narrative.get('events')
-            if not _is_plain_object(nevents):
-                bad(np_ + '.events', 'must be an object mapping event id -> natural-language description')
-            else:
-                for eid, description in nevents.items():
-                    if eid not in event_ids:
-                        bad(np_ + '.events', 'references unknown event ' + str(eid))
-                    if not isinstance(description, str) or len(description) == 0:
-                        bad(np_ + '.events.' + str(eid), 'must be a non-empty string')
-                for eid in event_ids:
-                    if not isinstance(nevents.get(eid), str):
-                        bad(np_ + '.events', 'missing description for event ' + str(eid))
-            scenarios = narrative.get('scenarios')
-            if not isinstance(scenarios, list):
-                bad(np_ + '.scenarios', 'must be an array of { from, event, scenario }')
-            else:
-                seen = set()
-                for index, entry in enumerate(scenarios):
-                    sp = np_ + '.scenarios[' + str(index) + ']'
-                    if not _is_plain_object(entry):
-                        bad(sp, 'must be an object')
-                        continue
-                    sfrom = entry.get('from')
-                    reject_unknown_keys(entry, 'scenario', sp)
-                    if not isinstance(sfrom, str) or len(sfrom) == 0:
-                        bad(sp + '.from', 'must be a non-empty string')
-                    elif sfrom not in state_ids:
-                        bad(sp + '.from', 'unknown state ' + str(sfrom))
-                    sevent = entry.get('event')
-                    if not isinstance(sevent, str) or len(sevent) == 0:
-                        bad(sp + '.event', 'must be a non-empty string')
-                    elif sevent not in event_ids:
-                        bad(sp + '.event', 'unknown event ' + str(sevent))
-                    scenario = entry.get('scenario')
-                    if not isinstance(scenario, str) or len(scenario) == 0:
-                        bad(sp + '.scenario', 'must be a non-empty string')
-                    key = str(sfrom) + '|' + str(sevent)
-                    if key in seen:
-                        bad(sp, 'duplicate scenario for (' + str(sfrom) + ', ' + str(sevent) + ')')
-                    seen.add(key)
-                for key in from_event_groups:
-                    if key not in seen:
-                        sep = key.find('|')
-                        bad(np_ + '.scenarios', 'missing scenario for (' + key[:sep] + ', ' + key[sep + 1:] + ')')
+            # A narrative is allowed to cover part of the model: states first, events and
+            # scenarios later is the natural authoring order, and `narrativeCoverage`
+            # reports what is still missing instead of rejecting the file. What stays an
+            # error is a narrative that is *wrong* (unknown id, empty description,
+            # duplicate scenario) or empty — an empty block claims documentation that
+            # does not exist.
+            declared_dimensions = [key for key in ('states', 'events', 'scenarios') if narrative.get(key) is not None]
+            if not declared_dimensions:
+                bad(np_, 'declares no dimension: give at least one of states, events or scenarios (a partial narrative is fine)')
+            if narrative.get('states') is not None:
+                nstates = narrative.get('states')
+                if not _is_plain_object(nstates):
+                    bad(np_ + '.states', 'must be an object mapping state id -> natural-language description')
+                else:
+                    for sid, description in nstates.items():
+                        if sid not in state_ids:
+                            bad(np_ + '.states', 'references unknown state ' + str(sid))
+                        if not isinstance(description, str) or len(description) == 0:
+                            bad(np_ + '.states.' + str(sid), 'must be a non-empty string')
+            if narrative.get('events') is not None:
+                nevents = narrative.get('events')
+                if not _is_plain_object(nevents):
+                    bad(np_ + '.events', 'must be an object mapping event id -> natural-language description')
+                else:
+                    for eid, description in nevents.items():
+                        if eid not in event_ids:
+                            bad(np_ + '.events', 'references unknown event ' + str(eid))
+                        if not isinstance(description, str) or len(description) == 0:
+                            bad(np_ + '.events.' + str(eid), 'must be a non-empty string')
+            if narrative.get('scenarios') is not None:
+                scenarios = narrative.get('scenarios')
+                if not isinstance(scenarios, list):
+                    bad(np_ + '.scenarios', 'must be an array of { from, event, scenario }')
+                else:
+                    seen = set()
+                    for index, entry in enumerate(scenarios):
+                        sp = np_ + '.scenarios[' + str(index) + ']'
+                        if not _is_plain_object(entry):
+                            bad(sp, 'must be an object')
+                            continue
+                        sfrom = entry.get('from')
+                        reject_unknown_keys(entry, 'scenario', sp)
+                        if not isinstance(sfrom, str) or len(sfrom) == 0:
+                            bad(sp + '.from', 'must be a non-empty string')
+                        elif sfrom not in state_ids:
+                            bad(sp + '.from', 'unknown state ' + str(sfrom))
+                        sevent = entry.get('event')
+                        if not isinstance(sevent, str) or len(sevent) == 0:
+                            bad(sp + '.event', 'must be a non-empty string')
+                        elif sevent not in event_ids:
+                            bad(sp + '.event', 'unknown event ' + str(sevent))
+                        scenario = entry.get('scenario')
+                        if not isinstance(scenario, str) or len(scenario) == 0:
+                            bad(sp + '.scenario', 'must be a non-empty string')
+                        key = str(sfrom) + '|' + str(sevent)
+                        if key in seen:
+                            bad(sp, 'duplicate scenario for (' + str(sfrom) + ', ' + str(sevent) + ')')
+                        seen.add(key)
     # guard/update variable reference walk
     if isinstance(transitions, list):
         for entry in transitions:
@@ -2700,22 +2758,26 @@ def run_verification(input_value, options=None):
     if not ok_model:
         errors = model_or_errors
         findings = [{'code': 'MODEL_INVALID', 'severity': 'error', 'message': message} for message in errors]
+        model_check = {
+            'id': 'MODEL',
+            'name': 'Model Validation',
+            'status': 'fail',
+            'detail': 'Model schema validation failed: ' + str(len(errors)) + ' errors',
+            'findings': findings,
+        }
         return {
             'ok': False,
             'ran': True,
             **verdict_of_findings(findings),
+            'schema': REPORT_SCHEMAS['verify'],
             'schemaVersion': 1,
             'hashSpec': hash_spec,
             'modelHash': '',
+            'hashes': {'hashSpec': hash_spec, 'modelHash': ''},
             **metadata,
             'summary': {'states': 0, 'transitions': 0, 'errors': len(errors), 'warnings': 0, 'checksRun': 0},
-            'checks': [{
-                'id': 'MODEL',
-                'name': 'Model Validation',
-                'status': 'fail',
-                'detail': 'Model schema validation failed: ' + str(len(errors)) + ' errors',
-                'findings': findings,
-            }],
+            'checks': [model_check],
+            'nextSteps': verification_next_steps([model_check], None),
         }
     model = model_or_errors
     exploration = _explore(model, max_states)
@@ -2755,9 +2817,12 @@ def run_verification(input_value, options=None):
                 'ok': False,
                 'ran': True,
                 **verdict_of_findings(all_findings),
+                'schema': REPORT_SCHEMAS['verify'],
                 'schemaVersion': 1,
                 'hashSpec': hash_spec,
                 'modelHash': model_hash(model, hash_spec),
+                'hashes': {'hashSpec': hash_spec, 'modelHash': model_hash(model, hash_spec),
+                           'afterModelHash': model_hash(model, hash_spec)},
                 **metadata,
                 'summary': {
                     'states': len(model.get('states') or []),
@@ -2774,6 +2839,7 @@ def run_verification(input_value, options=None):
                     'detail': 'Before model schema validation failed: ' + str(len(before_errors)) + ' errors',
                     'findings': before_findings,
                 }],
+                'nextSteps': verification_next_steps(checks, narrative_coverage_of(model)),
             }
         before = before_or_errors
         mapping = options.get('stateMapping') or {}
@@ -2785,14 +2851,23 @@ def run_verification(input_value, options=None):
     errors = sum(1 for check in checks for f in check['findings'] if f.get('severity') == 'error')
     warnings = sum(1 for check in checks for f in check['findings'] if f.get('severity') == 'warning')
     coverage_notes = compute_coverage_notes(model)
+    narrative_coverage = narrative_coverage_of(model)
     report = {
         'ok': True,
         'ran': True,
         **verdict_of_findings([f for check in checks for f in check['findings']]),
+        'schema': REPORT_SCHEMAS['verify'],
         'schemaVersion': 1,
         'hashSpec': hash_spec,
         'modelHash': model_hash(model, hash_spec),
+        'hashes': {
+            'hashSpec': hash_spec,
+            'modelHash': model_hash(model, hash_spec),
+            **({} if comparison is None else {'beforeModelHash': comparison['beforeModelHash'],
+                                              'afterModelHash': comparison['afterModelHash']}),
+        },
         **metadata,
+        **({} if narrative_coverage is None else {'narrativeCoverage': narrative_coverage}),
         'summary': {
             'states': len(model.get('states') or []),
             'transitions': len(model.get('transitions') or []),
@@ -2802,6 +2877,7 @@ def run_verification(input_value, options=None):
             'truncated': exploration['truncated'],
         },
         'checks': checks,
+        'nextSteps': verification_next_steps(checks, narrative_coverage),
     }
     if model.get('narrative') is not None:
         report['narrative'] = model['narrative']
@@ -2843,11 +2919,14 @@ def run_composition_verification(machines_input, options=None):
             'ok': False,
             'ran': True,
             **verdict_of_findings(model_findings),
+            'schema': REPORT_SCHEMAS['compose'],
             'hashSpec': hash_spec,
+            'hashes': {'hashSpec': hash_spec, 'machines': hashes},
             'summary': {'machineCount': len(models), 'machines': machine_summary, 'compositeStates': 0,
                         'errors': len(model_findings), 'warnings': 0, 'truncated': False},
             'checks': [{'id': 'MODEL', 'name': 'Machine Validation', 'status': 'fail',
                         'detail': 'composition input validation failed', 'findings': model_findings}],
+            'nextSteps': ['Fix the machine that failed validation, then re-run the composition.'],
         }
     machine_event_sets = [set(t['event'] for t in m.get('transitions') or []) for m in models]
 
@@ -2950,14 +3029,23 @@ def run_composition_verification(machines_input, options=None):
         _check_result('C2', 'Rendezvous Sync', c2_findings,
                       'All rendezvous events can fire' if not c2_findings else 'Rendezvous warnings: ' + str(len(c2_findings))),
     ]
+    next_steps = []
+    if errors > 0:
+        next_steps.append('Resolve the error findings first: the composition deadlocks at a reachable state, so at least one machine is missing an exit or a handshake partner.')
+    if warnings > 0:
+        next_steps.append('Review the warning findings: a rendezvous event that can never fire means the handshake is declared but unreachable.')
+    next_steps.append('Re-run the composition after the change; every machine must be able to advance, or explain why it is terminal.')
     return {
         'ok': errors == 0,
         'ran': True,
         **verdict_of(errors, warnings, (c1_findings[0]['code'] if c1_findings else (c2_findings[0]['code'] if c2_findings else None))),
+        'schema': REPORT_SCHEMAS['compose'],
         'hashSpec': hash_spec,
+        'hashes': {'hashSpec': hash_spec, 'machines': hashes},
         'summary': {'machineCount': len(models), 'machines': machine_summary, 'compositeStates': composite_states,
                     'errors': errors, 'warnings': warnings, 'truncated': truncated},
         'checks': checks,
+        'nextSteps': next_steps,
     }
 
 
@@ -4701,8 +4789,21 @@ def _structural_findings(model, labels, warnings):
             'severity': 'info',
             'message': 'the model carries no narrative block: no state, event or scenario has a natural-language meaning, '
                        'so a reader must re-derive every symbol from the source.',
-            'detail': 'Add narrative.states / narrative.events / narrative.scenarios — the schema requires all three and full coverage once the block is present.',
+            'detail': 'Add narrative.states / narrative.events / narrative.scenarios — a partial narrative is valid and its coverage is reported; write the states first and fill the rest in later.',
         })
+    else:
+        # A narrative that covers part of the model is valid: the gap is reported as
+        # coverage (and as this info finding), never as a validation failure.
+        coverage = narrative_coverage_of(model)
+        if coverage is not None and not narrative_complete(coverage):
+            findings.append({
+                'code': 'UML027_NARRATIVE_PARTIAL',
+                'severity': 'info',
+                'message': 'the narrative covers part of the model: states ' + coverage['states'] + ', events ' + coverage['events']
+                           + ', scenarios ' + coverage['scenarios'] + '. Every uncovered symbol still has to be re-derived from the source.',
+                'detail': 'narrativeCoverage carries the same numbers; complete the missing entries when the behaviour settles.',
+                'evidence': {'narrativeCoverage': coverage},
+            })
 
     documented = None
     if labels is not None:
@@ -4848,12 +4949,14 @@ def review_uml(options):
                 'ok': False,
                 'ran': True,
                 **verdict_of_findings([unreadable]),
+                'schema': REPORT_SCHEMAS['umlReview'],
                 'source': 'model+diagram' if has_model else 'diagram',
                 'summary': {'errors': 1, 'warnings': 0, 'info': 0, 'states': 0, 'events': 0, 'transitions': 0,
                             'terminalStates': 0, 'reachableStates': 0, 'documentedStates': 0},
                 'findings': [unreadable],
                 'roundTrip': None,
                 **metadata,
+                'hashes': {'hashSpec': DEFAULT_HASH_SPEC},
                 'warnings': warnings,
                 'nextSteps': ['Fix the diagram syntax (or render one from a model with logicprobe_uml action=render) and review again.'],
             }
@@ -4961,6 +5064,7 @@ def review_uml(options):
     else:
         documented_states = len([sid for sid in labels if _documented_meaning(labels[sid], sid) is not None])
     events = dict.fromkeys(transition['event'] for transition in model['transitions'])
+    narrative_coverage = narrative_coverage_of(model)
     next_steps = []
     if errors > 0:
         next_steps.append('Resolve the error findings first — a diagram that cannot be read (or that disagrees with its model) '
@@ -4978,6 +5082,7 @@ def review_uml(options):
         'ok': True,
         'ran': True,
         **verdict_of_findings(findings),
+        'schema': REPORT_SCHEMAS['umlReview'],
         'source': 'model+diagram' if (has_model and has_diagram) else ('diagram' if has_diagram else 'model'),
         'summary': {
             'errors': errors,
@@ -5000,6 +5105,10 @@ def review_uml(options):
     if primary is not None:
         report['primary'] = primary
     report.update(metadata)
+    if narrative_coverage is not None:
+        report['narrativeCoverage'] = narrative_coverage
+    report['hashes'] = {'hashSpec': DEFAULT_HASH_SPEC, **({} if round_trip is None else {
+        'modelHash': round_trip['modelHash'], 'parsedHash': round_trip['parsedHash']})}
     if discarded_constructs:
         report['discardedConstructs'] = discarded_constructs
         report['discardedEdges'] = discarded_edges
@@ -5563,6 +5672,7 @@ def review_structure(options):
         'ok': True,
         'ran': True,
         **verdict_of_findings(findings),
+        'schema': REPORT_SCHEMAS['structure'],
         'notation': graph['notation'],
         'graph': graph,
     }
@@ -5570,6 +5680,8 @@ def review_structure(options):
         report['edgeVerdicts'] = edge_verdicts
     report['findings'] = findings
     report['summary'] = summary
+    report['hashes'] = {'diagram': hashlib.sha256(options['diagram'].encode('utf-8')).hexdigest(),
+                        **({} if options.get('matrix') is None else {'matrix': hashlib.sha256(stable_stringify(options['matrix']).encode('utf-8')).hexdigest()})}
     report['warnings'] = warnings
     report['nextSteps'] = next_steps
     return report

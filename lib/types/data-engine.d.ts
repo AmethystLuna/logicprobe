@@ -1,4 +1,4 @@
-import { type CheckResult, type Verdict } from './engine.js';
+import { type CheckResult, type ReportSchema, type Verdict } from './engine.js';
 export declare const DATA_ENGINE_SCHEMA_VERSION = 1;
 export type DataValue = number | string | boolean | null;
 export type DataType = 'string' | 'integer' | 'number' | 'boolean' | 'uuid' | 'date' | 'datetime' | 'timestamp' | 'json' | 'enum' | 'array' | 'object' | 'binary';
@@ -179,8 +179,14 @@ export interface DataVerificationReport {
     ran: boolean;
     verdict: Verdict;
     verdictReason: string;
+    /** The versioned report contract this result follows. */
+    schema: ReportSchema;
     schemaVersion: 1;
     modelHash: string;
+    /** Every hash this report carries, in one place. The data-model hash follows the same normalization as the published spec, but is not covered by it. */
+    hashes: {
+        modelHash: string;
+    };
     summary: {
         entities: number;
         fields: number;
@@ -191,6 +197,8 @@ export interface DataVerificationReport {
     };
     checks: CheckResult[];
     comparison?: DataComparisonSummary;
+    /** What to do next, derived from the findings — never empty. */
+    nextSteps: string[];
 }
 export declare function dataModelHash(model: DataModelV1): string;
 export declare function validateDataModel(input: unknown): {

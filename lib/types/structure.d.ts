@@ -15,7 +15,7 @@
  *
  * @module logicprobe-structure
  */
-import { type Finding, type Verdict, type VerdictSummary } from './engine.js';
+import { type Finding, type ReportSchema, type Verdict, type VerdictSummary } from './engine.js';
 export type StructureNotation = 'plantuml' | 'mermaid';
 /** What a node declares itself to be. Containers hold other nodes; they are not dependencies. */
 export type StructureNodeKind = 'component' | 'class' | 'interface' | 'actor' | 'database' | 'node' | 'package' | 'rectangle' | 'cloud' | 'queue' | 'unknown';
@@ -102,12 +102,19 @@ export interface StructureReport {
     ran: boolean;
     verdict: Verdict;
     verdictReason: string;
+    /** The versioned report contract this result follows. */
+    schema: ReportSchema;
     notation: StructureNotation;
     graph: StructureGraph;
     /** Per-edge matrix verdict, present only when a matrix was supplied. */
     edgeVerdicts?: StructureEdgeVerdict[];
     findings: Finding[];
     summary: StructureSummary;
+    /** Hashes of the inputs this report is about: the diagram text, and the matrix when one was supplied. */
+    hashes: {
+        diagram: string;
+        matrix?: string;
+    };
     warnings: string[];
     nextSteps: string[];
 }

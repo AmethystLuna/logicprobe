@@ -201,12 +201,23 @@ export interface VerificationReport {
     verdict: Verdict;
     /** Why the verdict came out that way, e.g. `2 error finding(s) (first: S2_NO_TRANSITIONS)`. */
     verdictReason: string;
+    /** The versioned report contract this result follows. */
+    schema: ReportSchema;
     schemaVersion: 1;
     /** Which published specification `modelHash` follows (see references/hash-spec.md). */
     hashSpec: HashSpec;
     modelHash: string;
+    /** Every hash this report carries, in one place, for a baseline diff or an archive record. */
+    hashes: {
+        hashSpec: HashSpec;
+        modelHash: string;
+        beforeModelHash?: string;
+        afterModelHash?: string;
+    };
     /** Paths of the `_`-prefixed metadata keys found in the input and ignored by the schema. */
     metadataKeys?: string[];
+    /** How much of the model the narrative documents; absent when there is no narrative. */
+    narrativeCoverage?: NarrativeCoverage;
     /** Echo of the model's natural-language narrative, when present. */
     narrative?: ModelNarrative;
     summary: {
@@ -219,6 +230,8 @@ export interface VerificationReport {
     };
     checks: CheckResult[];
     comparison?: ComparisonSummary;
+    /** What to do next, derived from the findings — never empty. */
+    nextSteps: string[];
     /** Informational notes about semantic dimensions this model references (timing, preemption)
      * that this engine does not verify. Heuristic, vocabulary-based — never a substitute for the checks. */
     coverageNotes?: string[];
@@ -244,6 +257,11 @@ export interface RuntimeState {
 }
 export declare function modelHash(model: LogicModelV1, spec?: HashSpec): string;
 /**
+ * Deterministic JSON (sorted keys, no insignificant whitespace) — the serialization the
+ * hash specification is defined over. Exported so every report hashes inputs the same way.
+ */
+export declare function canonicalJson(value: unknown): string;
+/**
  * Published model-hash specifications. The full normalization rules, the list of
  * excluded keys and a one-line recompute command are in `references/hash-spec.md`.
  *
@@ -257,6 +275,38 @@ export declare function modelHash(model: LogicModelV1, spec?: HashSpec): string;
 export type HashSpec = 'v0' | 'v1';
 export declare const PUBLISHED_HASH_SPECS: readonly HashSpec[];
 export declare const DEFAULT_HASH_SPEC: HashSpec;
+/**
+ * Versioned report contracts. Every tool result carries `schema`, so a consumer can
+ * branch on the contract instead of sniffing fields, and a change to a report's shape
+ * is a version bump here rather than a silent break. `findings[]` keeps the same
+ * stable core in every family: `{code, severity, message, detail?, evidence?, path?}`.
+ */
+export declare const REPORT_SCHEMAS: {
+    readonly verify: 'logicprobe/verify/v1';
+    readonly compose: 'logicprobe/compose/v1';
+    readonly datamodel: 'logicprobe/datamodel/v1';
+    readonly concurrency: 'logicprobe/concurrency/v1';
+    readonly export: 'logicprobe/export/v1';
+    readonly umlRender: 'logicprobe/uml/render/v1';
+    readonly umlParse: 'logicprobe/uml/parse/v1';
+    readonly umlReview: 'logicprobe/uml/review/v1';
+    readonly structure: 'logicprobe/structure/v1';
+};
+export type ReportSchema = typeof REPORT_SCHEMAS[keyof typeof REPORT_SCHEMAS];
+/**
+ * How much of the model the `narrative` block actually documents, as `covered/total`
+ * per dimension. A partial narrative is valid — writing the states first and the
+ * events later is the natural order — so this is a coverage report, not a gate.
+ * `scenarios` counts distinct modelled (from, event) groups: one scenario per group.
+ */
+export interface NarrativeCoverage {
+    states: string;
+    events: string;
+    scenarios: string;
+}
+export declare function narrativeCoverageOf(model: LogicModelV1): NarrativeCoverage | undefined;
+/** True when every dimension of the coverage is fully described. */
+export declare function narrativeComplete(coverage: NarrativeCoverage | undefined): boolean;
 /**
  * The review outcome, kept separate from `ok` (= "the tool ran"). Collapsing the two
  * is how a failed review gets read as a passing one.
@@ -328,10 +378,19 @@ export interface CompositionReport {
     ran: boolean;
     verdict: Verdict;
     verdictReason: string;
+    /** The versioned report contract this result follows. */
+    schema: ReportSchema;
     /** Which published specification the per-machine `modelHash` values follow. */
     hashSpec: HashSpec;
+    /** Every hash this report carries, in one place. */
+    hashes: {
+        hashSpec: HashSpec;
+        machines: string[];
+    };
     summary: CompositionSummary;
     checks: CheckResult[];
+    /** What to do next, derived from the findings — never empty. */
+    nextSteps: string[];
 }
 /**
  * N-machine composition semantics (documented in dsh-model-schema.md):

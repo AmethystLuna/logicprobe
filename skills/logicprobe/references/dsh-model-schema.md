@@ -95,12 +95,16 @@ from "the review passed":
 
 | Field | Meaning |
 |---|---|
+| `schema` | The versioned report contract, e.g. `logicprobe/verify/v1` — branch on this instead of sniffing fields. |
 | `ok` | The engine produced a report. For `verify` this is `false` only when model *validation* failed. It is **not** a verdict. |
 | `ran` | The tool executed. `false` only for a tool-level refusal (`errorCode`/`error` present). |
 | `verdict` | `pass` \| `pass_with_findings` \| `fail`. Any `severity: "error"` finding — or a validation failure — makes this `fail`. |
 | `verdictReason` | e.g. `1 error finding(s) (first: S2_NO_TRANSITIONS)`, `no error findings; 3 warning finding(s)`, `no error or warning findings`. |
 | `hashSpec` | The published hash specification `modelHash` follows — see [hash-spec.md](hash-spec.md). |
+| `hashes` | Every hash the report carries, in one place (`modelHash`, `beforeModelHash`/`afterModelHash` for a comparison). |
 | `metadataKeys` | Present only when the input carried `_` keys (see above). |
+| `narrativeCoverage` | Present only when the input carried a narrative: `covered/total` per dimension. |
+| `nextSteps` | What to do next, derived from the findings; never empty, and identical for two runs over the same model. |
 
 A caller that reads `ok` sees `true` for a model with a deadlock; the verdict is what
 says so. Report the verdict, quote the counterexample path from the finding, and never
@@ -155,13 +159,21 @@ so findings can be read against real scenarios instead of bare ids.
 }
 ```
 
-**Completeness contract**: when `narrative` is present, all three parts are
-required and must fully cover the model — every declared state needs a
-`narrative.states` entry, every event used in `transitions` needs a
-`narrative.events` entry, and every distinct `(from, event)` group needs a
-`narrative.scenarios` entry. Keys must reference declared ids; unknown
-references, missing coverage, and duplicate scenario keys are model validation
-errors. The report's `narrative` field echoes the block unchanged.
+**Coverage contract**: a narrative may cover **part** of the model — writing the states
+first, then the events, then the scenarios is the natural authoring order, and a partial
+block is valid. What must hold is that whatever is written is *right*:
+
+| Case | Result |
+|---|---|
+| `narrative` absent | Valid. The review reports `UML013_NO_NARRATIVE` (info); `logicprobe_verify` reports no coverage at all. |
+| One or two of `states` / `events` / `scenarios` given | Valid. The report adds `narrativeCoverage: {states: "5/5", events: "3/9", scenarios: "0/12"}` (covered/total per dimension), and `nextSteps` names the gap. A `UML027_NARRATIVE_PARTIAL` (info) finding appears in a UML review. |
+| `narrative` present but `{}` | **Error**: an empty block claims documentation that does not exist. Give at least one dimension. |
+| Unknown state/event id, empty description, duplicate `(from, event)` scenario | **Error**: the narrative is wrong, not merely incomplete. |
+
+Totals are the model's own: states = declared states, events = distinct transition
+events, scenarios = distinct `(from, event)` groups (so two guarded transitions of one
+event need one scenario, not two). The report's `narrative` field echoes the block
+unchanged.
 
 **Presenting the model**: when showing the extracted model for confirmation, render
 the natural language INLINE in the model presentation, not as a separate block.

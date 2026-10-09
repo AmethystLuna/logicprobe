@@ -1,6 +1,15 @@
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { JsonValue } from './json-value.js'
+import { REPORT_SCHEMAS, DEFAULT_HASH_SPEC, modelHash, refusalVerdict, validateModel, verdictOf } from './engine.js'
 import { exportModel, type ExportFormat } from './exporters.js'
+
+/** The model hash of an export's input, when the input validates (the success path always does). */
+function exportHashes(model: unknown): { hashSpec: typeof DEFAULT_HASH_SPEC; modelHash?: string } {
+  const validation = validateModel(model)
+  return validation.ok
+    ? { hashSpec: DEFAULT_HASH_SPEC, modelHash: modelHash(validation.model) }
+    : { hashSpec: DEFAULT_HASH_SPEC }
+}
 
 export const LOGICPROBE_EXPORT_TOOL_NAME = 'logicprobe_export'
 
@@ -40,9 +49,25 @@ export const logicProbeExportTool = defineTool({
   async execute(args) {
     try {
       const result = exportModel(args.model, args.format as ExportFormat)
-      return { ok: true, format: result.format, primary: result.primary, ...(result.extras === undefined ? {} : { extras: result.extras }), warnings: result.warnings } as unknown as JsonValue
+      const warnings = result.warnings ?? []
+      const nextSteps: string[] = []
+      if (warnings.length > 0) nextSteps.push('The target notation cannot express some invariants; the warnings name each one — verify them in the target tool rather than assuming they carried over.')
+      nextSteps.push('Run the exported file through its own tool (verify/compile) before trusting the translation; logicprobe guarantees the encoding, not the target checker\'s verdict.')
+      return {
+        ok: true,
+        ran: true,
+        ...verdictOf(0, warnings.length),
+        schema: REPORT_SCHEMAS.export,
+        format: result.format,
+        primary: result.primary,
+        ...(result.extras === undefined ? {} : { extras: result.extras }),
+        hashes: exportHashes(args.model),
+        warnings,
+        nextSteps,
+      } as unknown as JsonValue
     } catch (error) {
-      return { ok: false, error: error instanceof Error ? error.message : String(error) } as unknown as JsonValue
+      const message = error instanceof Error ? error.message : String(error)
+      return { ok: false, ran: false, ...refusalVerdict(message), schema: REPORT_SCHEMAS.export, errorCode: 'MODEL_INVALID', error: message } as unknown as JsonValue
     }
   },
 })

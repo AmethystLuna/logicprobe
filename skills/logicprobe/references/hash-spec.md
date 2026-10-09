@@ -69,6 +69,20 @@ Round-trip reports (`logicprobe_uml action=review`, `roundTrip`) carry `hashSpec
 alongside `modelHash` and `parsedHash`, so a fidelity comparison is always
 spec-qualified.
 
+Every report also aggregates its hashes under `hashes`, so a baseline diff or an archive
+record reads one field instead of walking the report:
+
+```json
+{ "hashes": { "hashSpec": "v1", "modelHash": "f5832028…", "afterModelHash": "f5832028…" } }
+```
+
+A structure review hashes its inputs under the same rule but with its own keys:
+`hashes.diagram` (sha256 of the diagram text) and `hashes.matrix` (sha256 of the
+canonical — key-sorted — matrix JSON, so key order does not change the hash) when a
+dependency matrix was supplied. A data-model report carries `hashes.modelHash`; the
+data-model hash uses the same normalization but its schema is not covered by the
+published specification.
+
 ## Checking an archived hash
 
 `--hash-spec` recomputes under a named specification; `--hash-check` answers whether a

@@ -89,12 +89,16 @@ git clone https://github.com/AmethystLuna/logicprobe.git ~/.claude/plugins/dev/l
 
 | 字段 | 含义 |
 |------|------|
+| `schema` | 版本化报告契约（`logicprobe/verify/v1`、`logicprobe/uml/review/v1`…），消费方按它分支而不是猜字段。 |
 | `ok` | 引擎产出了报告。对 `verify` 只在**模型校验失败**时为 `false`；它**不是**结论。 |
 | `ran` | 工具确实执行了。仅在工具层拒绝请求（带 `errorCode`/`error`）时为 `false`。 |
 | `verdict` | `pass` / `pass_with_findings` / `fail`。任何 `severity: "error"` 的发现、或校验失败，都会是 `fail`。 |
 | `verdictReason` | 一行说明，例如 `1 error finding(s) (first: S2_NO_TRANSITIONS)`。 |
 | `hashSpec` | `modelHash` 依据的已发布规范（见 [`hash-spec.md`](skills/logicprobe/references/hash-spec.md)）。 |
+| `hashes` | 本次报告涉及的全部哈希集中一处（模型哈希、图/矩阵哈希、前后模型哈希）。 |
 | `metadataKeys` | 输入里带 `_` 前缀的注记键路径（仅当存在时出现）。 |
+| `narrativeCoverage` | `{states: "5/5", events: "3/9", scenarios: "0/12"}`：narrative **允许部分覆盖**，这里报告还差多少。 |
+| `nextSteps` | 由发现推导的下一步，永不为空，同一输入两次运行逐字一致。 |
 
 只看 `ok` 会把「有死锁」的模型读成通过——判据是 `verdict`。非 DSH 的 Python CLI 退出码跟随 verdict：`pass`/`pass_with_findings` → `0`，`fail` 或拒绝 → `2`。
 

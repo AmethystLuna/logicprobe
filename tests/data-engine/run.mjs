@@ -248,6 +248,28 @@ test('data atomicity flags missing backup and non-atomic transform', () => {
   assertNoUndefinedValues(report)
 })
 
+test('report contract: schema, hashes and next steps are present and deterministic', () => {
+  const model = {
+    schemaVersion: 1,
+    entities: [{ name: 'user', fields: [{ name: 'id', type: 'uuid', required: true, primaryKey: true }] }],
+  }
+  const report = runDataVerification(model)
+  if (report.schema !== 'logicprobe/datamodel/v1') throw new Error('schema: ' + report.schema)
+  if (report.hashes.modelHash !== report.modelHash || report.modelHash.length !== 64) {
+    throw new Error('hashes must carry the report modelHash: ' + JSON.stringify(report.hashes))
+  }
+  if (!Array.isArray(report.nextSteps) || report.nextSteps.length === 0) throw new Error('nextSteps must not be empty')
+  const again = runDataVerification(model)
+  if (JSON.stringify(again.nextSteps) !== JSON.stringify(report.nextSteps)) throw new Error('nextSteps must be deterministic')
+  const rejected = runDataVerification({ schemaVersion: 2, entities: [] })
+  if (rejected.ok !== false || rejected.schema !== 'logicprobe/datamodel/v1') throw new Error('a rejected model keeps the contract')
+  if (!rejected.nextSteps.some((step) => step.includes('DATA_MODEL Data Model Validation'))) {
+    throw new Error('a rejected model must name the validation check: ' + JSON.stringify(rejected.nextSteps))
+  }
+  assertNoUndefinedValues(report)
+  assertNoUndefinedValues(rejected)
+})
+
 if (failures > 0) {
   console.log('data engine tests failed:', failures)
   process.exit(1)

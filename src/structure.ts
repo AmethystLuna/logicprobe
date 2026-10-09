@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 /**
  * Structure-diagram review: a dependency graph is not a state machine.
  *
@@ -16,7 +17,7 @@
  * @module logicprobe-structure
  */
 
-import { verdictOfFindings, type Finding, type Verdict, type VerdictSummary } from './engine.js'
+import { REPORT_SCHEMAS, canonicalJson, verdictOfFindings, type Finding, type ReportSchema, type Verdict, type VerdictSummary } from './engine.js'
 
 export type StructureNotation = 'plantuml' | 'mermaid'
 
@@ -114,12 +115,16 @@ export interface StructureReport {
   ran: boolean
   verdict: Verdict
   verdictReason: string
+  /** The versioned report contract this result follows. */
+  schema: ReportSchema
   notation: StructureNotation
   graph: StructureGraph
   /** Per-edge matrix verdict, present only when a matrix was supplied. */
   edgeVerdicts?: StructureEdgeVerdict[]
   findings: Finding[]
   summary: StructureSummary
+  /** Hashes of the inputs this report is about: the diagram text, and the matrix when one was supplied. */
+  hashes: { diagram: string; matrix?: string }
   warnings: string[]
   nextSteps: string[]
 }
@@ -690,11 +695,16 @@ export function reviewStructure(options: StructureReviewOptions): StructureRepor
     ok: true,
     ran: true,
     ...verdictOfFindings(findings),
+    schema: REPORT_SCHEMAS.structure,
     notation: graph.notation,
     graph,
     ...(options.matrix === undefined ? {} : { edgeVerdicts }),
     findings,
     summary,
+    hashes: {
+      diagram: createHash('sha256').update(options.diagram).digest('hex'),
+      ...(options.matrix === undefined ? {} : { matrix: createHash('sha256').update(canonicalJson(options.matrix)).digest('hex') }),
+    },
     warnings,
     nextSteps,
   }

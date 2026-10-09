@@ -1,6 +1,7 @@
 import { defineTool } from '@deepseek-ai/dsh-tools'
+import { createHash } from 'node:crypto'
 import type { JsonValue } from './json-value.js'
-import { refusalVerdict, verdictOf, verdictOfFindings, type VerdictSummary } from './engine.js'
+import { REPORT_SCHEMAS, DEFAULT_HASH_SPEC, modelHash, refusalVerdict, verdictOf, verdictOfFindings, type VerdictSummary } from './engine.js'
 import { renderUml, parseUml, parseFindings, reviewUml, UmlError, type UmlDiagram, type UmlFinding, type UmlNotation, type UmlParseResult } from './uml.js'
 
 export const LOGICPROBE_UML_TOOL_NAME = 'logicprobe_uml'
@@ -80,7 +81,7 @@ export const logicProbeUmlTool = defineTool({
       if (args.action === 'render') {
         if (args.model === undefined) return errorResult('action=render needs `model` (a LogicModelV1 object)')
         const result = renderUml(args.model, (args.notation === undefined || args.notation === 'auto' ? 'mermaid' : args.notation) as UmlNotation, (args.kind ?? 'state') as UmlDiagram, args.maxSteps)
-        return { ok: true, ran: true, ...verdictOf(0, result.warnings.length), action: 'render', notation: result.notation, kind: result.diagram, diagram: result.primary, warnings: result.warnings } as unknown as JsonValue
+        return { ok: true, ran: true, ...verdictOf(0, result.warnings.length), schema: REPORT_SCHEMAS.umlRender, action: 'render', notation: result.notation, kind: result.diagram, diagram: result.primary, hashes: { diagram: createHash('sha256').update(result.primary).digest('hex') }, warnings: result.warnings } as unknown as JsonValue
       }
       if (args.action === 'parse') {
         if (args.diagram === undefined) return errorResult('action=parse needs `diagram` (Mermaid or PlantUML text)')
@@ -93,6 +94,7 @@ export const logicProbeUmlTool = defineTool({
           ok: true,
           ran: true,
           ...parseVerdict(result, findings),
+          schema: REPORT_SCHEMAS.umlParse,
           action: 'parse',
           notation: result.notation,
           kind: result.diagram,
@@ -101,6 +103,7 @@ export const logicProbeUmlTool = defineTool({
           findings,
           discardedConstructs: result.discardedConstructs,
           discardedEdges: result.discardedEdges,
+          hashes: { hashSpec: DEFAULT_HASH_SPEC, modelHash: modelHash(result.model), diagram: createHash('sha256').update(args.diagram).digest('hex') },
           warnings: result.warnings,
         } as unknown as JsonValue
       }

@@ -111,7 +111,8 @@ Four input shapes, four different questions:
 | `UML010_UNUSED_VARIABLE` | warning | No guard reads this variable and no action writes it. It is a symbol with no source. |
 | `UML011_UNBOUNDED_VARIABLE` | info | An integer variable has no min or max, so no range invariant can be checked and A5 has no declared domain. |
 | `UML012_NO_TERMINAL` | warning | No state is terminal, so completion, failure and a stuck flow all look the same. |
-| `UML013_NO_NARRATIVE` | info | The model carries no meanings, so a reader must re-derive every symbol from the source. |
+| `UML013_NO_NARRATIVE` | info | The model carries no meanings, so a reader must re-derive every symbol from the source. Adding a partial narrative is a valid first step. |
+| `UML027_NARRATIVE_PARTIAL` | info | The narrative covers part of the model. `narrativeCoverage` (also in the finding's `evidence`) reports `covered/total` per dimension — states, events, scenarios. Incomplete is not wrong. |
 | `UML014_UNDOCUMENTED_STATE` | info | These states render as their bare id, so the diagram cannot be read against the code. |
 | `UML015_LABEL_DRIFT` | warning | A diagram label disagrees with the model narrative. One of the two is stale, and the review cannot tell which. |
 | `UML016_DIAGRAM_PARSE_NOTES` | info | Notes collected while rendering or reading the diagram. They mark information the notation could not carry. |

@@ -1,3 +1,4 @@
+import { REPORT_SCHEMAS, verdictOfFindings, type ReportSchema, type Verdict } from './engine.js'
 export interface ConcurrencyFinding {
   code: 'CONCURRENCY_KEYWORD' | 'CONCURRENCY_ABSOLUTE_CLAIM'
   severity: 'warning' | 'error'
@@ -11,6 +12,11 @@ export interface ConcurrencyFinding {
 
 export interface ConcurrencyScanReport {
   ok: boolean
+  ran: boolean
+  verdict: Verdict
+  verdictReason: string
+  /** The versioned report contract this result follows. */
+  schema: ReportSchema
   findings: ConcurrencyFinding[]
   summary: {
     lines: number
@@ -19,6 +25,10 @@ export interface ConcurrencyScanReport {
     warnings: number
     errors: number
   }
+  /** This scan hashes no model; the field is present so every report has the same shape. */
+  hashes: Record<string, string>
+  /** What to do next, derived from the findings — never empty. */
+  nextSteps: string[]
 }
 
 interface KeywordRule {
@@ -100,8 +110,19 @@ export function runConcurrencyScan(text: string): ConcurrencyScanReport {
   const errors = findings.filter((finding) => finding.severity === 'error').length
   const warnings = findings.filter((finding) => finding.severity === 'warning').length
   const absoluteClaims = findings.filter((finding) => finding.code === 'CONCURRENCY_ABSOLUTE_CLAIM').length
+  const nextSteps: string[] = []
+  if (absoluteClaims > 0) {
+    nextSteps.push('Every absolute claim must either cite dedicated evidence (a TSan/Helgrind run, a CBMC harness, a TLA+ model of the interleaving) or be restated as a bounded, testable property.')
+  }
+  if (findings.length > absoluteClaims) {
+    nextSteps.push('Review each flagged keyword: a plan that names shared state, a mutex or an interrupt without a synchronization argument is incomplete, not merely verbose.')
+  }
+  nextSteps.push('This scan mines claims; it does not prove concurrency safety — route each one to the tool named in its suggestions.')
   return {
     ok: true,
+    ran: true,
+    ...verdictOfFindings(findings),
+    schema: REPORT_SCHEMAS.concurrency,
     findings,
     summary: {
       lines: lines.length,
@@ -110,5 +131,7 @@ export function runConcurrencyScan(text: string): ConcurrencyScanReport {
       warnings,
       errors,
     },
+    hashes: {},
+    nextSteps,
   }
 }

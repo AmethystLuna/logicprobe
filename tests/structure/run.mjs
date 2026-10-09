@@ -4,6 +4,7 @@
 // report contract. Every case is a shape a reader gets wrong by eye, which is the
 // only reason the check exists.
 import { readFileSync } from 'node:fs'
+import { createHash } from 'node:crypto'
 import { parseStructure, reviewStructure, shortestCycle, globMatches, validateMatrix } from '../../lib/structure.js'
 
 let failures = 0
@@ -305,6 +306,28 @@ test('review: the report contract holds (verdict, ran, summary, nextSteps)', () 
   if (!report.nextSteps.some((step) => step.includes('dependency matrix'))) throw new Error('the report must ask for a matrix when none was given')
   if (!report.nextSteps.some((step) => step.includes('source-side'))) throw new Error('the report must route to the source-side reconciliation')
   assertNoUndefinedValues(report)
+})
+
+test('review: the contract names itself and hashes its inputs', () => {
+  const plain = reviewStructure({ diagram: componentDiagram })
+  if (plain.schema !== 'logicprobe/structure/v1') throw new Error('schema: ' + plain.schema)
+  const expected = createHash('sha256').update(componentDiagram).digest('hex')
+  if (plain.hashes.diagram !== expected) throw new Error('the diagram hash must be the sha256 of the text')
+  if ('matrix' in plain.hashes) throw new Error('no matrix, no matrix hash')
+  const withMatrix = reviewStructure({ diagram: componentDiagram, matrix })
+  if (withMatrix.hashes.matrix === undefined || withMatrix.hashes.matrix.length !== 64) {
+    throw new Error('a supplied matrix must be hashed: ' + JSON.stringify(withMatrix.hashes))
+  }
+  // The matrix hash is over the canonical (key-sorted) serialization, so a reordered
+  // but equivalent matrix hashes the same.
+  const reordered = { default: 'deny', layers: matrix.layers, rules: matrix.rules }
+  if (reviewStructure({ diagram: componentDiagram, matrix: reordered }).hashes.matrix !== withMatrix.hashes.matrix) {
+    throw new Error('the matrix hash must not depend on key order')
+  }
+  if (reviewStructure({ diagram: componentDiagram + '\n', matrix }).hashes.diagram === plain.hashes.diagram) {
+    throw new Error('a changed diagram text must change the hash')
+  }
+  assertNoUndefinedValues(withMatrix)
 })
 
 test('review: without a matrix no edge is judged and edgeVerdicts is absent', () => {

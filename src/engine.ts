@@ -232,12 +232,18 @@ export interface VerificationReport {
   verdict: Verdict
   /** Why the verdict came out that way, e.g. `2 error finding(s) (first: S2_NO_TRANSITIONS)`. */
   verdictReason: string
+  /** The versioned report contract this result follows. */
+  schema: ReportSchema
   schemaVersion: 1
   /** Which published specification `modelHash` follows (see references/hash-spec.md). */
   hashSpec: HashSpec
   modelHash: string
+  /** Every hash this report carries, in one place, for a baseline diff or an archive record. */
+  hashes: { hashSpec: HashSpec; modelHash: string; beforeModelHash?: string; afterModelHash?: string }
   /** Paths of the `_`-prefixed metadata keys found in the input and ignored by the schema. */
   metadataKeys?: string[]
+  /** How much of the model the narrative documents; absent when there is no narrative. */
+  narrativeCoverage?: NarrativeCoverage
   /** Echo of the model's natural-language narrative, when present. */
   narrative?: ModelNarrative
   summary: {
@@ -250,9 +256,28 @@ export interface VerificationReport {
   }
   checks: CheckResult[]
   comparison?: ComparisonSummary
+  /** What to do next, derived from the findings — never empty. */
+  nextSteps: string[]
   /** Informational notes about semantic dimensions this model references (timing, preemption)
    * that this engine does not verify. Heuristic, vocabulary-based — never a substitute for the checks. */
   coverageNotes?: string[]
+}
+
+/**
+ * The next-steps list every verification report carries. Derived only from the checks
+ * and the narrative coverage, so two runs over the same model produce the same list.
+ */
+function verificationNextSteps(checks: CheckResult[], coverage: NarrativeCoverage | undefined): string[] {
+  const steps: string[] = []
+  const failed = checks.filter((check) => check.status === 'fail').map((check) => check.id + ' ' + check.name)
+  const warningCodes = [...new Set(checks.flatMap((check) => check.findings).filter((finding) => finding.severity === 'warning').map((finding) => finding.code))].sort()
+  if (failed.length > 0) steps.push('Resolve the failing checks first: ' + failed.join(', ') + '.')
+  if (warningCodes.length > 0) steps.push('Review the warning findings (' + warningCodes.join(', ') + '): they are not failures, but they are not silence either.')
+  if (coverage !== undefined && !narrativeComplete(coverage)) {
+    steps.push('Complete the narrative (states ' + coverage.states + ', events ' + coverage.events + ', scenarios ' + coverage.scenarios + ') — a partial narrative is valid, but a reader still has to re-derive the missing symbols.')
+  }
+  steps.push('Re-run with beforeModel/stateMapping after the change to prove the behaviour did not regress (D1-D4).')
+  return steps
 }
 
 export interface ComparisonSummary {
@@ -292,6 +317,14 @@ export function modelHash(model: LogicModelV1, spec: HashSpec = DEFAULT_HASH_SPE
   return createHash('sha256').update(stableStringify(hashPayload(model, spec))).digest('hex')
 }
 
+/**
+ * Deterministic JSON (sorted keys, no insignificant whitespace) — the serialization the
+ * hash specification is defined over. Exported so every report hashes inputs the same way.
+ */
+export function canonicalJson(value: unknown): string {
+  return stableStringify(value)
+}
+
 // ---------------------------------------------------------------------------
 // Report contract: ran / verdict (P0-1) and metadata keys + hash specs (P0-3/P0-4)
 // ---------------------------------------------------------------------------
@@ -311,6 +344,63 @@ export type HashSpec = 'v0' | 'v1'
 
 export const PUBLISHED_HASH_SPECS: readonly HashSpec[] = ['v0', 'v1']
 export const DEFAULT_HASH_SPEC: HashSpec = 'v1'
+
+/**
+ * Versioned report contracts. Every tool result carries `schema`, so a consumer can
+ * branch on the contract instead of sniffing fields, and a change to a report's shape
+ * is a version bump here rather than a silent break. `findings[]` keeps the same
+ * stable core in every family: `{code, severity, message, detail?, evidence?, path?}`.
+ */
+export const REPORT_SCHEMAS = {
+  verify: 'logicprobe/verify/v1',
+  compose: 'logicprobe/compose/v1',
+  datamodel: 'logicprobe/datamodel/v1',
+  concurrency: 'logicprobe/concurrency/v1',
+  export: 'logicprobe/export/v1',
+  umlRender: 'logicprobe/uml/render/v1',
+  umlParse: 'logicprobe/uml/parse/v1',
+  umlReview: 'logicprobe/uml/review/v1',
+  structure: 'logicprobe/structure/v1',
+} as const
+
+export type ReportSchema = typeof REPORT_SCHEMAS[keyof typeof REPORT_SCHEMAS]
+
+/**
+ * How much of the model the `narrative` block actually documents, as `covered/total`
+ * per dimension. A partial narrative is valid — writing the states first and the
+ * events later is the natural order — so this is a coverage report, not a gate.
+ * `scenarios` counts distinct modelled (from, event) groups: one scenario per group.
+ */
+export interface NarrativeCoverage {
+  states: string
+  events: string
+  scenarios: string
+}
+
+export function narrativeCoverageOf(model: LogicModelV1): NarrativeCoverage | undefined {
+  const narrative = model.narrative
+  if (narrative === undefined) return undefined
+  const describedStates = narrative.states === undefined ? 0 : Object.keys(narrative.states).length
+  const describedEvents = narrative.events === undefined ? 0 : Object.keys(narrative.events).length
+  const groups = new Set(model.transitions.map((transition) => transition.from + '|' + transition.event))
+  const describedGroups = narrative.scenarios === undefined
+    ? 0
+    : new Set(narrative.scenarios.map((scenario) => scenario.from + '|' + scenario.event)).size
+  const events = new Set(model.transitions.map((transition) => transition.event))
+  return {
+    states: String(describedStates) + '/' + String(model.states.length),
+    events: String(describedEvents) + '/' + String(events.size),
+    scenarios: String(describedGroups) + '/' + String(groups.size),
+  }
+}
+
+/** True when every dimension of the coverage is fully described. */
+export function narrativeComplete(coverage: NarrativeCoverage | undefined): boolean {
+  if (coverage === undefined) return false
+  return coverage.states.split('/')[0] === coverage.states.split('/')[1]
+    && coverage.events.split('/')[0] === coverage.events.split('/')[1]
+    && coverage.scenarios.split('/')[0] === coverage.scenarios.split('/')[1]
+}
 
 /**
  * The review outcome, kept separate from `ok` (= "the tool ran"). Collapsing the two
@@ -696,55 +786,57 @@ export function validateModel(input: unknown): { ok: true; model: LogicModelV1 }
       rejectUnknownKeys(narrative, MODEL_KEYS.narrative, narrativePath)
       const stateIds = new Set<string>(Array.isArray(root.states) ? (root.states as StateSpec[]).map((state) => state.id) : [])
       const eventIds = new Set<string>(Array.isArray(root.transitions) ? (root.transitions as TransitionSpec[]).map((transition) => transition.event) : [])
-      const fromEventGroups = new Set<string>(Array.isArray(root.transitions) ? (root.transitions as TransitionSpec[]).map((transition) => transition.from + '|' + transition.event) : [])
-      if (typeof narrative.states !== 'object' || narrative.states === null || Array.isArray(narrative.states)) {
-        bad(narrativePath + '.states', 'must be an object mapping state id -> natural-language description')
-      } else {
-        for (const [id, description] of Object.entries(narrative.states as Record<string, unknown>)) {
-          if (!stateIds.has(id)) bad(narrativePath + '.states', 'references unknown state ' + id)
-          if (typeof description !== 'string' || description.length === 0) bad(narrativePath + '.states.' + id, 'must be a non-empty string')
-        }
-        for (const id of stateIds) {
-          if (typeof (narrative.states as Record<string, unknown>)[id] !== 'string') bad(narrativePath + '.states', 'missing description for state ' + id)
+      // A narrative is allowed to cover part of the model: states first, events and
+      // scenarios later is the natural authoring order, and `narrativeCoverage` reports
+      // what is still missing instead of rejecting the file. What stays an error is a
+      // narrative that is *wrong* (unknown id, empty description, duplicate scenario) or
+      // empty — an empty block claims documentation that does not exist.
+      const declaredDimensions = (['states', 'events', 'scenarios'] as const).filter((key) => narrative[key] !== undefined)
+      if (declaredDimensions.length === 0) {
+        bad(narrativePath, 'declares no dimension: give at least one of states, events or scenarios (a partial narrative is fine)')
+      }
+      if (narrative.states !== undefined) {
+        if (typeof narrative.states !== 'object' || narrative.states === null || Array.isArray(narrative.states)) {
+          bad(narrativePath + '.states', 'must be an object mapping state id -> natural-language description')
+        } else {
+          for (const [id, description] of Object.entries(narrative.states as Record<string, unknown>)) {
+            if (!stateIds.has(id)) bad(narrativePath + '.states', 'references unknown state ' + id)
+            if (typeof description !== 'string' || description.length === 0) bad(narrativePath + '.states.' + id, 'must be a non-empty string')
+          }
         }
       }
-      if (typeof narrative.events !== 'object' || narrative.events === null || Array.isArray(narrative.events)) {
-        bad(narrativePath + '.events', 'must be an object mapping event id -> natural-language description')
-      } else {
-        for (const [id, description] of Object.entries(narrative.events as Record<string, unknown>)) {
-          if (!eventIds.has(id)) bad(narrativePath + '.events', 'references unknown event ' + id)
-          if (typeof description !== 'string' || description.length === 0) bad(narrativePath + '.events.' + id, 'must be a non-empty string')
-        }
-        for (const id of eventIds) {
-          if (typeof (narrative.events as Record<string, unknown>)[id] !== 'string') bad(narrativePath + '.events', 'missing description for event ' + id)
+      if (narrative.events !== undefined) {
+        if (typeof narrative.events !== 'object' || narrative.events === null || Array.isArray(narrative.events)) {
+          bad(narrativePath + '.events', 'must be an object mapping event id -> natural-language description')
+        } else {
+          for (const [id, description] of Object.entries(narrative.events as Record<string, unknown>)) {
+            if (!eventIds.has(id)) bad(narrativePath + '.events', 'references unknown event ' + id)
+            if (typeof description !== 'string' || description.length === 0) bad(narrativePath + '.events.' + id, 'must be a non-empty string')
+          }
         }
       }
-      if (!Array.isArray(narrative.scenarios)) {
-        bad(narrativePath + '.scenarios', 'must be an array of { from, event, scenario }')
-      } else {
-        const seen = new Set<string>()
-        narrative.scenarios.forEach((entry, index) => {
-          const scenarioPath = narrativePath + '.scenarios[' + index + ']'
-          if (typeof entry !== 'object' || entry === null || Array.isArray(entry)) {
-            bad(scenarioPath, 'must be an object')
-            return
-          }
-          const scenario = entry as Record<string, unknown>
-          rejectUnknownKeys(scenario, MODEL_KEYS.scenario, scenarioPath)
-          if (typeof scenario.from !== 'string' || scenario.from.length === 0) bad(scenarioPath + '.from', 'must be a non-empty string')
-          else if (!stateIds.has(scenario.from)) bad(scenarioPath + '.from', 'unknown state ' + scenario.from)
-          if (typeof scenario.event !== 'string' || scenario.event.length === 0) bad(scenarioPath + '.event', 'must be a non-empty string')
-          else if (!eventIds.has(scenario.event)) bad(scenarioPath + '.event', 'unknown event ' + scenario.event)
-          if (typeof scenario.scenario !== 'string' || scenario.scenario.length === 0) bad(scenarioPath + '.scenario', 'must be a non-empty string')
-          const key = String(scenario.from) + '|' + String(scenario.event)
-          if (seen.has(key)) bad(scenarioPath, 'duplicate scenario for (' + scenario.from + ', ' + scenario.event + ')')
-          seen.add(key)
-        })
-        for (const key of fromEventGroups) {
-          if (!seen.has(key)) {
-            const sep = key.indexOf('|')
-            bad(narrativePath + '.scenarios', 'missing scenario for (' + key.slice(0, sep) + ', ' + key.slice(sep + 1) + ')')
-          }
+      if (narrative.scenarios !== undefined) {
+        if (!Array.isArray(narrative.scenarios)) {
+          bad(narrativePath + '.scenarios', 'must be an array of { from, event, scenario }')
+        } else {
+          const seen = new Set<string>()
+          narrative.scenarios.forEach((entry, index) => {
+            const scenarioPath = narrativePath + '.scenarios[' + index + ']'
+            if (typeof entry !== 'object' || entry === null || Array.isArray(entry)) {
+              bad(scenarioPath, 'must be an object')
+              return
+            }
+            const scenario = entry as Record<string, unknown>
+            rejectUnknownKeys(scenario, MODEL_KEYS.scenario, scenarioPath)
+            if (typeof scenario.from !== 'string' || scenario.from.length === 0) bad(scenarioPath + '.from', 'must be a non-empty string')
+            else if (!stateIds.has(scenario.from)) bad(scenarioPath + '.from', 'unknown state ' + scenario.from)
+            if (typeof scenario.event !== 'string' || scenario.event.length === 0) bad(scenarioPath + '.event', 'must be a non-empty string')
+            else if (!eventIds.has(scenario.event)) bad(scenarioPath + '.event', 'unknown event ' + scenario.event)
+            if (typeof scenario.scenario !== 'string' || scenario.scenario.length === 0) bad(scenarioPath + '.scenario', 'must be a non-empty string')
+            const key = String(scenario.from) + '|' + String(scenario.event)
+            if (seen.has(key)) bad(scenarioPath, 'duplicate scenario for (' + scenario.from + ', ' + scenario.event + ')')
+            seen.add(key)
+          })
         }
       }
     }
@@ -2774,22 +2866,26 @@ export function runVerification(input: unknown, options: VerificationOptions = {
   const validation = validateModel(input)
   if (!validation.ok) {
     const findings: Finding[] = validation.errors.map((message) => ({ code: 'MODEL_INVALID', severity: 'error', message }))
+    const modelCheck: CheckResult = {
+      id: 'MODEL',
+      name: 'Model Validation',
+      status: 'fail',
+      detail: 'Model schema validation failed: ' + validation.errors.length + ' errors',
+      findings,
+    }
     return {
       ok: false,
       ran: true,
       ...verdictOfFindings(findings),
+      schema: REPORT_SCHEMAS.verify,
       schemaVersion: 1,
       hashSpec,
       modelHash: '',
+      hashes: { hashSpec, modelHash: '' },
       ...metadata,
       summary: { states: 0, transitions: 0, errors: validation.errors.length, warnings: 0, checksRun: 0 },
-      checks: [{
-        id: 'MODEL',
-        name: 'Model Validation',
-        status: 'fail',
-        detail: 'Model schema validation failed: ' + validation.errors.length + ' errors',
-        findings,
-      }],
+      checks: [modelCheck],
+      nextSteps: verificationNextSteps([modelCheck], undefined),
     }
   }
   const model = validation.model
@@ -2828,9 +2924,11 @@ export function runVerification(input: unknown, options: VerificationOptions = {
         ok: false,
         ran: true,
         ...verdictOfFindings(allFindings),
+        schema: REPORT_SCHEMAS.verify,
         schemaVersion: 1,
         hashSpec,
         modelHash: modelHash(model, hashSpec),
+        hashes: { hashSpec, modelHash: modelHash(model, hashSpec), afterModelHash: modelHash(model, hashSpec) },
         ...metadata,
         summary: {
           states: model.states.length,
@@ -2850,6 +2948,7 @@ export function runVerification(input: unknown, options: VerificationOptions = {
             findings: beforeFindings,
           },
         ],
+        nextSteps: verificationNextSteps(checks, narrativeCoverageOf(model)),
       }
     }
     const before = beforeValidation.model
@@ -2865,14 +2964,22 @@ export function runVerification(input: unknown, options: VerificationOptions = {
   const errors = checks.reduce((sum, check) => sum + check.findings.filter((finding) => finding.severity === 'error').length, 0)
   const warnings = checks.reduce((sum, check) => sum + check.findings.filter((finding) => finding.severity === 'warning').length, 0)
   const coverageNotes = computeCoverageNotes(model)
+  const narrativeCoverage = narrativeCoverageOf(model)
   return {
     ok: true,
     ran: true,
     ...verdictOfFindings(checks.flatMap((check) => check.findings)),
+    schema: REPORT_SCHEMAS.verify,
     schemaVersion: 1,
     hashSpec,
     modelHash: modelHash(model, hashSpec),
+    hashes: {
+      hashSpec,
+      modelHash: modelHash(model, hashSpec),
+      ...(comparison === undefined ? {} : { beforeModelHash: comparison.beforeModelHash, afterModelHash: comparison.afterModelHash }),
+    },
     ...metadata,
+    ...(narrativeCoverage === undefined ? {} : { narrativeCoverage }),
     summary: {
       states: model.states.length,
       transitions: model.transitions.length,
@@ -2882,6 +2989,7 @@ export function runVerification(input: unknown, options: VerificationOptions = {
       truncated: exploration.truncated,
     },
     checks,
+    nextSteps: verificationNextSteps(checks, narrativeCoverage),
     ...(model.narrative === undefined ? {} : { narrative: model.narrative }),
     ...(comparison === undefined ? {} : { comparison }),
     ...(coverageNotes.length === 0 ? {} : { coverageNotes }),
@@ -2921,10 +3029,16 @@ export interface CompositionReport {
   ran: boolean
   verdict: Verdict
   verdictReason: string
+  /** The versioned report contract this result follows. */
+  schema: ReportSchema
   /** Which published specification the per-machine `modelHash` values follow. */
   hashSpec: HashSpec
+  /** Every hash this report carries, in one place. */
+  hashes: { hashSpec: HashSpec; machines: string[] }
   summary: CompositionSummary
   checks: CheckResult[]
+  /** What to do next, derived from the findings — never empty. */
+  nextSteps: string[]
 }
 
 interface CompositionNode {
@@ -2972,9 +3086,12 @@ export function runCompositionVerification(machinesInput: unknown[], options: Co
       ok: false,
       ran: true,
       ...verdictOfFindings(modelFindings),
+      schema: REPORT_SCHEMAS.compose,
       hashSpec,
+      hashes: { hashSpec, machines: hashes },
       summary: { machineCount: models.length, machines: machineSummary, compositeStates: 0, errors: modelFindings.length, warnings: 0, truncated: false },
       checks: [{ id: 'MODEL', name: 'Machine Validation', status: 'fail', detail: 'composition input validation failed', findings: modelFindings }],
+      nextSteps: ['Fix the machine that failed validation, then re-run the composition.'],
     }
   }
   const rendezvous = new Set(options.rendezvous ?? [])
@@ -3081,12 +3198,19 @@ export function runCompositionVerification(machinesInput: unknown[], options: Co
     checkResult('C1', 'Composition Deadlock', c1Findings, c1Findings.length === 0 ? 'No composition deadlock reachable' : 'Composition deadlocks: ' + c1Findings.length),
     checkResult('C2', 'Rendezvous Sync', c2Findings, c2Findings.length === 0 ? 'All rendezvous events can fire' : 'Rendezvous warnings: ' + c2Findings.length),
   ]
+  const nextSteps: string[] = []
+  if (errors > 0) nextSteps.push('Resolve the error findings first: the composition deadlocks at a reachable state, so at least one machine is missing an exit or a handshake partner.')
+  if (warnings > 0) nextSteps.push('Review the warning findings: a rendezvous event that can never fire means the handshake is declared but unreachable.')
+  nextSteps.push('Re-run the composition after the change; every machine must be able to advance, or explain why it is terminal.')
   return {
     ok: errors === 0,
     ran: true,
     ...verdictOf(errors, warnings, c1Findings[0]?.code ?? c2Findings[0]?.code),
+    schema: REPORT_SCHEMAS.compose,
     hashSpec,
+    hashes: { hashSpec, machines: hashes },
     summary: { machineCount: models.length, machines: machineSummary, compositeStates, errors, warnings, truncated },
     checks,
+    nextSteps,
   }
 }

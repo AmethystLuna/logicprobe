@@ -91,12 +91,16 @@ Every report separates "the tool ran" from "the review passed":
 
 | Field | Meaning |
 |-------|---------|
+| `schema` | The versioned report contract (`logicprobe/verify/v1`, `logicprobe/uml/review/v1`, …) — branch on it instead of sniffing fields. |
 | `ok` | The engine produced a report. For `verify` it is `false` only when model *validation* failed. It is **not** a verdict. |
 | `ran` | The tool executed. `false` only for a tool-level refusal (which carries `errorCode`/`error`). |
 | `verdict` | `pass` / `pass_with_findings` / `fail`. Any `severity: "error"` finding — or a validation failure — makes it `fail`. |
 | `verdictReason` | One line, e.g. `1 error finding(s) (first: S2_NO_TRANSITIONS)`. |
 | `hashSpec` | The published specification `modelHash` follows — see [`hash-spec.md`](skills/logicprobe/references/hash-spec.md). |
+| `hashes` | Every hash the report carries, in one place (model, diagram/matrix, before/after). |
 | `metadataKeys` | Paths of the `_`-prefixed annotation keys the input carried. |
+| `narrativeCoverage` | `{states: "5/5", events: "3/9", scenarios: "0/12"}` — a narrative may cover part of the model, and this is how much is still undocumented. |
+| `nextSteps` | What to do next, derived from the findings; never empty, and identical for two runs over the same input. |
 
 Reading `ok` turns a model with a deadlock into a pass; the verdict is the judgement. The non-DSH Python CLI follows the verdict with its exit code: `pass`/`pass_with_findings` → `0`, `fail` or a refusal → `2`.
 

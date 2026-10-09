@@ -1384,6 +1384,9 @@ await runDiffTests()
 await runPathPropertyContinuityTests()
 
 async function runNarrativeValidationTests() {
+  // A narrative may cover part of the model: states first, events and scenarios later
+  // is the natural authoring order. Coverage is reported; only a *wrong* narrative
+  // (unknown id, empty description, duplicate scenario) or an empty block is rejected.
   const complete = {
     schemaVersion: 1,
     init: 'A',
@@ -1400,14 +1403,52 @@ async function runNarrativeValidationTests() {
   if (JSON.stringify(okReport.narrative) !== JSON.stringify(complete.narrative)) {
     throw new Error('report must echo the narrative block')
   }
+  if (JSON.stringify(okReport.narrativeCoverage) !== JSON.stringify({ states: '2/2', events: '1/1', scenarios: '1/1' })) {
+    throw new Error('full coverage must be reported: ' + JSON.stringify(okReport.narrativeCoverage))
+  }
+  if (okReport.nextSteps.some((step) => step.includes('Complete the narrative'))) {
+    throw new Error('a complete narrative must not be asked to complete itself')
+  }
   assertNoUndefinedValues(okReport)
 
   const clone = (value) => JSON.parse(JSON.stringify(value))
-  const missingScenario = clone(complete)
-  missingScenario.narrative.scenarios = []
-  const bad1 = runVerification(missingScenario)
-  if (bad1.ok || bad1.checks[0]?.id !== 'MODEL' || !bad1.checks[0].findings.some((entry) => entry.message.includes('missing scenario'))) {
-    throw new Error('missing scenario must fail MODEL validation: ' + JSON.stringify(bad1.checks[0]?.findings ?? []))
+
+  // The three release valves of P1-9: each partial block validates and reports coverage.
+  const partialCases = [
+    ['states only', { states: { A: 'start', B: 'done' } }, { states: '2/2', events: '0/1', scenarios: '0/1' }],
+    ['states + events', { states: { A: 'start', B: 'done' }, events: { go: 'go ahead' } }, { states: '2/2', events: '1/1', scenarios: '0/1' }],
+    ['scenarios only', { scenarios: [{ from: 'A', event: 'go', scenario: 'start -> done' }] }, { states: '0/2', events: '0/1', scenarios: '1/1' }],
+  ]
+  for (const [label, narrative, coverage] of partialCases) {
+    const model = clone(complete)
+    model.narrative = narrative
+    const report = runVerification(model)
+    if (!report.ok || report.ran !== true) {
+      throw new Error(label + ': a partial narrative must validate: ' + JSON.stringify(report.checks[0]?.findings ?? []))
+    }
+    if (JSON.stringify(report.narrativeCoverage) !== JSON.stringify(coverage)) {
+      throw new Error(label + ': coverage ' + JSON.stringify(report.narrativeCoverage) + ' != ' + JSON.stringify(coverage))
+    }
+    if (!report.nextSteps.some((step) => step.includes('Complete the narrative'))) {
+      throw new Error(label + ': the next steps must name the coverage gap')
+    }
+    assertNoUndefinedValues(report)
+  }
+
+  // An empty narrative block claims documentation that does not exist.
+  const empty = clone(complete)
+  empty.narrative = {}
+  const emptyReport = runVerification(empty)
+  if (emptyReport.ok || !emptyReport.checks[0].findings.some((entry) => entry.message.includes('declares no dimension'))) {
+    throw new Error('an empty narrative block must fail validation: ' + JSON.stringify(emptyReport.checks[0]?.findings ?? []))
+  }
+
+  // A narrative without a single key is just an absent narrative.
+  const absent = clone(complete)
+  delete absent.narrative
+  const absentReport = runVerification(absent)
+  if (!absentReport.ok || 'narrativeCoverage' in absentReport) {
+    throw new Error('an absent narrative must validate without a coverage field')
   }
 
   const unknownState = clone(complete)
@@ -1417,11 +1458,18 @@ async function runNarrativeValidationTests() {
     throw new Error('unknown state in narrative must fail validation')
   }
 
-  const missingEvent = clone(complete)
-  missingEvent.narrative.events = {}
-  const bad3 = runVerification(missingEvent)
-  if (bad3.ok || !bad3.checks[0].findings.some((entry) => entry.message.includes('missing description for event'))) {
-    throw new Error('missing event description must fail validation')
+  const unknownEvent = clone(complete)
+  unknownEvent.narrative.events = { never: 'not an event' }
+  const badEvent = runVerification(unknownEvent)
+  if (badEvent.ok || !badEvent.checks[0].findings.some((entry) => entry.message.includes('unknown event'))) {
+    throw new Error('unknown event in narrative must fail validation')
+  }
+
+  const emptyDescription = clone(complete)
+  emptyDescription.narrative.events = { go: '' }
+  const badDescription = runVerification(emptyDescription)
+  if (badDescription.ok || !badDescription.checks[0].findings.some((entry) => entry.message.includes('non-empty string'))) {
+    throw new Error('an empty description must fail validation')
   }
 
   const duplicate = clone(complete)
@@ -1434,7 +1482,7 @@ async function runNarrativeValidationTests() {
     throw new Error('duplicate scenario must fail validation')
   }
 
-  for (const bad of [bad1, bad2, bad3, bad4]) assertNoUndefinedValues(bad)
+  for (const bad of [emptyReport, bad2, badEvent, badDescription, bad4]) assertNoUndefinedValues(bad)
   console.log('PASS narrative-validation')
 }
 
@@ -1672,6 +1720,32 @@ async function runReportContractTests() {
   if (modelHash(bare, 'v1') !== modelHash(bare, 'v0')) throw new Error('v0 and v1 must agree without metadata')
   const legacy = runVerification(bare, { hashSpec: 'v0' })
   if (legacy.hashSpec !== 'v0' || legacy.modelHash !== modelHash(bare, 'v0')) throw new Error('hashSpec option not honoured')
+
+  // P2-13: every report names its contract, carries its hashes in one place, and ends
+  // with next steps — derived from the findings, so two runs agree byte for byte.
+  if (deadlocked.schema !== 'logicprobe/verify/v1') throw new Error('verify schema: ' + deadlocked.schema)
+  if (JSON.stringify(deadlocked.hashes) !== JSON.stringify({ hashSpec: 'v1', modelHash: modelHash({ schemaVersion: 1, init: 'A', states: [{ id: 'A' }], transitions: [] }) })) {
+    throw new Error('verify hashes: ' + JSON.stringify(deadlocked.hashes))
+  }
+  if (!Array.isArray(deadlocked.nextSteps) || deadlocked.nextSteps.length === 0) throw new Error('verify nextSteps must not be empty')
+  if (!deadlocked.nextSteps.some((step) => step.includes('S2 Deadlock'))) {
+    throw new Error('the failing check must be named in nextSteps: ' + JSON.stringify(deadlocked.nextSteps))
+  }
+  const repeat = runVerification({ schemaVersion: 1, init: 'A', states: [{ id: 'A' }], transitions: [] })
+  if (JSON.stringify(repeat.nextSteps) !== JSON.stringify(deadlocked.nextSteps)) throw new Error('nextSteps must be deterministic')
+  if (!invalid.nextSteps.some((step) => step.includes('MODEL Model Validation'))) {
+    throw new Error('a rejected model must name the validation check')
+  }
+
+  const composedForContract = runCompositionVerification([
+    { schemaVersion: 1, init: 'A0', states: [{ id: 'A0' }, { id: 'A1', terminal: true }], transitions: [{ from: 'A0', event: 'go', to: 'A1' }] },
+    { schemaVersion: 1, init: 'B0', states: [{ id: 'B0' }, { id: 'B1', terminal: true }], transitions: [{ from: 'B0', event: 'go', to: 'B1' }] },
+  ])
+  if (composedForContract.schema !== 'logicprobe/compose/v1') throw new Error('compose schema: ' + composedForContract.schema)
+  if (composedForContract.hashes.machines.length !== 2 || composedForContract.hashes.machines.some((hash) => hash === '')) {
+    throw new Error('compose hashes: ' + JSON.stringify(composedForContract.hashes))
+  }
+  if (composedForContract.nextSteps.length === 0) throw new Error('compose nextSteps must not be empty')
 
   // Backward compatibility, pinned: the 0.9.0 hashes of two fixtures. A change to the
   // normalization must be a new hashSpec, never a silent change to this one.
