@@ -20,7 +20,7 @@ if (typeof config.enabled?.get !== 'function') {
 }
 mod.apply(ctx, config)
 
-if (toolsRegistered !== 7) throw new Error('expected seven tool registrations, got ' + toolsRegistered)
+if (toolsRegistered !== 8) throw new Error('expected eight tool registrations, got ' + toolsRegistered)
 if (promptContext === undefined) throw new Error('system prompt context was not registered')
 if (promptContext.name !== 'logicprobe:mode') throw new Error('unexpected context name: ' + promptContext.name)
 if (promptContext.order !== 118) throw new Error('unexpected context order: ' + promptContext.order)
@@ -51,6 +51,6 @@ if (status.enabled !== true) throw new Error('inspect status enabled should read
 updateVolatile(config.enabled, createVolatile(false))
 const toggled = await inspectProvider.query('status')
 if (toggled.enabled !== false) throw new Error('the live switch did not reach the plugin')
-if (toolsRegistered !== 7) throw new Error('toggling the switch must not disturb the verification tools')
+if (toolsRegistered !== 8) throw new Error('toggling the switch must not disturb the verification tools')
 
 console.log('PASS apply smoke: tool/inspect/system-prompt registrations, policy-aware text, and the live injection switch')

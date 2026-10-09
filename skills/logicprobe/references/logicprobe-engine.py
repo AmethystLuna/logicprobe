@@ -153,6 +153,118 @@ def refusal_verdict(reason):
     return {'verdict': 'fail', 'verdictReason': 'the tool did not run: ' + reason}
 
 
+# ---------------------------------------------------------------------------
+# Report diffing (mirror of src/baseline.ts): "did this slice add findings?"
+# ---------------------------------------------------------------------------
+
+def finding_identity(finding):
+    """The stable identity of a finding: check + code + a canonical locator (prose excluded)."""
+    locator = stable_stringify({key: value for key, value in (('evidence', finding.get('evidence')), ('path', finding.get('path')))
+                                if value is not None})
+    where = 'message:' + finding['message'] if locator == '{}' else locator
+    prefix = '' if finding.get('check') is None else finding['check'] + '|'
+    return prefix + finding['code'] + '|' + where
+
+
+def flatten_report_findings(report):
+    """Flatten a report of any family into one finding list (`checks[].findings` or `findings[]`)."""
+    if not isinstance(report, dict):
+        return []
+    flat = []
+    checks = report.get('checks')
+    if isinstance(checks, list):
+        for check in checks:
+            if not isinstance(check, dict):
+                continue
+            cid = check.get('id') if isinstance(check.get('id'), str) else None
+            for finding in (check.get('findings') or []):
+                flat.append(finding if cid is None else {**finding, 'check': cid})
+    for finding in (report.get('findings') or []):
+        flat.append(finding)
+    return flat
+
+
+def _report_verdict(report):
+    if not isinstance(report, dict):
+        return 'fail'
+    value = report.get('verdict')
+    return value if value in ('pass', 'pass_with_findings', 'fail') else 'fail'
+
+
+def diff_reports(baseline, current):
+    """Compare a baseline report with the current one; the verdict describes the delta."""
+    before = flatten_report_findings(baseline)
+    after = flatten_report_findings(current)
+    before_by_identity = {}
+    for finding in before:
+        before_by_identity[finding_identity(finding)] = finding
+    seen = set()
+    added = []
+    changed = []
+    for finding in after:
+        identity = finding_identity(finding)
+        seen.add(identity)
+        previous = before_by_identity.get(identity)
+        if previous is None:
+            added.append(finding)
+            continue
+        if previous.get('severity') != finding.get('severity') or previous.get('message') != finding.get('message'):
+            changed.append({
+                'identity': identity,
+                'code': finding['code'],
+                'before': {'severity': previous.get('severity'), 'message': previous.get('message')},
+                'after': {'severity': finding.get('severity'), 'message': finding.get('message')},
+            })
+    removed = [finding for finding in before if finding_identity(finding) not in seen]
+    added_errors = [finding for finding in added if finding.get('severity') == 'error']
+    added_warnings = [finding for finding in added if finding.get('severity') == 'warning']
+    if added_errors:
+        delta = {'verdict': 'fail',
+                 'verdictReason': str(len(added)) + ' new finding(s) (' + str(len(added_errors)) + ' error)'
+                                  + ' (first: ' + added_errors[0]['code'] + ')'}
+    elif added:
+        delta = {'verdict': 'pass_with_findings', 'verdictReason': str(len(added)) + ' new warning finding(s), no new errors'}
+    elif removed:
+        delta = {'verdict': 'pass', 'verdictReason': 'no new findings; ' + str(len(removed)) + ' finding(s) resolved'}
+    else:
+        delta = {'verdict': 'pass', 'verdictReason': 'no new findings, nothing resolved'}
+
+    next_steps = []
+    if added_errors:
+        next_steps.append('Fix or explicitly accept the ' + str(len(added_errors)) + ' new error finding(s) before calling this slice done: the baseline is what "not worse" is measured against.')
+    elif added:
+        next_steps.append('The new warnings are not failures, but they are new: decide per finding whether the change introduced them or the baseline was incomplete.')
+    else:
+        next_steps.append('No new findings: re-record the baseline with this report if the slice is accepted, so the next comparison starts from it.')
+    if changed:
+        next_steps.append('Review the ' + str(len(changed)) + ' changed finding(s): the same locator now reports something different, which usually means the fix moved the problem.')
+    if removed:
+        next_steps.append(str(len(removed)) + ' finding(s) from the baseline are gone — confirm they were fixed rather than renamed out of the report (a renamed check or a reworded message changes the identity).')
+    if _report_verdict(current) == 'fail':
+        next_steps.append('The current report still fails on its own terms; the delta being clean does not make the run clean.')
+
+    return {
+        'ok': True,
+        'ran': True,
+        **delta,
+        'schema': REPORT_SCHEMAS['baseline'],
+        'currentVerdict': _report_verdict(current),
+        'added': added,
+        'removed': removed,
+        'changed': changed,
+        'summary': {
+            'baseline': len(before),
+            'current': len(after),
+            'added': len(added),
+            'removed': len(removed),
+            'changed': len(changed),
+            'addedErrors': len(added_errors),
+            'addedWarnings': len(added_warnings),
+        },
+        'nextSteps': next_steps,
+    }
+
+
 # Versioned report contracts: every result carries `schema`, so a consumer can branch on
 # the contract instead of sniffing fields.
 REPORT_SCHEMAS = {
@@ -165,6 +277,7 @@ REPORT_SCHEMAS = {
     'umlParse': 'logicprobe/uml/parse/v1',
     'umlReview': 'logicprobe/uml/review/v1',
     'structure': 'logicprobe/structure/v1',
+    'baseline': 'logicprobe/baseline/v1',
 }
 
 
@@ -5718,6 +5831,15 @@ def _hash_check(model, target):
     }
 
 
+def _emit_report(report, baseline_path=None):
+    """Print a report (or its diff against a baseline) and exit on the verdict."""
+    if baseline_path:
+        report = diff_reports(_load_json_file(baseline_path), report)
+    print(json.dumps(report, indent=2))
+    # The exit code follows the verdict, not `ok`: a report that ran and failed is a failure.
+    sys.exit(0 if report['verdict'] != 'fail' else 2)
+
+
 def _cmd_verify(args):
     model = _load_json_file(args.model)
     if args.hash_check:
@@ -5734,9 +5856,7 @@ def _cmd_verify(args):
     if args.state_mapping:
         options['stateMapping'] = _load_json_file(args.state_mapping)
     report = run_verification(model, options)
-    print(json.dumps(report, indent=2))
-    # The exit code follows the verdict, not `ok`: a report that ran and failed is a failure.
-    sys.exit(0 if report['verdict'] != 'fail' else 2)
+    _emit_report(report, args.baseline)
 
 
 def _cmd_compose(args):
@@ -5747,8 +5867,7 @@ def _cmd_compose(args):
     if args.max_states:
         options['maxStates'] = args.max_states
     report = run_composition_verification(machines, options)
-    print(json.dumps(report, indent=2))
-    sys.exit(0 if report['verdict'] != 'fail' else 2)
+    _emit_report(report, args.baseline)
 
 
 def _cmd_export(args):
@@ -5804,8 +5923,7 @@ def _cmd_structure(args):
     except (OSError, ValueError) as exc:
         print(json.dumps(_refusal_json(exc)))
         sys.exit(2)
-    print(json.dumps(report, indent=2))
-    sys.exit(0 if report['verdict'] != 'fail' else 2)
+    _emit_report(report, args.baseline)
 
 
 def _cmd_uml_review(args):
@@ -5828,8 +5946,7 @@ def _cmd_uml_review(args):
     except (OSError, ValueError) as exc:
         print(json.dumps(_refusal_json(exc)))
         sys.exit(2)
-    print(json.dumps(report, indent=2))
-    sys.exit(0 if report['verdict'] != 'fail' else 2)
+    _emit_report(report, args.baseline)
 
 
 def _build_parser():
@@ -5844,6 +5961,8 @@ def _build_parser():
     p_verify.add_argument('--max-permutation-events', type=int)
     p_verify.add_argument('--hash-spec', choices=list(PUBLISHED_HASH_SPECS), default=DEFAULT_HASH_SPEC,
                           help='model-hash specification to report (default v1; v0 = pre-0.10.0 behaviour)')
+    p_verify.add_argument('--baseline', metavar='REPORT',
+                          help='compare against an earlier report of the same family and print the diff (a new error finding fails it)')
     p_verify.add_argument('--hash-check', metavar='HEX',
                           help='report which published hash spec reproduces this archived hash, then exit')
     p_verify.set_defaults(func=_cmd_verify)
@@ -5852,6 +5971,7 @@ def _build_parser():
     p_compose.add_argument('--rendezvous', help='comma-separated handshake events')
     p_compose.add_argument('--max-states', type=int)
     p_compose.add_argument('--hash-spec', choices=list(PUBLISHED_HASH_SPECS), default=DEFAULT_HASH_SPEC)
+    p_compose.add_argument('--baseline', metavar='REPORT', help='compare against an earlier report and print the diff')
     p_compose.set_defaults(func=_cmd_compose)
     p_export = sub.add_parser('export', help='export a model to UPPAAL/TLA+/PRISM/SPIN')
     p_export.add_argument('model')
@@ -5874,11 +5994,13 @@ def _build_parser():
     p_uml_review.add_argument('--diagram-kind', choices=['state', 'activity', 'sequence'])
     p_uml_review.add_argument('--no-round-trip', action='store_true')
     p_uml_review.add_argument('--max-steps', type=int)
+    p_uml_review.add_argument('--baseline', metavar='REPORT', help='compare against an earlier report and print the diff')
     p_uml_review.set_defaults(func=_cmd_uml_review)
     p_structure = sub.add_parser('structure', help='audit a structure/dependency diagram (UML020-UML026)')
     p_structure.add_argument('diagram')
     p_structure.add_argument('--notation', choices=['auto', 'plantuml', 'mermaid'], default='auto')
     p_structure.add_argument('--matrix', help='dependency matrix JSON: {rules, layers, default}')
+    p_structure.add_argument('--baseline', metavar='REPORT', help='compare against an earlier report and print the diff')
     p_structure.set_defaults(func=_cmd_structure)
     return parser
 

@@ -291,6 +291,7 @@ export declare const REPORT_SCHEMAS: {
     readonly umlParse: 'logicprobe/uml/parse/v1';
     readonly umlReview: 'logicprobe/uml/review/v1';
     readonly structure: 'logicprobe/structure/v1';
+    readonly baseline: 'logicprobe/baseline/v1';
 };
 export type ReportSchema = typeof REPORT_SCHEMAS[keyof typeof REPORT_SCHEMAS];
 /**

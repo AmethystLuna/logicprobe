@@ -42,6 +42,7 @@ import { logicProbeComposeTool } from './compose-tool.js'
 import { logicProbeExportTool } from './export-tool.js'
 import { logicProbeUmlTool } from './uml-tool.js'
 import { logicProbeStructureTool } from './structure-tool.js'
+import { logicProbeReportDiffTool } from './report-diff-tool.js'
 import { ENGINE_SCHEMA_VERSION } from './engine.js'
 
 // DSH 0.1.7-alpha.1 (session format v4) retires the shared
@@ -97,8 +98,9 @@ Plugin logicprobe is active. Documents are not truth — code is. Verify every v
 - \`logicprobe_export\` — emit external-checker input from a verified model: UPPAAL, TLA+, PRISM, SPIN.
 - \`logicprobe_uml\` — model a code flow as UML (render), read a diagram back into a model (parse), or audit the modelling (review: UML001-UML019 structural defects plus \`UML_NOT_A_STATE_DIAGRAM\`, documentation gaps, diagram-versus-model round-trip fidelity).
 - \`logicprobe_structure_verify\` — audit a structure diagram as a dependency graph (UML020-UML026): isolated nodes, dangling endpoints, cycles, disallowed edges and layer violations against a dependency matrix (rules / layers / default), and required edges the diagram is missing. Every judged edge names the rule ids it matched. It audits the diagram, not the code — reconcile it with a source-side scan.
+- \`logicprobe_report_diff\` — compare two reports (baseline vs current) and report what a change added, removed or altered, matched by a stable finding identity, with a delta verdict: the "violations must not increase" acceptance criterion, computed instead of eyeballed.
 
-**How to read a report**: every report carries \`ran\` (the tool executed), \`verdict\` (\`pass\` / \`pass_with_findings\` / \`fail\`) and \`verdictReason\`. \`ok: true\` only means a report was produced — a report with error findings is a FAILED verification, so read \`verdict\`, never \`ok\`. \`hashSpec\` names the published specification \`modelHash\` follows (\`references/hash-spec.md\`); \`_source\`/\`_verified\`-style \`_\`-prefixed keys are accepted annotation metadata, echoed as \`metadataKeys\` and excluded from the hash.
+**How to read a report**: every report carries \`schema\` (the versioned contract), \`ran\` (the tool executed), \`verdict\` (\`pass\` / \`pass_with_findings\` / \`fail\`), \`verdictReason\`, \`hashes\` and \`nextSteps\`. \`ok: true\` only means a report was produced — a report with error findings is a FAILED verification, so read \`verdict\`, never \`ok\`. \`hashSpec\` names the published specification \`modelHash\` follows (\`references/hash-spec.md\`); \`_source\`/\`_verified\`-style \`_\`-prefixed keys are accepted annotation metadata, echoed as \`metadataKeys\` and excluded from the hash; a \`narrative\` may cover part of the model, and \`narrativeCoverage\` reports how much is undocumented.
 
 Python harnesses in the skill references remain the fallback for non-dsh hosts.
 
@@ -250,7 +252,7 @@ interface SystemPromptLike {
  * lets the model read this plugin's runtime status without guessing. Mirrors
  * the registration pattern of the official dsh-tool-cordis host providers.
  */
-function inspectProvider(config: Config, isToolRegistered: () => boolean, isDataToolRegistered: () => boolean, isConcurrencyToolRegistered: () => boolean, isComposeToolRegistered: () => boolean, isExportToolRegistered: () => boolean, isUmlToolRegistered: () => boolean, isStructureToolRegistered: () => boolean): HostCordisInspectProviderRegistration {
+function inspectProvider(config: Config, isToolRegistered: () => boolean, isDataToolRegistered: () => boolean, isConcurrencyToolRegistered: () => boolean, isComposeToolRegistered: () => boolean, isExportToolRegistered: () => boolean, isUmlToolRegistered: () => boolean, isStructureToolRegistered: () => boolean, isReportDiffToolRegistered: () => boolean): HostCordisInspectProviderRegistration {
   return {
     manifest: {
       id: 'logicprobe',
@@ -278,10 +280,11 @@ function inspectProvider(config: Config, isToolRegistered: () => boolean, isData
               exportToolRegistered: { type: 'boolean', description: 'Whether the logicprobe_export tool is registered on ctx.tools.' },
               umlToolRegistered: { type: 'boolean', description: 'Whether the logicprobe_uml tool (UML modelling + modelling review) is registered on ctx.tools.' },
               structureToolRegistered: { type: 'boolean', description: 'Whether the logicprobe_structure_verify tool (structure-diagram / dependency review) is registered on ctx.tools.' },
+              reportDiffToolRegistered: { type: 'boolean', description: 'Whether the logicprobe_report_diff tool (baseline report comparison) is registered on ctx.tools.' },
               engineSchemaVersion: { type: 'integer', description: 'Model schema version the bundled state-machine verification engine accepts.' },
               dataEngineSchemaVersion: { type: 'integer', description: 'Model schema version the bundled data-model verification engine accepts.' },
             },
-            required: ['enabled', 'gateContentLength', 'interaction', 'toolRegistered', 'dataToolRegistered', 'concurrencyToolRegistered', 'composeToolRegistered', 'exportToolRegistered', 'umlToolRegistered', 'structureToolRegistered', 'engineSchemaVersion', 'dataEngineSchemaVersion'],
+            required: ['enabled', 'gateContentLength', 'interaction', 'toolRegistered', 'dataToolRegistered', 'concurrencyToolRegistered', 'composeToolRegistered', 'exportToolRegistered', 'umlToolRegistered', 'structureToolRegistered', 'reportDiffToolRegistered', 'engineSchemaVersion', 'dataEngineSchemaVersion'],
             additionalProperties: false,
           },
         },
@@ -300,6 +303,7 @@ function inspectProvider(config: Config, isToolRegistered: () => boolean, isData
           exportToolRegistered: isExportToolRegistered(),
           umlToolRegistered: isUmlToolRegistered(),
           structureToolRegistered: isStructureToolRegistered(),
+          reportDiffToolRegistered: isReportDiffToolRegistered(),
           engineSchemaVersion: ENGINE_SCHEMA_VERSION,
           dataEngineSchemaVersion: DATA_ENGINE_SCHEMA_VERSION,
         }
@@ -321,13 +325,14 @@ export function apply(ctx: Context, config: Config): void {
   let exportToolRegistered = false
   let umlToolRegistered = false
   let structureToolRegistered = false
+  let reportDiffToolRegistered = false
   let modeContextRegistered = false
   const registerProvider = (): void => {
     if (providerRegistered) return
     const inspect = ctx.get('cordisInspect')
     if (inspect === undefined) return
     try {
-      ctx.effect(() => inspect.register(inspectProvider(config, () => toolRegistered, () => dataToolRegistered, () => concurrencyToolRegistered, () => composeToolRegistered, () => exportToolRegistered, () => umlToolRegistered, () => structureToolRegistered)), 'logicprobe: inspect provider')
+      ctx.effect(() => inspect.register(inspectProvider(config, () => toolRegistered, () => dataToolRegistered, () => concurrencyToolRegistered, () => composeToolRegistered, () => exportToolRegistered, () => umlToolRegistered, () => structureToolRegistered, () => reportDiffToolRegistered)), 'logicprobe: inspect provider')
       providerRegistered = true
     } catch (err) {
       console.warn('[logicprobe] inspect provider registration failed', err)
@@ -345,6 +350,7 @@ export function apply(ctx: Context, config: Config): void {
       ctx.effect(() => tools.register(logicProbeExportTool), 'logicprobe: export tool')
       ctx.effect(() => tools.register(logicProbeUmlTool), 'logicprobe: uml tool')
       ctx.effect(() => tools.register(logicProbeStructureTool), 'logicprobe: structure tool')
+      ctx.effect(() => tools.register(logicProbeReportDiffTool), 'logicprobe: report diff tool')
       toolRegistered = true
       dataToolRegistered = true
       concurrencyToolRegistered = true
@@ -352,6 +358,7 @@ export function apply(ctx: Context, config: Config): void {
       exportToolRegistered = true
       umlToolRegistered = true
       structureToolRegistered = true
+      reportDiffToolRegistered = true
     } catch (err) {
       console.warn('[logicprobe] logicprobe_verify/logicprobe_datamodel_verify tool registration failed', err)
     }

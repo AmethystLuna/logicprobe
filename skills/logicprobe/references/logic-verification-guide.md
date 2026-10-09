@@ -373,6 +373,36 @@ Probe: explore residency — a `tick` step that keeps the machine resident past 
 
 `references/logicprobe-engine.py` is an exact Python mirror of the DSH tools: `verify model.json` runs all 22 checks + D1-D4 with a `--before-model`/optional `--state-mapping`; `compose m1.json m2.json ... --rendezvous a,b` runs C1/C2 composition; `export model.json --format uppaal|tla|prism|spin` reproduces the four exporters byte-for-byte. It reads the same LogicModelV1 JSON as DSH, so a model verified in one host verifies identically in the other (checked by tests/python/run.mjs).
 
+#### Baseline diffs (accepting a slice)
+
+The acceptance criterion of a slice is normally "violations must not increase", which is
+a comparison, not a single run. Both hosts compute it:
+
+```bash
+# any host with Python
+python skills/logicprobe/references/logicprobe-engine.py verify model.json --baseline earlier-report.json
+# also: compose … --baseline, structure … --baseline, uml-review --baseline
+```
+
+In DSH, `logicprobe_report_diff { baseline, current }` takes the two report objects.
+
+The output is `{schema: "logicprobe/baseline/v1", verdict, verdictReason,
+currentVerdict, added[], removed[], changed[], summary, nextSteps}`:
+
+- **Identity**: `check id + code + canonical locator`, where the locator is the finding's
+  `evidence` and `path` (canonical JSON, so key order does not matter). Prose is excluded
+  — a reworded message is `changed`, not added-plus-removed. A finding with neither
+  evidence nor a path falls back to its message; an engine that reports nothing
+  structured has nothing stabler to match on.
+- **Delta verdict**: a newly added `severity: "error"` finding fails it; new warnings are
+  `pass_with_findings`; removals keep it `pass` and are listed so "fixed" is confirmed
+  rather than assumed.
+- **Absolute verdict**: `currentVerdict` echoes the current report's own verdict, and a
+  clean delta over a still-failing run adds that fact to `nextSteps`. A green delta is not
+  a green run.
+- **Self-check**: diffing a report against itself must add and remove nothing. If it does
+  not, the identity is unstable for that family — fix that before trusting the baseline.
+
 #### Report contract and exit codes
 
 Every report carries `ran`, `verdict` (`pass` / `pass_with_findings` / `fail`),

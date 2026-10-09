@@ -361,6 +361,7 @@ export const REPORT_SCHEMAS = {
   umlParse: 'logicprobe/uml/parse/v1',
   umlReview: 'logicprobe/uml/review/v1',
   structure: 'logicprobe/structure/v1',
+  baseline: 'logicprobe/baseline/v1',
 } as const
 
 export type ReportSchema = typeof REPORT_SCHEMAS[keyof typeof REPORT_SCHEMAS]

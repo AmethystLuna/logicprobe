@@ -12,6 +12,7 @@ Plugin logicprobe is active. Documents are not truth — code is. Verify every v
 - **Modelling a code flow as UML, or auditing a diagram somebody drew** → `logicprobe-uml`: render / parse / review, with render-versus-model round-trip fidelity; a component, package or class diagram is refused rather than modelled
 - **Reviewing architecture, module structure or a dependency diagram** — "are the dependencies sound", "is the layering right" → `logicprobe-structure`: parse a component/package/class/deployment diagram into a dependency graph and check isolated nodes, dangling endpoints, cycles, allowed-dependency violations, layer violations and missing required edges, each edge naming the rule it matched
 - **Entities, fields, relationships, data invariants, schema migrations** → `logicprobe-datamodel` (DS1-DS4, DA1-DA12, DD1-DD4)
+- **Accepting a slice by "violations must not increase"** → `logicprobe_report_diff`: compare the earlier report with the new one by stable finding identity; a newly added error fails the delta, and a clean delta never hides a failing run
 
 **1% Rule**: If there is even a 1% chance the skill applies to the task, invoke it before responding. The cost of loading is trivial compared to the cost of a false claim.
 

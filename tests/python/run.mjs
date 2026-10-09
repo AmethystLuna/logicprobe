@@ -693,6 +693,64 @@ check('structure mermaid class-diagram parity', () => {
   if (diffs.length) throw new Error(diffs.slice(0, 6).join(' | '))
 })
 
+// ---- baseline diff parity --------------------------------------------------
+// "Violations must not increase" must be computed the same way in both engines: the
+// stable identity, the delta verdict, the exit code, and the self-diff of zero.
+const { diffReports } = await import('../../lib/baseline.js')
+
+check('baseline self-diff parity: the same report adds nothing', () => {
+  const model = { schemaVersion: 1, init: 'A', states: [{ id: 'A' }, { id: 'B', terminal: true }], transitions: [{ from: 'A', event: 'go', to: 'B' }] }
+  const [f] = writeTmp(model)
+  const baselineRun = pythonRun(['verify', f])
+  if (!baselineRun.out) throw new Error('python returned no JSON')
+  const baselineFile = join(tmpDir, 'baseline-good.json')
+  writeFileSync(baselineFile, JSON.stringify(baselineRun.out), 'utf8')
+  const expected = diffReports(baselineRun.out, baselineRun.out)
+  const actual = pythonRun(['verify', f, '--baseline', baselineFile])
+  if (!actual.out) throw new Error('python returned no JSON')
+  const diffs = deepDiff(expected, actual.out)
+  if (diffs.length) throw new Error(diffs.slice(0, 6).join(' | '))
+  if (actual.out.verdict !== 'pass' || actual.out.summary.added !== 0 || actual.code !== 0) {
+    throw new Error('a self-baseline must add nothing and exit 0: ' + JSON.stringify(actual.out.summary))
+  }
+})
+
+check('baseline new-error parity: a new error fails the delta and exits 2', () => {
+  const good = { schemaVersion: 1, init: 'A', states: [{ id: 'A' }, { id: 'B', terminal: true }], transitions: [{ from: 'A', event: 'go', to: 'B' }] }
+  const bad = { schemaVersion: 1, init: 'A', states: [{ id: 'A' }], transitions: [] }
+  const [fg, fb] = writeTmp(good, bad)
+  const baselineRun = pythonRun(['verify', fg])
+  const baselineFile = join(tmpDir, 'baseline-new-error.json')
+  writeFileSync(baselineFile, JSON.stringify(baselineRun.out), 'utf8')
+  const currentRun = pythonRun(['verify', fb])
+  const expected = diffReports(baselineRun.out, currentRun.out)
+  const actual = pythonRun(['verify', fb, '--baseline', baselineFile])
+  if (!actual.out) throw new Error('python returned no JSON')
+  const diffs = deepDiff(expected, actual.out)
+  if (diffs.length) throw new Error(diffs.slice(0, 6).join(' | '))
+  if (actual.out.verdict !== 'fail' || actual.out.summary.addedErrors !== 1 || actual.code !== 2) {
+    throw new Error('a new error must fail the delta and exit 2: ' + JSON.stringify(actual.out))
+  }
+  if (actual.out.currentVerdict !== 'fail') throw new Error('the absolute verdict must stay visible')
+})
+
+check('baseline structure parity (a new isolated node is a new warning)', () => {
+  const diagram = ['@startuml', 'component [A] as A', 'component [B] as B', 'A --> B', '@enduml'].join('\n')
+  const withOrphan = ['@startuml', 'component [A] as A', 'component [B] as B', 'component [C] as C', 'A --> B', '@enduml'].join('\n')
+  const baselineFile = join(tmpDir, 'baseline-structure.json')
+  const baselineRun = pythonRun(['structure', writeDiagram(diagram)])
+  writeFileSync(baselineFile, JSON.stringify(baselineRun.out), 'utf8')
+  const currentRun = pythonRun(['structure', writeDiagram(withOrphan)])
+  const expected = diffReports(baselineRun.out, currentRun.out)
+  const actual = pythonRun(['structure', writeDiagram(withOrphan), '--baseline', baselineFile])
+  if (!actual.out) throw new Error('python returned no JSON')
+  const diffs = deepDiff(expected, actual.out)
+  if (diffs.length) throw new Error(diffs.slice(0, 6).join(' | '))
+  if (actual.out.verdict !== 'pass_with_findings' || actual.code !== 0) {
+    throw new Error('a new warning is pass_with_findings and exits 0: ' + actual.out.verdict)
+  }
+})
+
 rmSync(tmpDir, { recursive: true, force: true })
 if (failures > 0) { console.log('python parity failed:', failures); process.exit(1) }
 console.log('all python parity checks passed')

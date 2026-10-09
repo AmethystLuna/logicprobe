@@ -80,6 +80,7 @@ git clone https://github.com/AmethystLuna/logicprobe.git ~/.claude/plugins/dev/l
 | `logicprobe_export` | 导出外部工具原生输入：UPPAAL（`.xta` + queries）、TLA+（TLC 模块）、PRISM（DTMC `.pm` + `.pctl`）、SPIN（Promela + ltl）。 |
 | `logicprobe_uml` | 用 UML 建模代码流程，并审查这份建模。见下方「UML 建模与审查」。 |
 | `logicprobe_structure_verify` | 把组件/包/类/部署图当**依赖图**审查（UML020-UML026）：孤立节点、悬空端点、依赖环、违反允许依赖矩阵的边、跨层反向依赖、矩阵要求却缺失的边；每条被判定的边都会报出命中的规则 id。它审的是**图**，代码侧要用 include/依赖扫描对账。 |
+| `logicprobe_report_diff` | 对比两份同族报告（baseline vs current），给出新增/消除/变化的发现与**增量**判定：按 `检查 id + code + 机器可读定位（evidence/path）` 匹配，改措辞只会算作 `changed`；新增 error 判 fail，而 `currentVerdict` 仍保留本次运行的绝对结论。"违规不增"的验收判据，算出来而不是看出来的。 |
 
 迁移代价用 `cost`（缺省 1），配 `budget` 不变量即由 A12 检查最坏路径代价，正成本环会被判为无界。迁移权重用 `weight`（缺省 1），配 `probability` 不变量即由 A13 计算概率可达。状态上的 `onEntry`/`onExit` 动作由 A4 自动纳入配对检查，`maxTicks` 加 `tickEvents` 由 A14 检查期限。
 

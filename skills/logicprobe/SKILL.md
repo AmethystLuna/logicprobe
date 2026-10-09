@@ -201,6 +201,23 @@ Turn the verdict into an answer, never into a summary of `ok`:
 
 Exit codes (non-DSH CLI `references/logicprobe-engine.py`): `0` for `pass`/`pass_with_findings`, `2` for `fail`, a refusal, or an unreadable input. In DSH the native tools return the report as data — read `verdict`, and treat `errorCode`/`error` as the refusal path.
 
+### Slice Acceptance: Baseline Diffs
+
+The acceptance criterion for a refactoring slice is usually "no **new** findings", not
+"zero findings". Do not compare two JSON reports by eye — run the comparison:
+
+- DSH: `logicprobe_report_diff { baseline: <earlier report>, current: <new report> }`
+- Any host with Python: `logicprobe-engine.py verify model.json --baseline base.json`
+  (also available on `compose`, `structure` and `uml-review`)
+
+A finding's identity is its **check id + code + canonical locator** (built from
+`evidence`/`path`; the message only when a finding carries neither), so a reworded
+message reads as `changed`, never as a new finding. The diff's `verdict` describes the
+**delta** — a newly added error finding fails it — while `currentVerdict` keeps the
+absolute result visible, and a clean delta over a still-failing report says so in
+`nextSteps` rather than passing quietly. Two runs over the same input add zero findings:
+run that self-check before trusting any baseline.
+
 ### Archiving a Model: `_`-Prefixed Metadata
 
 Keep provenance with the model instead of in a sidecar that drifts:
