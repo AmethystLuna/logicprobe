@@ -1765,6 +1765,116 @@ async function runReportContractTests() {
 
 await runReportContractTests()
 
+// ---------------------------------------------------------------------------
+// Composition explainability (P1-10): shortest counterexample, per-machine
+// reasons, and the asynchronous semantics that stand in for a tempo ratio.
+// ---------------------------------------------------------------------------
+
+function compositionChecks(report) {
+  return {
+    c1: report.checks.find((check) => check.id === 'C1'),
+    c2: report.checks.find((check) => check.id === 'C2'),
+  }
+}
+
+async function runCompositionExplainTests() {
+  const stuck = { schemaVersion: 1, init: 'S', states: [{ id: 'S' }], transitions: [] }
+  const waiter = { schemaVersion: 1, init: 'W0', states: [{ id: 'W0' }, { id: 'W1', terminal: true }], transitions: [{ from: 'W0', event: 'req', to: 'W1' }] }
+  const partner = { schemaVersion: 1, init: 'P0', states: [{ id: 'P0' }, { id: 'P1', terminal: true }], transitions: [{ from: 'P0', event: 'other', to: 'P1' }] }
+
+  // C1 must say WHY nobody can advance: per machine, its state and each event's blocker.
+  const deadlock = runCompositionVerification([stuck, waiter, partner], { rendezvous: ['req'] })
+  const { c1, c2 } = compositionChecks(deadlock)
+  const finding = c1.findings.find((entry) => entry.code === 'C1_COMPOSITION_DEADLOCK')
+  if (finding === undefined) throw new Error('expected a C1 deadlock')
+  if (finding.detail === undefined || !finding.detail.includes('Shortest counterexample')) throw new Error('C1 must say the counterexample is shortest: ' + finding.detail)
+  if (finding.evidence.depth !== finding.evidence.steps.length) throw new Error('the reported depth must be the reported path length')
+  const census = finding.evidence.perMachine
+  if (census.length !== 3) throw new Error('every machine must appear in the census')
+  const waiting = census.find((machine) => machine.index === 1)
+  if (waiting.blocked[0].reason !== 'rendezvous-needs-partner') {
+    // The machine has its own transition for `req`, but a handshake needs a partner: the
+    // census must not call that "enabled".
+    throw new Error('a rendezvous without a partner is not fireable: ' + JSON.stringify(waiting.blocked))
+  }
+  if (!finding.detail.includes('rendezvous-needs-partner')) throw new Error('the detail must carry the reason')
+  if (census[0].blocked.length !== 0) throw new Error('a machine with no transitions has an empty alphabet, not blocked events')
+
+  // C2 must say WHY the handshake never happens: here, only one machine declares it.
+  const c2Finding = c2.findings.find((entry) => entry.code === 'C2_RENDEZVOUS_NEVER_FIRES')
+  if (c2Finding === undefined) throw new Error('expected a C2 finding')
+  if (!c2Finding.message.includes('needs at least two') && !c2Finding.message.includes('only 1 machine')) {
+    throw new Error('C2 must name the missing partner: ' + c2Finding.message)
+  }
+  if (c2Finding.evidence.machines.length !== 3) throw new Error('C2 must list every machine')
+
+  // C2's other branch: a declaring machine that never has the event enabled.
+  const blockedByAnother = {
+    schemaVersion: 1,
+    init: 'A0',
+    states: [{ id: 'A0' }, { id: 'A1' }, { id: 'A2', terminal: true }],
+    transitions: [{ from: 'A0', event: 'p', to: 'A1' }, { from: 'A1', event: 'req', to: 'A2' }],
+  }
+  const alsoBlocked = {
+    schemaVersion: 1,
+    init: 'B0',
+    states: [{ id: 'B0' }, { id: 'B1' }, { id: 'B2', terminal: true }],
+    transitions: [{ from: 'B0', event: 'req', to: 'B1' }, { from: 'B1', event: 'q', to: 'B2' }],
+  }
+  const blocked = runCompositionVerification([blockedByAnother, alsoBlocked], { rendezvous: ['p', 'req'] })
+  const reqFinding = blocked.checks.find((check) => check.id === 'C2').findings.find((entry) => entry.evidence.event === 'req')
+  if (reqFinding === undefined) throw new Error('expected a C2 finding for req')
+  if (!reqFinding.message.includes('never has it enabled')) throw new Error('C2 must name the machine that never enables it: ' + reqFinding.message)
+  if (!reqFinding.detail.includes('never enabled')) throw new Error('the detail must say which machine never enabled it')
+
+  // Tempo: there is no rate limit, so a machine may advance arbitrarily many times while
+  // another waits. The composite state count is the evidence: B stays at B0 while A's
+  // tick counter moves on.
+  const ticking = {
+    schemaVersion: 1,
+    init: 'A0',
+    states: [{ id: 'A0' }, { id: 'A1', terminal: true }],
+    transitions: [
+      { from: 'A0', event: 'tick', to: 'A0', updates: [{ variable: 'k', op: 'inc' }] },
+      { from: 'A0', event: 'sync', to: 'A1' },
+    ],
+    variables: [{ name: 'k', kind: 'integer', init: 0 }],
+  }
+  const slowMachine = {
+    schemaVersion: 1,
+    init: 'B0',
+    states: [{ id: 'B0' }, { id: 'B1', terminal: true }],
+    transitions: [{ from: 'B0', event: 'sync', to: 'B1' }],
+  }
+
+  // Absence of a deadlock is not proof when the search was cut short.
+  const truncatedC1 = runCompositionVerification([ticking, slowMachine], { rendezvous: ['sync'], maxStates: 2 })
+  if (truncatedC1.summary.truncated !== true) throw new Error('the cap must be reported')
+  if (!truncatedC1.checks.find((check) => check.id === 'C1').detail.includes('truncated')) {
+    throw new Error('a truncated search must not claim "no deadlock reachable": ' + truncatedC1.checks.find((check) => check.id === 'C1').detail)
+  }
+  const truncatedC2 = runCompositionVerification([stuck, waiter, partner], { rendezvous: ['req'], maxStates: 1 })
+  if (truncatedC2.summary.truncated !== true) throw new Error('the cap must be reported for the C2 case too')
+  const caveated = truncatedC2.checks.find((check) => check.id === 'C2').findings
+  if (caveated.length === 0 || !caveated.every((entry) => entry.message.includes('artefact of the cap'))) {
+    throw new Error('a truncated search must caveat its C2 findings: ' + JSON.stringify(caveated.map((entry) => entry.message)))
+  }
+
+  const overtaken = runCompositionVerification([ticking, slowMachine], { rendezvous: ['sync'], maxStates: 500 })
+  // The counter is unbounded, so the composite space is infinite and the cap bites: that
+  // is itself the evidence that A ticked hundreds of times while B never moved off B0.
+  if (overtaken.summary.truncated !== true) throw new Error('an unbounded counter must be reported as truncated')
+  if (overtaken.summary.compositeStates < 100) {
+    throw new Error('a waiting machine must be overtakeable: only ' + overtaken.summary.compositeStates + ' composite state(s) explored')
+  }
+  const overtakenC2 = overtaken.checks.find((check) => check.id === 'C2')
+  if (overtakenC2.findings.length !== 0) throw new Error('sync does fire: ' + JSON.stringify(overtakenC2.findings.map((entry) => entry.message)))
+
+  console.log('PASS composition-explain')
+}
+
+await runCompositionExplainTests()
+
 if (failures > 0) {
   console.log('engine fixtures failed:', failures)
   process.exit(1)

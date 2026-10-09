@@ -3008,7 +3008,11 @@ def run_verification(input_value, options=None):
 def run_composition_verification(machines_input, options=None):
     if options is None:
         options = {}
-    rendezvous_set = set(options.get('rendezvous') or [])
+    # `rendezvous_order` keeps the caller's order for report iteration; the set is only
+    # for membership tests (a Python set's iteration order is hash-based, and the C2
+    # findings must come out in the same sequence as the TypeScript engine's).
+    rendezvous_order = list(dict.fromkeys(options.get('rendezvous') or []))
+    rendezvous_set = set(rendezvous_order)
     max_states = options.get('maxStates', DEFAULT_MAX_STATES)
     hash_spec = options.get('hashSpec', DEFAULT_HASH_SPEC)
     models = []
@@ -3090,8 +3094,16 @@ def run_composition_verification(machines_input, options=None):
     composite_states = 0
     truncated = False
     fired_count = {}
+    # Per-machine enablement, collected while the state space is explored: a rendezvous
+    # that never fires must say *which* machine never had it enabled.
+    ever_enabled = {}
+    enabled_states = {}
+    co_enabled_nodes = {}
     for event in rendezvous_set:
         fired_count[event] = 0
+        ever_enabled[event] = set()
+        enabled_states[event] = [[] for _ in models]
+        co_enabled_nodes[event] = 0
     c1_findings = []
     while queue:
         node = queue.popleft()
@@ -3105,12 +3117,66 @@ def run_composition_verification(machines_input, options=None):
             break
         moves = composition_moves(node)
         all_terminal = all(_is_terminal(models[i], r['state']) for i, r in enumerate(node['runtimes']))
+        # Enablement census for C2: which machines could fire each rendezvous here.
+        for event in rendezvous_set:
+            declaring = [i for i in range(len(models)) if event in machine_event_sets[i]]
+            if not declaring:
+                continue
+            all_enabled = len(declaring) >= 2
+            for i in declaring:
+                enabled = (not _is_terminal(models[i], node['runtimes'][i]['state'])
+                           and len(_step_runtime(models[i], node['runtimes'][i], event)) > 0)
+                if not enabled:
+                    all_enabled = False
+                    continue
+                ever_enabled[event].add(i)
+                states = enabled_states[event][i]
+                if node['runtimes'][i]['state'] not in states and len(states) < 8:
+                    states.append(node['runtimes'][i]['state'])
+            if all_enabled:
+                co_enabled_nodes[event] = co_enabled_nodes.get(event, 0) + 1
         if not moves and not all_terminal:
+            # Why nobody can advance, per machine: its state, its alphabet, and for every
+            # event either the rendezvous partner that is not ready or the transition that
+            # does not fire.
+            per_machine = []
+            for i, runtime in enumerate(node['runtimes']):
+                terminal = _is_terminal(models[i], runtime['state'])
+                blocked = []
+                if not terminal:
+                    for event in _all_events(models[i]):
+                        enabled = len(_step_runtime(models[i], runtime, event)) > 0
+                        # A rendezvous event is not fireable just because this machine has a
+                        # transition: it needs every declaring machine enabled at once.
+                        if event not in rendezvous_set:
+                            blocked.append({'event': event, 'reason': 'enabled' if enabled else 'no-enabled-transition'})
+                            continue
+                        declaring = [j for j in range(len(models)) if event in machine_event_sets[j]]
+                        if len(declaring) < 2:
+                            blocked.append({'event': event, 'reason': 'rendezvous-needs-partner'})
+                            continue
+                        partners_ready = all(not _is_terminal(models[j], node['runtimes'][j]['state'])
+                                             and len(_step_runtime(models[j], node['runtimes'][j], event)) > 0
+                                             for j in declaring)
+                        if not partners_ready:
+                            blocked.append({'event': event, 'reason': 'rendezvous-partner-not-ready'})
+                            continue
+                        blocked.append({'event': event, 'reason': 'enabled' if enabled else 'no-enabled-transition'})
+                per_machine.append({'index': i, 'state': runtime['state'], 'terminal': terminal, 'blocked': blocked})
+            reasons = []
+            for machine in per_machine:
+                if machine['terminal']:
+                    continue
+                detail = ('empty event alphabet' if not machine['blocked']
+                          else ', '.join(entry['event'] + ' (' + entry['reason'] + ')' for entry in machine['blocked']))
+                reasons.append('machine ' + str(machine['index']) + ' at ' + machine['state'] + ': ' + detail)
             c1_findings.append({
                 'code': 'C1_COMPOSITION_DEADLOCK',
                 'severity': 'error',
                 'message': 'Composition deadlock: no machine can advance from (' + ', '.join(r['state'] for r in node['runtimes']) + ') while at least one is not terminal.',
-                'evidence': {'steps': node['path'], 'states': [r['state'] for r in node['runtimes']]},
+                'detail': 'Shortest counterexample (breadth-first): ' + str(len(node['path'])) + ' step(s) to reach it. ' + ' | '.join(reasons),
+                'evidence': {'steps': node['path'], 'states': [r['state'] for r in node['runtimes']],
+                             'depth': len(node['path']), 'perMachine': per_machine, 'reasons': reasons},
             })
             continue
         for move in moves:
@@ -3125,22 +3191,59 @@ def run_composition_verification(machines_input, options=None):
     all_events_set = set()
     for s in machine_event_sets:
         all_events_set.update(s)
-    for event in rendezvous_set:
+    # Iterate the caller's order, not a set's hash order: the C2 findings are part of the
+    # report contract, so two engines must list them in the same sequence.
+    for event in rendezvous_order:
         if event not in all_events_set:
             continue
         if fired_count.get(event, 0) == 0:
+            machines = [{'index': index, 'declares': event in machine_event_sets[index],
+                         'everEnabled': index in ever_enabled[event],
+                         'enabledAt': enabled_states[event][index]}
+                        for index in range(len(models))]
+            declaring = [machine for machine in machines if machine['declares']]
+            never_enabled = [machine for machine in declaring if not machine['everEnabled']]
+            co_enabled = co_enabled_nodes.get(event, 0)
+            if len(declaring) < 2:
+                reason = ('only ' + str(len(declaring)) + ' machine(s) declare it (machine '
+                          + ', '.join(str(machine['index']) for machine in declaring) + '); a handshake needs at least two')
+            elif never_enabled:
+                reason = ('machine ' + ', '.join(str(machine['index']) for machine in never_enabled)
+                          + ' declares it but never has it enabled (no transition, or the guard never holds)')
+            else:
+                reason = ('every declaring machine enables it somewhere, but never at the same time ('
+                          + str(co_enabled) + ' composite state(s) had all of them ready)')
+            # A truncated exploration cannot prove that a handshake never happens.
+            caveat = (' The search was truncated at ' + str(max_states) + ' composite states, so this may be an artefact of the cap rather than a property of the model.'
+                      if truncated else '')
             c2_findings.append({
                 'code': 'C2_RENDEZVOUS_NEVER_FIRES',
                 'severity': 'warning',
-                'message': 'Rendezvous event ' + event + ' can never fire: fewer than two machines ever jointly enable it.',
+                'message': 'Rendezvous event ' + event + ' can never fire: ' + reason + '.' + caveat,
+                'detail': ' | '.join('machine ' + str(machine['index']) + (' declares' if machine['declares'] else ' does not declare')
+                                     + (', enabled at ' + ('/'.join(machine['enabledAt']) if machine['enabledAt'] else 'no visited state')
+                                        if machine['everEnabled'] else ', never enabled') for machine in machines),
+                'evidence': {'event': event, 'machines': machines, 'declaring': [machine['index'] for machine in declaring],
+                             'coEnabledNodes': co_enabled, 'reason': reason, 'truncated': truncated},
             })
     errors = len(c1_findings)
     warnings = len(c2_findings)
+    if c1_findings:
+        c1_detail = 'Composition deadlocks: ' + str(len(c1_findings))
+    elif truncated:
+        c1_detail = ('No composition deadlock found, but the search was truncated at ' + str(max_states)
+                     + ' composite states: absence is not proven')
+    else:
+        c1_detail = 'No composition deadlock reachable'
+    if c2_findings:
+        c2_detail = 'Rendezvous warnings: ' + str(len(c2_findings))
+    elif truncated:
+        c2_detail = ('All rendezvous events fired, but the search was truncated at ' + str(max_states) + ' composite states')
+    else:
+        c2_detail = 'All rendezvous events can fire'
     checks = [
-        _check_result('C1', 'Composition Deadlock', c1_findings,
-                      'No composition deadlock reachable' if not c1_findings else 'Composition deadlocks: ' + str(len(c1_findings))),
-        _check_result('C2', 'Rendezvous Sync', c2_findings,
-                      'All rendezvous events can fire' if not c2_findings else 'Rendezvous warnings: ' + str(len(c2_findings))),
+        _check_result('C1', 'Composition Deadlock', c1_findings, c1_detail),
+        _check_result('C2', 'Rendezvous Sync', c2_findings, c2_detail),
     ]
     next_steps = []
     if errors > 0:

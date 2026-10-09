@@ -122,9 +122,10 @@ for (const f of readdirSync(fixturesRoot).filter((n) => n.endsWith('.json')).sor
 }
 
 // ---- composition + regression + invalid parity ----
-function pythonCompose(files, rendezvous) {
+function pythonCompose(files, rendezvous, maxStates) {
   const args = ['compose', ...files]
   if (rendezvous) args.push('--rendezvous', rendezvous)
+  if (maxStates) args.push('--max-states', String(maxStates))
   return pythonRun(args)
 }
 
@@ -749,6 +750,41 @@ check('baseline structure parity (a new isolated node is a new warning)', () => 
   if (actual.out.verdict !== 'pass_with_findings' || actual.code !== 0) {
     throw new Error('a new warning is pass_with_findings and exits 0: ' + actual.out.verdict)
   }
+})
+
+// Composition explainability must match too: the per-machine deadlock census, the
+// rendezvous reason and the truncation caveat are part of the report contract.
+check('compose C1 per-machine census parity', () => {
+  const stuck = { schemaVersion: 1, init: 'S', states: [{ id: 'S' }], transitions: [] }
+  const waiter = { schemaVersion: 1, init: 'W0', states: [{ id: 'W0' }, { id: 'W1', terminal: true }], transitions: [{ from: 'W0', event: 'req', to: 'W1' }] }
+  const partner = { schemaVersion: 1, init: 'P0', states: [{ id: 'P0' }, { id: 'P1', terminal: true }], transitions: [{ from: 'P0', event: 'other', to: 'P1' }] }
+  const [fs, fw, fp] = writeTmp(stuck, waiter, partner)
+  const expected = runCompositionVerification([stuck, waiter, partner], { rendezvous: ['req'] })
+  const actual = pythonCompose([fs, fw, fp], 'req')
+  if (!actual.out) throw new Error('python returned no JSON')
+  const diffs = deepDiff(expected, actual.out)
+  if (diffs.length) throw new Error(diffs.slice(0, 6).join(' | '))
+  const c1 = actual.out.checks.find((check) => check.id === 'C1').findings[0]
+  if (!c1.detail.includes('rendezvous-needs-partner')) throw new Error('python must name the reason: ' + c1.detail)
+  if (c1.evidence.perMachine.length !== 3) throw new Error('python must census every machine')
+})
+
+check('compose C2 reason + truncation caveat parity', () => {
+  // Same shape as the engine fixture: one machine with no transitions, one that declares
+  // the handshake alone, one that walks away — and a cap small enough to truncate.
+  const stuck = { schemaVersion: 1, init: 'S', states: [{ id: 'S' }], transitions: [] }
+  const waiter = { schemaVersion: 1, init: 'W0', states: [{ id: 'W0' }, { id: 'W1', terminal: true }], transitions: [{ from: 'W0', event: 'req', to: 'W1' }] }
+  const partner = { schemaVersion: 1, init: 'P0', states: [{ id: 'P0' }, { id: 'P1', terminal: true }], transitions: [{ from: 'P0', event: 'other', to: 'P1' }] }
+  const [fs, fw, fp] = writeTmp(stuck, waiter, partner)
+  const expected = runCompositionVerification([stuck, waiter, partner], { rendezvous: ['req'], maxStates: 1 })
+  const actual = pythonCompose([fs, fw, fp], 'req', 1)
+  if (!actual.out) throw new Error('python returned no JSON')
+  const diffs = deepDiff(expected, actual.out)
+  if (diffs.length) throw new Error(diffs.slice(0, 6).join(' | '))
+  if (actual.out.summary.truncated !== true) throw new Error('python must report the cap')
+  const req = actual.out.checks.find((check) => check.id === 'C2').findings.find((finding) => finding.evidence.event === 'req')
+  if (req === undefined) throw new Error('python must report the req handshake')
+  if (!req.message.includes('artefact of the cap')) throw new Error('python must caveat a truncated result: ' + req.message)
 })
 
 rmSync(tmpDir, { recursive: true, force: true })

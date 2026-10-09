@@ -312,10 +312,19 @@ Actions never change state or variables. Checks that care about resource discipl
 Two or more machines can be checked together with `runCompositionVerification` (DSH tool `logicprobe_compose_verify`):
 
 - non-rendezvous events advance exactly one firing machine;
-- a rendezvous (handshake) event fires only when at least two machines declare it and every such non-terminal machine has it jointly enabled (guards held); participants advance simultaneously;
-- a terminal machine is stopped and does not participate.
+- a rendezvous (handshake) event fires only when at least two machines declare it **and** every such non-terminal machine has it jointly enabled (guards held); participants advance simultaneously. A machine whose alphabet does not contain the event does not participate, and a terminal machine is stopped;
+- therefore a machine that is *waiting* for a rendezvous is not blocked from everything else: it may take any number of its own non-rendezvous steps first. That is how different rates are modelled — there is **no rate ratio** and no fairness bound, so "the 1 ms pump runs N times while the ISR waits" is expressed by the pump's own tick event, not by a tempo setting. A bound would only prune interleavings, never add behaviour; if you need to *forbid* a fast machine from overtaking, encode that in the model (a guard on a counter the slow machine resets), not in the composition options.
 
-Checks: `C1_COMPOSITION_DEADLOCK` (a reachable composite state with no move while at least one machine is not terminal) and `C2_RENDEZVOUS_NEVER_FIRES`. This is a product-space BFS, so composite state count is the product of the machines; keep `maxStates` in mind.
+Inputs: the DSH tool takes an array of model objects (an agent reads the files and passes them); the CLI takes any number of files directly — `compose models/*.json --rendezvous req,ack` — so nothing has to be concatenated by hand.
+
+### Reading C1 and C2
+
+Both findings carry the *why*, not just the *what*:
+
+- **C1_COMPOSITION_DEADLOCK** — the composite state, the number of steps to reach it (**shortest**, because the search is breadth-first), and `evidence.perMachine`: for every machine, its state, whether it is terminal, and every event in its alphabet with a reason — `rendezvous-needs-partner` (fewer than two machines declare it), `rendezvous-partner-not-ready` (a declaring partner is terminal or has no enabled transition), `no-enabled-transition` (guard false or no such transition), or `enabled`. An event this machine can fire on its own is never labelled `enabled` when the handshake itself is missing.
+- **C2_RENDEZVOUS_NEVER_FIRES** — `evidence.machines` gives, per machine, whether it declares the event, whether it ever had it enabled, and the states where it did. The reason distinguishes "fewer than two machines declare it" from "machine *i* declares it but never enables it".
+
+`maxStates` caps the product space, and the cap is **reported, never hidden**: a truncated run cannot claim "no deadlock reachable" (the C1 check detail says so), and a C2 finding gained under truncation carries "may be an artefact of the cap" in its message. Bump `maxStates` before believing a negative result on a large product. Note that a machine with an unbounded counter produces an infinite composite space and will always truncate.
 
 ## Minimal example
 

@@ -179,6 +179,8 @@ export interface Finding {
     code: string;
     severity: 'error' | 'warning';
     message: string;
+    /** Longer explanation: the shortest-path note, the per-machine reasons, the quoted source lines. */
+    detail?: string;
     path?: PathStep[];
     evidence?: Record<string, unknown>;
 }
