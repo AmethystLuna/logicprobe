@@ -81,6 +81,7 @@ The tools:
 | `logicprobe_compose_verify` | Composition verification of two or more machines (rendezvous handshake semantics): C1 composition deadlock, C2 rendezvous never fires. |
 | `logicprobe_export` | Exports external-tool input: UPPAAL (`.xta` + queries), TLA+ (TLC module), PRISM (DTMC `.pm` + `.pctl`), SPIN (Promela + ltl). |
 | `logicprobe_uml` | Models a code flow as UML and reviews the modelling. See "UML modelling and review" below. |
+| `logicprobe_structure_verify` | Audits a component/package/class/deployment diagram as a **dependency graph** (UML020-UML026): isolated nodes, dangling endpoints, dependency cycles, edges that violate an allowed-dependency matrix, upward cross-layer edges, and required edges the diagram is missing — every judged edge names the rule ids it matched. It audits the diagram; reconcile it with a source-side include scan. |
 
 Transition `cost` (default 1) plus a `budget` invariant makes A12 check the worst-case path cost. A reachable cycle with positive cost counts as unbounded. Transition `weight` (default 1) plus a `probability` invariant makes A13 compute probability reachability. State `onEntry`/`onExit` actions enter A4 pair symmetry automatically, and `maxTicks` plus `tickEvents` drive the A14 deadline check.
 
@@ -140,17 +141,49 @@ Fidelity is the core of the feature. Generated diagrams carry `logicprobe:` comm
 
 The review covers the modelling, never the behaviour. Every finding names the engine check that settles the behavioural half. The verdict — not `ok` — says whether the review passed: `fail` means error findings exist and the diagram did **not** pass. The full list (`UML001`-`UML019` plus `UML_NOT_A_STATE_DIAGRAM`), the directive format, a worked example and the limits of each view are in [`skills/logicprobe/references/uml-modeling-guide.md`](skills/logicprobe/references/uml-modeling-guide.md).
 
+## Architecture and Dependency Review
+
+A component diagram is not a state machine; it is a directed **dependency graph**. `logicprobe_structure_verify` parses the same PlantUML component/package/class/deployment text (or a Mermaid class diagram) into real nodes and edges — nothing is discarded — and checks it:
+
+| Check | Severity | Meaning |
+|---|---|---|
+| `UML020_ISOLATED_NODE` | warning | A declared, non-container node with no edge: a dead entry, or a dependency the diagram forgot |
+| `UML021_DANGLING_REFERENCE` | error | An arrow endpoint never declared — a dependency on a component that does not exist |
+| `UML022_CYCLE` | error | A directed cycle, reported as the **shortest** cycle path; a cycle means no build order and no layering |
+| `UML023_DISALLOWED_EDGE` | error | An edge that violates the allowed-dependency matrix (with `default: deny`, any edge no rule permits) |
+| `UML024_LAYER_VIOLATION` | error | An upward edge between declared layers (downward is allowed, upward is not) |
+| `UML025_MISSING_EXPECTED_EDGE` | warning | A `require: true` edge the diagram does not draw: the matrix and the diagram disagree |
+
+The dependency matrix is the single source of truth:
+
+```json
+{
+  "rules": [
+    { "id": "R1-app-may-use-hal", "source": "app.*", "allow": ["hal.*"], "deny": ["hal.at32_internal"] },
+    { "id": "R4-persistence-required", "source": "LA", "allow": ["DB"], "require": true }
+  ],
+  "layers": [{ "name": "app", "members": ["MS", "LA"] }, { "name": "hal", "members": ["DRV", "DB"] }],
+  "default": "deny"
+}
+```
+
+`source`, `allow`, `deny` and `members` accept globs (`*`, `?`); **`deny` wins globally**, so the result never depends on rule order; an invalid matrix (typo'd key, duplicate rule id, `require` without `allow`) is a hard `MATRIX_INVALID` error rather than a silently weaker check. Every edge is echoed in `edgeVerdicts` as `{from, to, matchedRules, allowed, basis}`.
+
+**It audits the diagram, not the code.** Function pointers, DI, registries and plugin loading never appear as edges; a clean `pass` only means the drawn graph is self-consistent and satisfies the matrix. The step that touches the source is the **reconciliation**: run a source-side include/dependency scan (your own `arch_check.py`, for instance) with the same rule ids and classify every difference — the diagram is stale (`UML025` when the rule is `require: true`), the diagram is aspirational or the scan scope is narrower, the code violates a rule the diagram never showed (**the architecture defect the diagram hid** — the one worth acting on), or both agree it is a violation. The full matrix schema, a worked example and the reconciliation table are in [`skills/logicprobe-structure/references/structure-review-guide.md`](skills/logicprobe-structure/references/structure-review-guide.md).
+
 ## Usage
 
-The plugin injects a capability notification into the first model step. The skill activates when its `Use when` description matches your task:
+The plugin injects a capability notification into the first model step. There is **one skill per domain** — four in total. `logicprobe` is the entry point: load it whenever you have any thought of checking whether something about the code is true, and its routing table hands a neighbouring domain on.
 
-- **Design doc or plan review** — "Review this design document" → claim enumeration and codebase verification
-- **Behavioral questions** — "could this state machine deadlock", "is this retry limit safe" → the skill is proactively suggested (not auto-loaded) as an optional verification pass
-- **Refactoring plans** — the pipeline compares before/after models and flags undocumented behavioral changes
-- **Data model or migration review** — "is this migration non-breaking" → use the `logicprobe-datamodel` skill
-- **Code-flow modelling** — "draw this state machine", "is this UML diagram right" → use `logicprobe_uml` to draw the diagram and review the modelling, then run `logicprobe_verify` for the behaviour
+| Skill | Domain | Typical trigger |
+|---|---|---|
+| `logicprobe` | Claim verification plus behavioural verification (state machines and protocols, timing and quantitative guarantees, composition, refactoring regression) | "Review this design document", "could this state machine deadlock", "is this retry limit safe", "is this budget enough" |
+| `logicprobe-uml` | Diagram modelling and diagram review | "draw this state machine", "is this UML diagram right", "can this component diagram be reviewed as a state machine" |
+| `logicprobe-structure` | Architecture and dependency-structure review | "review this architecture", "are the module dependencies sound", "is the layering right" |
+| `logicprobe-concurrency` | Concurrency claims: mined and routed, never proven | "is this thread-safe", "can this ISR race" |
+| `logicprobe-datamodel` | Data models, migrations and data invariants | "is this migration non-breaking", "does this copy cover every field" |
 
-The skill classifies depth (LIGHTWEIGHT / STANDARD / ESCALATED) from plan features in Phase 0, and appends a `## Plan Verification` summary block as the audit trail.
+Behavioural questions still follow the suggest-don't-escalate rule: offer an optional verification pass and let the user decide. The skill classifies depth (LIGHTWEIGHT / STANDARD / ESCALATED) from plan features in Phase 0, and appends a `## Plan Verification` summary block as the audit trail.
 
 Python is optional. When a LogicModelV1 JSON already exists, run the standalone engine at `skills/logicprobe/references/logicprobe-engine.py`:
 

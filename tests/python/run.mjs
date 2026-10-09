@@ -604,6 +604,95 @@ check('another Mermaid family refusal parity', () => {
   if (message !== actual.out.error) throw new Error('refusal message differs: TS "' + message + '" vs python ' + JSON.stringify(actual.out.error))
 })
 
+// ---- structure-diagram review parity ---------------------------------------
+// A component diagram is a dependency graph: the parser, the six checks and the
+// matrix semantics must be identical in both engines, including the exit code.
+const { parseStructure, reviewStructure } = await import('../../lib/structure.js')
+
+const structurePuml = [
+  '@startuml',
+  'package "app" {',
+  '  component [Motion Service] as MS',
+  '  component [Locator Adapter] as LA',
+  '}',
+  'package "hal" {',
+  '  component [AT32 Driver] as DRV',
+  '}',
+  'component [Orphan Cache] as CACHE',
+  'component [Persistence] as DB',
+  'MS --> LA : plan',
+  'LA --> DRV : read',
+  'DRV --> MS : fault',
+  'MS --> GHOST : unknown',
+  'LA --> DB : store',
+  '@enduml',
+].join('\n')
+
+const structureMatrix = {
+  rules: [
+    { id: 'R1-app-may-use-hal', source: 'MS', allow: ['LA'], deny: ['DRV'] },
+    { id: 'R2-adapter-owns-hal', source: 'LA', allow: ['DRV'], deny: ['MS'] },
+    { id: 'R3-no-back-edges', source: '*', deny: ['MS'] },
+    { id: 'R4-persistence-required', source: 'LA', allow: ['DB'], require: true },
+    { id: 'R5-ghost-required', source: 'MS', allow: ['NOPE'], require: true },
+  ],
+  layers: [{ name: 'app', members: ['MS', 'LA'] }, { name: 'hal', members: ['DRV'] }],
+  default: 'deny',
+}
+
+check('structure parse parity', () => {
+  const expected = parseStructure(structurePuml)
+  const actual = pythonRun(['structure', writeDiagram(structurePuml)])
+  if (!actual.out) throw new Error('python returned no JSON')
+  const diffs = deepDiff(expected, actual.out.graph)
+  if (diffs.length) throw new Error(diffs.slice(0, 6).join(' | '))
+})
+
+check('structure review parity without a matrix', () => {
+  const expected = reviewStructure({ diagram: structurePuml })
+  const actual = pythonRun(['structure', writeDiagram(structurePuml)])
+  if (!actual.out) throw new Error('python returned no JSON')
+  const diffs = deepDiff(expected, actual.out)
+  if (diffs.length) throw new Error(diffs.slice(0, 6).join(' | '))
+  if (actual.code !== 2) throw new Error('a structural error must exit 2, got ' + actual.code)
+})
+
+check('structure review parity with a matrix (rules, layers, deny, required edges)', () => {
+  const [matrixFile] = writeTmp(structureMatrix)
+  const expected = reviewStructure({ diagram: structurePuml, matrix: structureMatrix })
+  const actual = pythonRun(['structure', writeDiagram(structurePuml), '--matrix', matrixFile])
+  if (!actual.out) throw new Error('python returned no JSON')
+  const diffs = deepDiff(expected, actual.out)
+  if (diffs.length) throw new Error(diffs.slice(0, 6).join(' | '))
+  if (actual.out.verdict !== 'fail' || actual.code !== 2) throw new Error('expected verdict fail and exit 2')
+  if (actual.out.summary.disallowedEdges !== expected.summary.disallowedEdges) throw new Error('disallowedEdges differ')
+  if (actual.out.summary.missingExpectedEdges !== 1) throw new Error('the unsatisfiable required rule must be reported')
+})
+
+check('structure matrix-invalid parity', () => {
+  const [matrixFile] = writeTmp({ rules: [{ id: 'R', sorce: 'A' }] })
+  const expected = reviewStructure({ diagram: structurePuml, matrix: { rules: [{ id: 'R', sorce: 'A' }] } })
+  const actual = pythonRun(['structure', writeDiagram(structurePuml), '--matrix', matrixFile])
+  if (!actual.out) throw new Error('python returned no JSON')
+  const diffs = deepDiff(expected, actual.out)
+  if (diffs.length) throw new Error(diffs.slice(0, 6).join(' | '))
+  // The structural findings come first; MATRIX_INVALID must be among them, and no rule
+  // may have been applied.
+  if (!actual.out.findings.some((finding) => finding.code === 'MATRIX_INVALID')) {
+    throw new Error('expected MATRIX_INVALID in ' + JSON.stringify(actual.out.findings.map((finding) => finding.code)))
+  }
+  if (actual.out.edgeVerdicts.some((verdict) => verdict.basis !== 'default')) throw new Error('an invalid matrix must apply no rule')
+})
+
+check('structure mermaid class-diagram parity', () => {
+  const text = ['classDiagram', '  class MotionService', '  class LocatorAdapter', '  MotionService --> LocatorAdapter : uses'].join('\n')
+  const expected = reviewStructure({ diagram: text })
+  const actual = pythonRun(['structure', writeDiagram(text)])
+  if (!actual.out) throw new Error('python returned no JSON')
+  const diffs = deepDiff(expected, actual.out)
+  if (diffs.length) throw new Error(diffs.slice(0, 6).join(' | '))
+})
+
 rmSync(tmpDir, { recursive: true, force: true })
 if (failures > 0) { console.log('python parity failed:', failures); process.exit(1) }
 console.log('all python parity checks passed')

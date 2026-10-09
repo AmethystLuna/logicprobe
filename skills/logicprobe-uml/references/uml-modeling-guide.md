@@ -28,7 +28,7 @@ One machine, three projections. They are not interchangeable. The review reports
 
 ## Modelling a code flow from source
 
-Extraction follows the same discipline as `logic-verification-guide.md`, applied to code instead of a plan.
+Extraction follows the same discipline as `logic-verification-guide.md`, applied to code instead of a plan. That guide ships with the entry-point skill: `../logicprobe/references/logic-verification-guide.md`.
 
 1. **Fix the boundary.** Decide which function, task, or module is the machine. In scope: state the code holds across calls, such as statics, fields, enums, and task state variables. Out of scope: the call stack inside one invocation, hardware behaviour, and scheduler preemption.
 2. **Name the states from the code.** A state exists if something survives a call boundary and is tested later. An enum, a `state` field, or a task-local variable that gates the next entry all qualify. A local variable inside one function does not.
@@ -183,9 +183,13 @@ different reason (a trace cannot reconstruct a machine).
 Both routes are non-pass and both name what was discarded. What the tool will **not**
 do is hand back a plausible model with no verdict — that is the false guarantee.
 
-Structural checks over a genuine dependency graph (allowed-edge matrices, cycles,
-isolated nodes) are **not** implemented; the codes `UML020`+ are reserved for them, and
-until they exist a component diagram must be audited by other means.
+**A structure diagram has its own reviewer.** Dependency-graph checks — isolated
+nodes (`UML020`), dangling endpoints (`UML021`), cycles (`UML022`), disallowed edges
+and layer violations against an allowed-dependency matrix (`UML023`, `UML024`) and
+required-but-absent edges (`UML025`) — are implemented by the `logicprobe-structure`
+skill and the `logicprobe_structure_verify` tool, which parse the same component,
+package, class and deployment text into a real node/edge graph instead of discarding
+it. Use that for architecture questions; this guide is about the state-machine half.
 
 ### What the round trip proves
 

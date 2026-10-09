@@ -79,6 +79,7 @@ git clone https://github.com/AmethystLuna/logicprobe.git ~/.claude/plugins/dev/l
 | `logicprobe_compose_verify` | 两台及以上状态机组合验证（握手 rendezvous 语义）：C1 组合死锁、C2 握手永不触发。 |
 | `logicprobe_export` | 导出外部工具原生输入：UPPAAL（`.xta` + queries）、TLA+（TLC 模块）、PRISM（DTMC `.pm` + `.pctl`）、SPIN（Promela + ltl）。 |
 | `logicprobe_uml` | 用 UML 建模代码流程，并审查这份建模。见下方「UML 建模与审查」。 |
+| `logicprobe_structure_verify` | 把组件/包/类/部署图当**依赖图**审查（UML020-UML026）：孤立节点、悬空端点、依赖环、违反允许依赖矩阵的边、跨层反向依赖、矩阵要求却缺失的边；每条被判定的边都会报出命中的规则 id。它审的是**图**，代码侧要用 include/依赖扫描对账。 |
 
 迁移代价用 `cost`（缺省 1），配 `budget` 不变量即由 A12 检查最坏路径代价，正成本环会被判为无界。迁移权重用 `weight`（缺省 1），配 `probability` 不变量即由 A13 计算概率可达。状态上的 `onEntry`/`onExit` 动作由 A4 自动纳入配对检查，`maxTicks` 加 `tickEvents` 由 A14 检查期限。
 
@@ -138,17 +139,49 @@ pnpm 会把该版本写进 profile 的 `pnpm-workspace.yaml` 的 `minimumRelease
 
 审查只覆盖建模，不覆盖行为。每条发现都会指明应该跑哪一项引擎检查。判据是 `verdict`（`fail` 表示有 error 级发现，图**未**通过审查），不是 `ok`。完整清单（`UML001`-`UML019` 加 `UML_NOT_A_STATE_DIAGRAM`）、指令格式、示例与各视图局限见 [`skills/logicprobe/references/uml-modeling-guide.md`](skills/logicprobe/references/uml-modeling-guide.md)。
 
+## 架构与依赖审查
+
+组件图不是状态机，它是一张**有向依赖图**。`logicprobe_structure_verify` 把同一份 PlantUML 组件/包/类/部署图（或 Mermaid 类图）解析成真正的节点与边——不再丢弃——然后逐项检查：
+
+| 检查 | 严重度 | 含义 |
+|---|---|---|
+| `UML020_ISOLATED_NODE` | warning | 已声明且非容器的节点一条边都没有：死条目，或漏画的依赖 |
+| `UML021_DANGLING_REFERENCE` | error | 箭头端点从未被声明——依赖指向了根本不存在的组件 |
+| `UML022_CYCLE` | error | 有向环，给出**最短环**路径；环意味着没有构建顺序、没有分层 |
+| `UML023_DISALLOWED_EDGE` | error | 违反允许依赖矩阵的边（`default: deny` 时未被任何规则允许的边也算） |
+| `UML024_LAYER_VIOLATION` | error | 从下层指向已声明上层的反向依赖（向下允许、向上禁止） |
+| `UML025_MISSING_EXPECTED_EDGE` | warning | `require: true` 要求存在的边图里没有；矩阵与图不一致 |
+
+依赖矩阵就是单一事实源，JSON 形式：
+
+```json
+{
+  "rules": [
+    { "id": "R1-app-may-use-hal", "source": "app.*", "allow": ["hal.*"], "deny": ["hal.at32_internal"] },
+    { "id": "R4-persistence-required", "source": "LA", "allow": ["DB"], "require": true }
+  ],
+  "layers": [{ "name": "app", "members": ["MS", "LA"] }, { "name": "hal", "members": ["DRV", "DB"] }],
+  "default": "deny"
+}
+```
+
+`source`/`allow`/`deny`/`members` 支持 glob（`*`、`?`）；**`deny` 全局优先**，结果不依赖规则书写顺序；矩阵写错（键名拼错、规则 id 重复、`require` 没有 `allow`）是硬错误 `MATRIX_INVALID`，不会静默放宽检查。每条边都会在 `edgeVerdicts` 里回显 `{from, to, matchedRules, allowed, basis}`。
+
+**它审的是图，不是代码。** 函数指针、DI、注册表、插件加载这些运行期依赖不会出现在边上；干净的 `pass` 只说明"画出来的图自洽且满足矩阵"。真正碰代码的那一步是**对账**：与源码侧的 include/依赖扫描（例如你们自己的 `arch_check.py`）用同一套规则 id 跑一遍，差异按四类定性——图漏了代码里有的边（图过期，`require` 时由 `UML025` 报出）、图画了代码里没有的边（图是愿景，或扫描范围更窄）、代码违反了图里没画出的规则（**图掩盖的架构缺陷**，这条才是要动手的）、两边一致判违规（真违规）。完整矩阵 schema、worked example 与对账表见 [`skills/logicprobe-structure/references/structure-review-guide.md`](skills/logicprobe-structure/references/structure-review-guide.md)。
+
 ## 使用
 
-插件在会话首个模型步骤自动注入能力通知。任务匹配技能的 `Use when` 描述时技能生效：
+插件在会话首个模型步骤自动注入能力通知。技能按**领域**拆分,一共四个;`logicprobe` 是总入口,只要有一点「想验证代码/某个说法是否成立」的念头就加载它,它自己的路由表再把相邻领域交出去:
 
-- **设计文档 / 计划审查** — "Review this design document" → 声称枚举与代码库核查
-- **行为类问题** — "could this state machine deadlock"、"is this retry limit safe" → 主动建议（不自动加载）作为可选验证
-- **重构计划** — 对比前后模型，标记计划未声明的行为变化
-- **数据模型 / 迁移审查** — "is this migration non-breaking" → 使用 `logicprobe-datamodel` 技能
-- **代码流程建模** — "把这个状态机画出来"、"这份 UML 图对吗" → 用 `logicprobe_uml` 出图并审查建模，随后仍用 `logicprobe_verify` 验证行为
+| 技能 | 领域 | 典型触发 |
+|---|---|---|
+| `logicprobe` | 声称核查 + 行为验证(状态机/协议、时序与量化保证、组合、重构回归) | "Review this design document"、"could this state machine deadlock"、"is this retry limit safe"、"这个预算够不够" |
+| `logicprobe-uml` | 图的建模与审查 | "把这个状态机画出来"、"这份 UML 图对吗"、"component 图能不能当状态机审" |
+| `logicprobe-structure` | 架构 / 依赖结构审查 | "审查一下这个架构"、"模块依赖有没有问题"、"分层对不对" |
+| `logicprobe-concurrency` | 并发声称:挖矿 + 路由(不证明) | "thread-safe 吗"、"这个 ISR 会 race 吗" |
+| `logicprobe-datamodel` | 数据模型 / 迁移与不变量 | "is this migration non-breaking"、"这份 copy 覆盖全字段了吗" |
 
-技能在 Phase 0 依据计划特征自动分级（LIGHTWEIGHT / STANDARD / ESCALATED），并在计划文件追加 `## Plan Verification` 摘要块作为审计痕迹。
+行为类问题仍按"主动建议、不自动升级"处理:先建议一次可选验证,由你决定是否跑。技能在 Phase 0 依据计划特征自动分级(LIGHTWEIGHT / STANDARD / ESCALATED),并在计划文件追加 `## Plan Verification` 摘要块作为审计痕迹。
 
 Python 可选。已有 LogicModelV1 JSON 时，可直接运行独立引擎 `skills/logicprobe/references/logicprobe-engine.py`：
 

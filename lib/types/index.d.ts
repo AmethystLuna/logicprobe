@@ -18,8 +18,9 @@
  * there. The default gate text is the dsh-native adaptation of
  * `hooks/session-start-content.md`: behavior rules
  * (1% Rule / Red Flags / proactive suggestion) stay in sync, while
- * presentation is adapted to dsh's native skill catalog — the trigger list
- * lives in the skill description, not duplicated in the gate. Deployments
+ * presentation is adapted to dsh's native skill catalog — the per-domain trigger
+ * lists live in the four skill descriptions, and the gate names the entry point
+ * and its routes rather than duplicating them. Deployments
  * override via Config.
  *
  * @module logicprobe-dsh

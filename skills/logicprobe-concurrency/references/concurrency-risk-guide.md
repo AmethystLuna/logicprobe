@@ -53,4 +53,4 @@ Manual checklist:
 - General: TLA+, SPIN, Alloy
 - Rust: loom, Shuttle
 
-Other semantic dimensions (hard real time, hybrid control, probability/reliability, execution cost) route through the same pattern — see `references/gap-routing-guide.md`.
+Other semantic dimensions (hard real time, hybrid control, probability/reliability, execution cost) route through the same pattern — see the full table in the `logicprobe` skill: `../logicprobe/references/gap-routing-guide.md`.

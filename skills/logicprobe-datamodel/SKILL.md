@@ -1,6 +1,6 @@
 ---
 name: logicprobe-datamodel
-description: "Use when reviewing design docs, specs, plans or migrations claiming entities, fields, constraints, relationships, data invariants, or before/after data-model equivalence: schema changes, migration logic, or data guarantees ('all records must have X', 'no orphan rows', 'ids unique') want executable data-model verification (migration coverage, copy consistency, rollback symmetry, DD1-DD4 regression). State machines, protocols and UML: use the sibling logicprobe skill."
+description: "Use when reviewing design docs, specs, plans or migrations claiming entities, fields, constraints, relationships, data invariants, or before/after data-model equivalence: schema changes, migration logic, or data guarantees ('all records must have X', 'no orphan rows', 'ids unique') want executable data-model verification (migration coverage, copy consistency, rollback symmetry, DD1-DD4 regression). State machines and protocols: logicprobe; diagrams: logicprobe-uml."
 ---
 
 # Logic Probe Data

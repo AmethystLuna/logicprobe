@@ -30,6 +30,8 @@ echo "===== POSITIVE TESTS (should trigger) ====="
 echo ""
 run_test "Design doc review → logicprobe" "logicprobe" "design-review-fact-verify.txt" "trigger"
 run_test "State machine safety question → logicprobe" "logicprobe" "state-machine-deadlock.txt" "trigger"
+run_test "UML component diagram audit → logicprobe-uml" "logicprobe-uml" "uml-diagram-audit.txt" "trigger"
+run_test "Architecture / dependency review → logicprobe-structure" "logicprobe-structure" "architecture-dependency-review.txt" "trigger"
 
 # Negative tests (should NOT trigger)
 echo "===== NEGATIVE TESTS (should NOT trigger) ====="

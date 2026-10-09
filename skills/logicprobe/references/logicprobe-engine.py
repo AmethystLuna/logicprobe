@@ -5009,6 +5009,573 @@ def review_uml(options):
 
 
 # ---------------------------------------------------------------------------
+# Structure-diagram review (mirror of src/structure.ts)
+#
+# A structure diagram is not a state machine: this reads the dependency graph the
+# diagram draws (components, packages, classes, deployment nodes and their arrows)
+# and audits it against an optional dependency matrix. The state-machine front end
+# refuses the same text; this is the honest reading of it.
+# ---------------------------------------------------------------------------
+
+_STRUCTURE_CONSTRUCT_KIND = {
+    'component': 'component', 'componentdiagram': 'component', 'class': 'class',
+    'abstract': 'class', 'interface': 'interface', 'enum': 'class', 'object': 'component',
+    'actor': 'actor', 'usecase': 'component', 'database': 'database', 'node': 'node',
+    'artifact': 'node', 'deployment': 'node', 'rectangle': 'rectangle', 'folder': 'package',
+    'frame': 'rectangle', 'cloud': 'cloud', 'queue': 'queue', 'stack': 'queue',
+    'storage': 'database', 'collections': 'queue', 'agent': 'component', 'boundary': 'component',
+    'control': 'component', 'entity': 'component', 'package': 'package', 'namespace': 'package',
+    'module': 'package',
+}
+
+_STRUCTURE_CONTAINER_KINDS = ('package',)
+
+_STRUCTURE_DECLARATION_RE = re.compile(
+    r'^\s*(component|componentDiagram|class|abstract|interface|enum|object|actor|usecase|database|node|'
+    r'artifact|deployment|rectangle|folder|frame|cloud|queue|stack|storage|collections|agent|boundary|'
+    r'control|entity|package|namespace|module)\b\s*(.*)\Z', re.I)
+_STRUCTURE_PLANTUML_EDGE_RE = re.compile(r'^\s*(.+?)\s*(-->|->|\.\.>|--|==>|<--|<\.\.)\s*(.+?)\s*\Z')
+_STRUCTURE_MERMAID_EDGE_RE = re.compile(r'^\s*(.+?)\s*(-->|\.\.>|--\|>|\.\.\|>|--|\.\.)\s*(.+?)\s*\Z')
+_STRUCTURE_MERMAID_CLASS_RE = re.compile(r'^\s*class\s+([A-Za-z_][A-Za-z0-9_.-]*)\s*(?:\["([^"]*)"\])?\s*\Z')
+_STRUCTURE_MERMAID_BLOCK_RE = re.compile(r'^\s*class\s+([A-Za-z_][A-Za-z0-9_.-]*)\s*\{\Z')
+_STRUCTURE_MERMAID_MEMBER_RE = re.compile(r'^\s*([A-Za-z_][A-Za-z0-9_.-]*)\s*(?::|\{)')
+_STRUCTURE_SKIP_RE = re.compile(r"^skinparam\b|^scale\b|^title\b|^hide\b|^left to right direction|"
+                                r"^top to bottom direction|^!theme|^legend\b|^end legend$", re.I)
+_STRUCTURE_NOTE_START_RE = re.compile(r'^note\b', re.I)
+_STRUCTURE_NOTE_END_RE = re.compile(r'^end\s*note\Z', re.I)
+
+
+def _structure_clean_label(value):
+    trimmed = re.sub(r'^"|"$', '', re.sub(r'^\[|\]$', '', value.strip())).strip()
+    return None if trimmed == '' else trimmed
+
+
+def _structure_read_declaration(rest):
+    """Read `X as Y`, `"X" as Y`, `[X] as Y`, `X` -> (id, label)."""
+    trimmed = re.sub(r'[;{]\s*\Z', '', rest.strip()).strip()
+    if trimmed == '':
+        return None, None
+    aliased = re.match(r'^(.*?)\s+as\s+([A-Za-z_][A-Za-z0-9_.-]*)\s*\Z', trimmed)
+    if aliased is not None:
+        return aliased.group(2), _structure_clean_label(aliased.group(1))
+    bare = re.match(r'^([A-Za-z_][A-Za-z0-9_.-]*)\s*\Z', trimmed)
+    if bare is not None:
+        return bare.group(1), None
+    quoted = re.match(r'^"([^"]+)"\s*\Z', trimmed)
+    if quoted is not None:
+        return quoted.group(1), quoted.group(1)
+    bracketed = re.match(r'^\[([^\]]+)\]\s*\Z', trimmed)
+    if bracketed is not None:
+        return bracketed.group(1).strip(), bracketed.group(1).strip()
+    return None, _structure_clean_label(trimmed)
+
+
+def _structure_split_target(text):
+    colon = text.find(':')
+    if colon < 0:
+        return text.strip(), None
+    return text[:colon].strip(), text[colon + 1:].strip()
+
+
+def _structure_node_id(reference):
+    trimmed = reference.strip()
+    quoted = re.match(r'^"([^"]+)"\Z', trimmed)
+    if quoted is not None:
+        return quoted.group(1)
+    bracketed = re.match(r'^\[([^\]]+)\]\Z', trimmed)
+    if bracketed is not None:
+        return bracketed.group(1).strip()
+    return re.sub(r'^"|"$', '', trimmed)
+
+
+def _structure_declare(builder, node_id, kind, line, label=None):
+    existing = builder['nodes'].get(node_id)
+    container = kind in _STRUCTURE_CONTAINER_KINDS
+    if existing is None:
+        node = {'id': node_id, 'kind': kind, 'container': container, 'line': line, 'declared': True}
+        if label is not None:
+            node['label'] = label
+        if builder['stack']:
+            node['parent'] = builder['stack'][-1]
+        builder['nodes'][node_id] = node
+        return
+    existing['declared'] = True
+    existing['kind'] = kind
+    existing['container'] = container
+    if label is not None and 'label' not in existing:
+        existing['label'] = label
+    if existing.get('line') is None:
+        existing['line'] = line
+
+
+def _structure_reference(builder, node_id, line):
+    if node_id in builder['nodes']:
+        return
+    node = {'id': node_id, 'kind': 'unknown', 'container': False, 'line': line, 'declared': False}
+    if builder['stack']:
+        node['parent'] = builder['stack'][-1]
+    builder['nodes'][node_id] = node
+
+
+def _parse_plantuml_structure(text):
+    builder = {'nodes': {}, 'edges': [], 'warnings': [], 'stack': []}
+    in_note = False
+    for index, raw_line in enumerate(re.split(r'\r?\n', text)):
+        line_number = index + 1
+        line = _js_trim(raw_line)
+        if line == '':
+            continue
+        if line.startswith('@start') or line.startswith('@end'):
+            continue
+        if line.startswith("'") or line.startswith('//'):
+            continue
+        note_start = _STRUCTURE_NOTE_START_RE.match(line) is not None
+        note_end = _STRUCTURE_NOTE_END_RE.match(line) is not None
+        if note_end:
+            in_note = False
+            continue
+        if in_note:
+            continue
+        if note_start and not re.search(r':\s*.+\Z', line):
+            in_note = True
+            continue
+        if note_start:
+            continue
+        if _STRUCTURE_SKIP_RE.match(line):
+            continue
+        if line == '}':
+            if builder['stack']:
+                builder['stack'].pop()
+            continue
+        declaration = _STRUCTURE_DECLARATION_RE.match(line)
+        if declaration is not None:
+            kind = _STRUCTURE_CONSTRUCT_KIND.get(declaration.group(1).lower(), 'unknown')
+            node_id, label = _structure_read_declaration(declaration.group(2))
+            if node_id is None:
+                node_id = declaration.group(2).strip()
+            if node_id != '':
+                _structure_declare(builder, node_id, kind, line_number, label)
+                if line.endswith('{'):
+                    builder['stack'].append(node_id)
+            continue
+        edge = _STRUCTURE_PLANTUML_EDGE_RE.match(line)
+        if edge is not None:
+            frm = _structure_node_id(edge.group(1))
+            to_raw, label = _structure_split_target(edge.group(3))
+            to = _structure_node_id(to_raw)
+            if frm == '' or to == '':
+                continue
+            _structure_reference(builder, frm, line_number)
+            _structure_reference(builder, to, line_number)
+            item = {'from': frm, 'to': to, 'line': line_number}
+            if label is not None:
+                item['label'] = label
+            builder['edges'].append(item)
+            continue
+        builder['warnings'].append('STRUCTURE_IGNORED_LINE: "' + line + '" is not a component, package, class or edge statement; it was ignored.')
+    return {'notation': 'plantuml', 'nodes': list(builder['nodes'].values()), 'edges': builder['edges'], 'warnings': builder['warnings']}
+
+
+def _parse_mermaid_class(text):
+    builder = {'nodes': {}, 'edges': [], 'warnings': [], 'stack': []}
+    for index, raw_line in enumerate(re.split(r'\r?\n', text)):
+        line_number = index + 1
+        line = _js_trim(raw_line)
+        if line == '' or re.match(r'^classDiagram\b', line) or line.startswith('%%'):
+            continue
+        if line == '}':
+            if builder['stack']:
+                builder['stack'].pop()
+            continue
+        declaration = _STRUCTURE_MERMAID_CLASS_RE.match(line)
+        if declaration is not None:
+            _structure_declare(builder, declaration.group(1), 'class', line_number, declaration.group(2))
+            continue
+        block = _STRUCTURE_MERMAID_BLOCK_RE.match(line)
+        if block is not None:
+            _structure_declare(builder, block.group(1), 'class', line_number)
+            builder['stack'].append(block.group(1))
+            continue
+        edge = _STRUCTURE_MERMAID_EDGE_RE.match(line)
+        if edge is not None:
+            frm = _structure_node_id(edge.group(1))
+            to_raw, label = _structure_split_target(edge.group(3))
+            to = _structure_node_id(to_raw)
+            if frm == '' or to == '':
+                continue
+            _structure_reference(builder, frm, line_number)
+            _structure_reference(builder, to, line_number)
+            item = {'from': frm, 'to': to, 'line': line_number}
+            if label is not None:
+                item['label'] = label
+            builder['edges'].append(item)
+            continue
+        if builder['stack']:
+            continue
+        member = _STRUCTURE_MERMAID_MEMBER_RE.match(line)
+        if member is not None:
+            _structure_declare(builder, member.group(1), 'class', line_number)
+            continue
+        builder['warnings'].append('STRUCTURE_IGNORED_LINE: "' + line + '" is not a class or edge statement; it was ignored.')
+    return {'notation': 'mermaid', 'nodes': list(builder['nodes'].values()), 'edges': builder['edges'], 'warnings': builder['warnings']}
+
+
+def _detect_structure_notation(text):
+    if re.search(r'^\s*@start', text, re.M):
+        return 'plantuml'
+    if re.search(r'^\s*classDiagram\b', text, re.M):
+        return 'mermaid'
+    if re.search(r'^\s*(component|package|deployment)\b', text, re.M | re.I):
+        return 'plantuml'
+    return 'plantuml'
+
+
+def parse_structure(text, notation='auto'):
+    """Parse a structure diagram into nodes and dependency edges (mirror of parseStructure)."""
+    resolved = _detect_structure_notation(text) if notation == 'auto' else notation
+    return _parse_mermaid_class(text) if resolved == 'mermaid' else _parse_plantuml_structure(text)
+
+
+def glob_matches(pattern, value):
+    """`*` matches any run of characters, `?` exactly one."""
+    if pattern == value:
+        return True
+    if '*' not in pattern and '?' not in pattern:
+        return False
+    escaped = re.sub(r'([.+^${}()|\[\]\\])', r'\\\1', pattern).replace('*', '.*').replace('?', '.')
+    return re.match('^' + escaped + r'\Z', value) is not None
+
+
+def _matches_any(patterns, value):
+    if patterns is None:
+        return None
+    for pattern in patterns:
+        if glob_matches(pattern, value):
+            return pattern
+    return None
+
+
+def validate_matrix(input_value):
+    """Mirror of validateMatrix: returns (ok, matrix_or_errors)."""
+    errors = []
+    if not _is_plain_object(input_value):
+        return (False, ['matrix: must be an object'])
+    allowed = ('rules', 'layers', 'default')
+    for key in input_value.keys():
+        if key not in allowed:
+            errors.append('matrix.' + key + ': unknown field (allowed: rules, layers, default)')
+    if input_value.get('default') is not None and input_value['default'] not in ('allow', 'deny'):
+        errors.append("matrix.default: must be 'allow' or 'deny'")
+    rules = input_value.get('rules')
+    if rules is not None:
+        if not isinstance(rules, list):
+            errors.append('matrix.rules: must be an array')
+        else:
+            seen = set()
+            for index, entry in enumerate(rules):
+                path = 'matrix.rules[' + str(index) + ']'
+                if not _is_plain_object(entry):
+                    errors.append(path + ': must be an object')
+                    continue
+                for key in entry.keys():
+                    if key not in ('id', 'source', 'allow', 'deny', 'require'):
+                        errors.append(path + '.' + key + ': unknown field (allowed: id, source, allow, deny, require)')
+                rule_id = entry.get('id')
+                if not isinstance(rule_id, str) or rule_id == '':
+                    errors.append(path + '.id: must be a non-empty string')
+                elif rule_id in seen:
+                    errors.append(path + '.id: duplicate rule id ' + rule_id)
+                else:
+                    seen.add(rule_id)
+                if entry.get('source') is not None and not isinstance(entry['source'], str):
+                    errors.append(path + '.source: must be a string')
+                for field in ('allow', 'deny'):
+                    value = entry.get(field)
+                    if value is None:
+                        continue
+                    if not isinstance(value, list) or len(value) == 0:
+                        errors.append(path + '.' + field + ': must be a non-empty array')
+                    elif any(not isinstance(item, str) or item == '' for item in value):
+                        errors.append(path + '.' + field + ': every entry must be a non-empty string')
+                if entry.get('require') is not None and not isinstance(entry['require'], bool):
+                    errors.append(path + '.require: must be a boolean')
+                if entry.get('require') is True and entry.get('allow') is None:
+                    errors.append(path + '.require: needs `allow` to say which edges must exist')
+    layers = input_value.get('layers')
+    if layers is not None:
+        if not isinstance(layers, list):
+            errors.append('matrix.layers: must be an array')
+        else:
+            for index, entry in enumerate(layers):
+                path = 'matrix.layers[' + str(index) + ']'
+                if not _is_plain_object(entry):
+                    errors.append(path + ': must be an object')
+                    continue
+                for key in entry.keys():
+                    if key not in ('name', 'members'):
+                        errors.append(path + '.' + key + ': unknown field (allowed: name, members)')
+                if not isinstance(entry.get('name'), str) or entry['name'] == '':
+                    errors.append(path + '.name: must be a non-empty string')
+                members = entry.get('members')
+                if not isinstance(members, list) or len(members) == 0:
+                    errors.append(path + '.members: must be a non-empty array')
+                elif any(not isinstance(item, str) or item == '' for item in members):
+                    errors.append(path + '.members: every entry must be a non-empty string')
+    if errors:
+        return (False, errors)
+    return (True, input_value)
+
+
+def _structure_layer_of(layers, node_id):
+    for index, layer in enumerate(layers):
+        if _matches_any(layer['members'], node_id) is not None:
+            return index
+    return None
+
+
+def shortest_cycle(nodes, edges):
+    """Shortest directed cycle as a node path with the start repeated (mirror of shortestCycle)."""
+    adjacency = {}
+    for node in nodes:
+        adjacency[node] = []
+    for edge in edges:
+        if edge['from'] == edge['to']:
+            return [edge['from'], edge['from']]
+        listing = adjacency.get(edge['from'])
+        if listing is not None and edge['to'] not in listing:
+            listing.append(edge['to'])
+    best = None
+    for start in nodes:
+        previous = {}
+        queue = deque([start])
+        seen = set([start])
+        found = False
+        while queue and not found:
+            current = queue.popleft()
+            for nxt in adjacency.get(current, []):
+                if nxt == start:
+                    chain = []
+                    cursor = current
+                    while cursor != start:
+                        chain.append(cursor)
+                        cursor = previous[cursor]
+                    chain.reverse()
+                    path = [start] + chain + [start]
+                    if best is None or len(path) < len(best):
+                        best = path
+                    found = True
+                    break
+                if nxt in seen:
+                    continue
+                seen.add(nxt)
+                previous[nxt] = current
+                queue.append(nxt)
+    return best
+
+
+def review_structure(options):
+    """Mirror of reviewStructure: audit a structure diagram against an optional matrix."""
+    graph = parse_structure(options['diagram'], options.get('notation') or 'auto')
+    warnings = list(graph['warnings'])
+    findings = []
+    nodes = graph['nodes']
+    node_ids = [node['id'] for node in nodes]
+
+    if not nodes:
+        findings.append({
+            'code': 'UML026_NO_NODES',
+            'severity': 'error',
+            'message': 'no node was declared in this text, so there is no structure to review.',
+            'evidence': {'notation': graph['notation']},
+        })
+
+    dangling = [node for node in nodes if not node['declared']]
+    if dangling:
+        findings.append({
+            'code': 'UML021_DANGLING_REFERENCE',
+            'severity': 'error',
+            'message': str(len(dangling)) + ' arrow endpoint(s) are used without ever being declared: ' + ', '.join(node['id'] for node in dangling) + '. In a component diagram this is how a dependency on a component that does not exist stays invisible.',
+            'evidence': {'nodes': [{'id': node['id'], 'line': node.get('line')} for node in dangling]},
+        })
+
+    degree = dict((node_id, 0) for node_id in node_ids)
+    for edge in graph['edges']:
+        degree[edge['from']] = degree.get(edge['from'], 0) + 1
+        degree[edge['to']] = degree.get(edge['to'], 0) + 1
+    isolated = [node for node in nodes if not node['container'] and node['declared'] and degree.get(node['id'], 0) == 0]
+    if isolated:
+        findings.append({
+            'code': 'UML020_ISOLATED_NODE',
+            'severity': 'warning',
+            'message': str(len(isolated)) + ' node(s) have no edge at all: ' + ', '.join(node['id'] for node in isolated) + '. Either they are dead entries or the diagram is missing their dependencies.',
+            'evidence': {'nodes': [{'id': node['id'], 'line': node.get('line')} for node in isolated]},
+        })
+
+    cycle = shortest_cycle(node_ids, graph['edges'])
+    if cycle is not None:
+        findings.append({
+            'code': 'UML022_CYCLE',
+            'severity': 'error',
+            'message': 'the dependency graph has a directed cycle: ' + ' → '.join(cycle) + '. A cycle means no build order and no layering can hold.',
+            'path': [{'from': cycle[index], 'event': 'depends-on', 'to': cycle[index + 1]} for index in range(len(cycle) - 1)],
+            'evidence': {'cycle': cycle},
+        })
+
+    edge_verdicts = []
+    rules = []
+    layers = []
+    matrix_default = 'allow'
+    if options.get('matrix') is not None:
+        ok_matrix, matrix_or_errors = validate_matrix(options['matrix'])
+        if not ok_matrix:
+            findings.extend({'code': 'MATRIX_INVALID', 'severity': 'error', 'message': message} for message in matrix_or_errors)
+        else:
+            rules = matrix_or_errors.get('rules') or []
+            layers = matrix_or_errors.get('layers') or []
+            matrix_default = matrix_or_errors.get('default') or 'allow'
+
+    for edge in graph['edges']:
+        matched_rules = []
+        denied_by = None
+        allowed_by = None
+        for rule in rules:
+            if rule.get('source') is None:
+                continue
+            if _matches_any([rule['source']], edge['from']) is None:
+                continue
+            matched_rules.append(rule['id'])
+            if denied_by is None and _matches_any(rule.get('deny'), edge['to']) is not None:
+                denied_by = rule
+            if allowed_by is None and _matches_any(rule.get('allow'), edge['to']) is not None:
+                allowed_by = rule
+        # Deny wins globally: a later rule's allow must not resurrect a forbidden edge.
+        if denied_by is not None:
+            allowed = False
+            basis = 'deny'
+        elif allowed_by is not None:
+            allowed = True
+            basis = 'allow'
+        elif matrix_default == 'deny':
+            allowed = False
+            basis = 'unlisted'
+        else:
+            allowed = True
+            basis = 'default'
+        edge_verdicts.append({'from': edge['from'], 'to': edge['to'], 'line': edge['line'],
+                              'matchedRules': matched_rules, 'allowed': allowed, 'basis': basis})
+        if not allowed:
+            rule = denied_by
+            if rule is None:
+                message = 'edge ' + edge['from'] + ' → ' + edge['to'] + ' is not permitted: no rule allows it and the matrix default is deny.'
+            else:
+                message = ('edge ' + edge['from'] + ' → ' + edge['to'] + ' violates rule ' + rule['id']
+                           + ('' if rule.get('deny') is None else ' (deny ' + ', '.join(rule['deny']) + ')') + '.')
+            evidence = {'edge': {'from': edge['from'], 'to': edge['to'], 'line': edge['line']},
+                        'matchedRules': matched_rules, 'basis': basis}
+            if rule is not None:
+                evidence['rule'] = rule['id']
+            findings.append({
+                'code': 'UML023_DISALLOWED_EDGE',
+                'severity': 'error',
+                'message': message,
+                'evidence': evidence,
+            })
+
+    layer_violations = []
+    if layers:
+        for edge in graph['edges']:
+            from_layer = _structure_layer_of(layers, edge['from'])
+            to_layer = _structure_layer_of(layers, edge['to'])
+            if from_layer is None or to_layer is None:
+                continue
+            if from_layer > to_layer:
+                layer_violations.append({'from': edge['from'], 'to': edge['to'],
+                                         'fromLayer': layers[from_layer]['name'], 'toLayer': layers[to_layer]['name'],
+                                         'line': edge['line']})
+        if layer_violations:
+            findings.append({
+                'code': 'UML024_LAYER_VIOLATION',
+                'severity': 'error',
+                'message': str(len(layer_violations)) + ' edge(s) point from a lower layer into a higher one: '
+                           + '; '.join(entry['from'] + ' (' + entry['fromLayer'] + ') → ' + entry['to'] + ' (' + entry['toLayer'] + ')' for entry in layer_violations)
+                           + '. Declared layers allow downward dependencies only.',
+                'evidence': {'violations': layer_violations},
+            })
+
+    missing = []
+    for rule in rules:
+        if rule.get('require') is not True or rule.get('source') is None or rule.get('allow') is None:
+            continue
+        sources = [node_id for node_id in node_ids if _matches_any([rule['source']], node_id) is not None]
+        if not sources:
+            missing.append({'rule': rule['id'], 'source': rule['source'], 'expected': rule['allow'],
+                            'unsatisfiedFrom': [], 'noSourceMatch': True})
+            continue
+        unsatisfied = [source for source in sources
+                       if not any(edge['from'] == source and _matches_any(rule['allow'], edge['to']) is not None
+                                  for edge in graph['edges'])]
+        if unsatisfied:
+            missing.append({'rule': rule['id'], 'source': rule['source'], 'expected': rule['allow'],
+                            'unsatisfiedFrom': unsatisfied, 'noSourceMatch': False})
+    if missing:
+        parts = []
+        for entry in missing:
+            if entry['noSourceMatch']:
+                parts.append(entry['rule'] + ' requires an edge from ' + entry['source'] + ' to ' + ', '.join(entry['expected'])
+                             + ', but no node matches ' + entry['source'])
+            else:
+                parts.append(entry['rule'] + ' requires an edge from ' + ', '.join(entry['unsatisfiedFrom']) + ' to '
+                             + ', '.join(entry['expected']) + ', and the diagram draws none')
+        findings.append({
+            'code': 'UML025_MISSING_EXPECTED_EDGE',
+            'severity': 'warning',
+            'message': str(len(missing)) + ' required edge(s) are absent from the diagram: ' + '; '.join(parts) + '. The matrix and the diagram disagree.',
+            'evidence': {'missing': missing},
+        })
+
+    errors = len([finding for finding in findings if finding['severity'] == 'error'])
+    warning_count = len([finding for finding in findings if finding['severity'] == 'warning'])
+    summary = {
+        'nodes': len(nodes),
+        'edges': len(graph['edges']),
+        'containers': len([node for node in nodes if node['container']]),
+        'isolated': len(isolated),
+        'dangling': len(dangling),
+        'cycles': 0 if cycle is None else 1,
+        'disallowedEdges': len([verdict for verdict in edge_verdicts if not verdict['allowed']]),
+        'layerViolations': len(layer_violations),
+        'missingExpectedEdges': len(missing),
+        'errors': errors,
+        'warnings': warning_count,
+        'rules': len(rules),
+    }
+
+    next_steps = []
+    if errors > 0:
+        next_steps.append('Resolve the error findings first: a dangling endpoint or a layer violation means the diagram and the intended architecture disagree.')
+    if not rules:
+        next_steps.append('Supply a dependency matrix (rules/layers) to have every edge judged and named; without one only the structural checks run.')
+    next_steps.append('Reconcile the result with the source-side checker: this audits the diagram, an include/graph scan audits the code, and the difference between them is the finding worth chasing.')
+    if graph['notation'] == 'plantuml':
+        next_steps.append('State machines are a different question — for a state or activity diagram use logicprobe_uml action=review and logicprobe_verify.')
+
+    report = {
+        'ok': True,
+        'ran': True,
+        **verdict_of_findings(findings),
+        'notation': graph['notation'],
+        'graph': graph,
+    }
+    if options.get('matrix') is not None:
+        report['edgeVerdicts'] = edge_verdicts
+    report['findings'] = findings
+    report['summary'] = summary
+    report['warnings'] = warnings
+    report['nextSteps'] = next_steps
+    return report
+
+
+# ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
 
@@ -5112,6 +5679,23 @@ def _cmd_uml_parse(args):
     sys.exit(2 if any(finding['severity'] == 'error' for finding in parse_findings(result)) else 0)
 
 
+def _cmd_structure(args):
+    try:
+        with open(args.diagram, 'r', encoding='utf-8') as handle:
+            text = handle.read()
+        options = {'diagram': text}
+        if args.notation is not None and args.notation != 'auto':
+            options['notation'] = args.notation
+        if args.matrix:
+            options['matrix'] = _load_json_file(args.matrix)
+        report = review_structure(options)
+    except (OSError, ValueError) as exc:
+        print(json.dumps(_refusal_json(exc)))
+        sys.exit(2)
+    print(json.dumps(report, indent=2))
+    sys.exit(0 if report['verdict'] != 'fail' else 2)
+
+
 def _cmd_uml_review(args):
     try:
         options = {}
@@ -5179,6 +5763,11 @@ def _build_parser():
     p_uml_review.add_argument('--no-round-trip', action='store_true')
     p_uml_review.add_argument('--max-steps', type=int)
     p_uml_review.set_defaults(func=_cmd_uml_review)
+    p_structure = sub.add_parser('structure', help='audit a structure/dependency diagram (UML020-UML026)')
+    p_structure.add_argument('diagram')
+    p_structure.add_argument('--notation', choices=['auto', 'plantuml', 'mermaid'], default='auto')
+    p_structure.add_argument('--matrix', help='dependency matrix JSON: {rules, layers, default}')
+    p_structure.set_defaults(func=_cmd_structure)
     return parser
 
 

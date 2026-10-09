@@ -1,6 +1,6 @@
 ---
 name: logicprobe
-description: "Use when reviewing design docs, specs, plans, refactorings making verifiable claims (API names, paths, enums). Escalates to executable models for state machines/protocols (guards, ACK/retry, lock pairs), guarantees (cost vs budget, P(reach SAFE), deadlines), cross-machine handshakes, concurrency claims (mined, never proven), and topology-changing refactors. Also UML: draw a code flow, parse a hand-drawn diagram, audit the modelling (dead ends, unreachable states, round-trip fidelity)."
+description: "Use when you want to verify something about code: a design doc, spec, plan, review comment, README or refactor asserting API names, paths, enums, feasibility, state-machine or protocol behaviour, timing guarantees, or 'always/never' properties. Enumerates the claims, verifies each against the code (file:line), and escalates to executable model checks (S1-S8 + A1-A14) when behaviour is at stake. Diagrams: logicprobe-uml; concurrency: logicprobe-concurrency; data: logicprobe-datamodel."
 ---
 
 # Logic Probe
@@ -9,21 +9,19 @@ Documents are not truth — code is. Verify every verifiable claim before accept
 
 ## When This Skill Applies
 
-The catalog entry is a summary; this is the full trigger list. Any one row is enough to load the skill.
+**This is the entry point.** If you have any thought of checking whether something about the code is actually true — however small, however informal the claim — load this skill. It owns the doctrine (enumerate the claims, verify each against the code, cite `file:line`, read `verdict` and never `ok`) and the executable verification for behaviour. When the task lands in a neighbouring domain, its routing table below hands it over rather than stretching the doctrine to cover it.
 
 | The task involves… | What it does |
 |---|---|
-| A design doc, spec, proposal or plan claiming API names, file paths, enum values, or mechanism feasibility | Enumerate the verifiable claims (Phase 1), verify each against the codebase with `file:line` evidence (Phase 2) |
+| Any claim about code you want to check — a design doc, spec, plan, review comment, README, commit message, refactor proposal, or a "this is safe / this always holds / this can't deadlock" assertion | Enumerate the verifiable claims (Phase 1), verify each against the codebase with `file:line` evidence (Phase 2), classify the gaps (Phase 3) |
 | A state machine or protocol — ≥3 states, guards, ACK/NACK/retry, lock/unlock, start/stop ordering | Build an executable model: S1-S8 structural checks, A1-A14 adversarial probes |
 | A quantitative or temporal guarantee — worst-case path cost ≤ budget, "≥90% of runs reach SAFE", "must leave within 2 ticks" | A12 budget, A13 probabilistic reachability, A14 deadlines, each with a counterexample path |
 | A handshake or power-up sequencing across two or more components | `logicprobe_compose_verify`: C1 composition deadlock, C2 rendezvous that never fires |
-| A concurrency guarantee — "thread-safe", "lock-free", "no data race", "ISR-safe" | Mined and routed to dedicated verification; never proven here |
 | A refactoring that changes state topology or guard conditions | BEFORE/AFTER models compared for behavioral preservation, invariant continuity and deadlock regression (D1-D4) |
-| Modelling a code flow as UML, or auditing a diagram somebody drew | `logicprobe_uml` render / parse / review, with render-parse round-trip fidelity; a component, package or class diagram is refused rather than modelled |
-| Entities, fields, relationships, data invariants, schema migrations | The sibling `logicprobe-datamodel` skill (DS1-DS4, DA1-DA12, DD1-DD4) |
-| A code-level behavioural question — "could this deadlock", "is this retry limit safe" | Suggest an optional verification pass; do not escalate automatically |
+| Explicit request to prove code correct, formally verify a module, or check a migration for breakage | Route by domain — the table under [Routing to the Sibling Skills](#routing-to-the-sibling-skills) — and keep the doctrine |
+| An architecture or dependency question about a component/package/class diagram | `logicprobe-structure`: parse the diagram into a dependency graph and judge every edge against the dependency matrix |
 
-**Catalog budget**: DSH renders only the frontmatter `description`, and truncates it at 500 characters (`dsh-tool-skill`, `DEFAULT_CATALOG_DESCRIPTION_MAX_LENGTH`). The description is therefore written to fit that budget, and the triggers that do not fit live in this table. `tests/skills/run.mjs` fails when either skill's catalog line would be cut, or would lose one of its use-case triggers.
+**Catalog budget**: DSH renders only the frontmatter `description`, and truncates it at 500 characters (`dsh-tool-skill`, `DEFAULT_CATALOG_DESCRIPTION_MAX_LENGTH`). Every description in this plugin is written to fit that budget, and the triggers that do not fit live in this table. `tests/skills/run.mjs` fails when any skill's catalog line would be cut, or would lose one of its use-case triggers.
 
 <HARD-GATE>
 
@@ -174,7 +172,7 @@ UML modelling variant (the task is to draw a flow, not to check a claim):
 | `logicprobe_compose_verify` | Two or more machines checked together (rendezvous handshake semantics): C1 composition deadlock, C2 rendezvous never fires. |
 | `logicprobe_concurrency_scan` | Mines concurrency claims (thread-safe, lock-free, race condition, mutex, ISR-safe) and routes them to dedicated verification. It does not prove concurrency safety. |
 | `logicprobe_export` | Emits external-checker input from a verified model: UPPAAL, TLA+, PRISM, SPIN. |
-| `logicprobe_uml` | render / parse / review for UML modelling — see [UML Modelling and Modelling Review](#uml-modelling-and-modelling-review). |
+| `logicprobe_uml` | render / parse / review for UML modelling — the diagram domain belongs to the `logicprobe-uml` skill. |
 
 `references/logicprobe-engine.py` mirrors the same checks and carries `compose` and `export` subcommands for hosts without the native tools.
 
@@ -372,38 +370,6 @@ If the user says yes, extract the model from the existing code (not a plan docum
 
 This covers the gap where behavioral verification is useful even when no design document is being reviewed.
 
-## UML Modelling and Modelling Review
-
-Use this when the task is to **draw** a code flow rather than to check a claim. Typical cases are reverse-engineering a handler, documenting a protocol exchange, and auditing a diagram somebody else drew.
-
-A diagram is a model, and a model can be wrong. A tidy flow chart is not evidence about the code. A diagram that disagrees with its own model is worse than no diagram, because a reader will believe it.
-
-Pipeline (DSH):
-
-```text
-code flow → model (citation per element) → logicprobe_uml action=render → diagram source
-          → logicprobe_uml action=review → modelling findings + round-trip fidelity
-          → logicprobe_verify           → behaviour (S1-S8 structural, A1-A14 adversarial)
-```
-
-- **render** — model to diagram. Mermaid covers `state`, `activity` and `sequence`. PlantUML covers `state` and `sequence`. Any construct the notation cannot carry becomes a warning, never a silent drop. PlantUML activity is refused instead of approximated.
-- **parse** — diagram to model. It reads Mermaid and PlantUML state or activity text, so a hand-drawn diagram can be verified like any other model. Two inputs are refused because they cannot become a machine: a sequence diagram (a trace cannot reconstruct a machine) and a different Mermaid family (`classDiagram`, `erDiagram`, `gantt`, `mindmap`, …) — both come back as `errorCode: "UML_NOT_A_STATE_DIAGRAM"` with the discarded construct named.
-- **review** — it answers one of three questions. Give it a model: is the machine well-modelled? Give it a diagram: what does the diagram say? Give it both: does the diagram match the model?
-
-**A structure diagram is the dangerous case, because it parses.** PlantUML component, package, class and deployment diagrams declare no diagram kind, so the parser meets their keywords line by line. It still returns *something* — the arrows look like transitions — so `parse` reports the by-product model **plus** an error finding `UML_NOT_A_STATE_DIAGRAM`, the declarations it could not represent in `discardedConstructs` (with line and text), the arrows that were misread in `discardedEdges`, and `verdict: "fail"`. Read that as: **there is no model of this file; the diagram was not checked.** Do not feed that model to `logicprobe_verify` and call the result a review of the architecture, and do not present a component diagram as evidence about dependencies — for that, see the structural checks in `references/uml-modeling-guide.md`.
-
-The review reports structural defects and documentation gaps. The structural defects are unreachable states, dead ends, ambiguous or non-exhaustive branches, self-loops with no exit, and duplicate transitions. The documentation gaps are a missing narrative, unbounded variables, states the reader cannot map back to code, and label drift. It also runs the fidelity check. Any structural difference between the diagram and its model is `UML017_ROUND_TRIP_MISMATCH`.
-
-Rules for this mode:
-
-1. **A diagram is not evidence.** Every state, event, guard and action needs a citation. Use `file:line` for code and a section reference for a document. Present the citations with the diagram.
-2. **Review before you present.** Run `logicprobe_uml action=review` and fix the error findings first. An ambiguous or dead-ended diagram misleads every later reader.
-3. **Check the verdict before the picture.** `ok: true` with `verdict: "fail"` means the review failed; a diagram whose review failed is not something to show as if it were checked.
-4. **The review never replaces verification.** It covers the modelling. S1-S8 and A1-A14 cover the behaviour, and each finding names the check that settles it.
-5. **Keep the narrative with the model.** Write `narrative.states`, `narrative.events` and `narrative.scenarios`. Then the diagram stays readable against the code, and label drift shows up as a finding instead of as a stale picture.
-
-The full checklist (codes `UML001` to `UML019` plus `UML_NOT_A_STATE_DIAGRAM`), the directive format generated diagrams carry, a worked example, and the limits of each view are in `references/uml-modeling-guide.md`.
-
 ### When NOT to Escalate
 
 Skip logic-primitive verification when:
@@ -412,19 +378,16 @@ Skip logic-primitive verification when:
 - The state machine has ≤2 states, no guards, and trivial transitions (IDLE↔ACTIVE)
 - The claim is purely structural (file paths, type names, numeric constants) — Phase 2 grep verification is sufficient
 
-## Concurrency Risk Mining
+### Routing to the Sibling Skills
 
-**Only use this after confirming the verification target actually has concurrency requirements or behavior** — e.g., multiple threads, async tasks, interrupts, shared state, or parallel execution. If the target is purely sequential, do not invoke concurrency mining.
+This skill owns behavioural claims. Three neighbouring domains have their own skill, and loading the wrong one wastes the verification:
 
-logicprobe does **not** prove concurrency safety. It mines documents and plans for concurrency-related claims and flags them for dedicated verification.
-
-- Absolute claims ("thread-safe", "lock-free", "no data race") → error / `UNVERIFIED` unless dedicated evidence is provided.
-- Risk keywords ("race condition", "shared variable", "mutex", "atomic", "shared memory") → warning; review whether the plan addresses them.
-- Interrupt safety is included: `interrupt-safe` / `ISR-safe` are absolute claims; `ISR`, `IRQ`, `NMI`, `critical section`, `disable_irq` / `enable_irq` are risk keywords.
-
-In DSH, use the `logicprobe_concurrency_scan` tool. For manual review, follow `references/concurrency-risk-guide.md`.
-
-For routing claims in dimensions logicprobe does not verify — hard real time (deadlines/periods), preemptive concurrency, hybrid control stability, probabilistic reliability, and execution-cost budgets — to dedicated tools, see `references/gap-routing-guide.md`. In `logicprobe_verify` reports, matching models carry informational `coverageNotes` with the same routing.
+| Domain | Skill |
+|---|---|
+| Drawing a code flow as UML, or auditing a diagram somebody drew (render / parse / review, round-trip fidelity, component and class diagrams refused) | `logicprobe-uml` |
+| Reviewing architecture, module structure or a dependency diagram (isolated nodes, dangling endpoints, cycles, allowed-dependency and layer violations, missing required edges) | `logicprobe-structure` |
+| Concurrency claims — "thread-safe", "lock-free", "no data race", "ISR-safe" — mined and routed to TSan/Helgrind/CBMC/TLA+, never proven here | `logicprobe-concurrency` |
+| Entities, fields, relationships, data invariants, schema migrations (DS1-DS4, DA1-DA12, DD1-DD4) | `logicprobe-datamodel` |
 
 ---
 
@@ -437,4 +400,5 @@ For routing claims in dimensions logicprobe does not verify — hard real time (
 5. **For behavioral claims: verify with code, not reasoning.** If a plan says "always", "never", or "guaranteed", generate and run a model. One counter-example is enough to refute a universal claim.
 6. **Confirm the model before running it** — unless the runtime reports `logicprobe interaction=auto`. Extraction errors are the dominant failure mode of formal verification. In auto mode, substitute evidence-cited extraction + round-trip validation and mark the report `UNCONFIRMED`.
 7. **Don't verify what the code already checks.** If the existing codebase has compile-time assertions, static analysis, or runtime checks for a property, cite those — don't re-verify in a Python model.
-8. **A diagram is a model, not evidence.** When you model a code flow as UML, cite the source for every state, event, guard and action. Run `logicprobe_uml` with `action=review` before you show the diagram. A diagram that does not read back as the model it was drawn from is mis-modelled, however tidy it looks.
+8. **Hand a neighbouring domain to its own skill.** A diagram is a model, not evidence: modelling or auditing one belongs to `logicprobe-uml`. A concurrency claim is mined and routed, never proven here: that is `logicprobe-concurrency`. Schema, data invariants and migrations are `logicprobe-datamodel`. This skill keeps the doctrine and the behavioural checks.
+9. **Say what this does not prove.** For dimensions logicprobe does not verify — hard real time (deadlines, periods), preemptive concurrency, hybrid-control stability, probabilistic reliability, execution-cost budgets — route to the dedicated tool named in `references/gap-routing-guide.md`. `logicprobe_verify` reports carry the same routing as informational `coverageNotes` on matching models.

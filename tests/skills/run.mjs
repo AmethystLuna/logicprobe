@@ -19,8 +19,14 @@ const CATALOG_DESCRIPTION_MAX_LENGTH = 500
 
 /** Trigger words that must survive inside the catalog budget: the use cases the skill exists for. */
 const REQUIRED_TRIGGERS = {
-  logicprobe: ['Use when', 'state machine', 'UML', 'budget', 'deadline', 'handshake', 'concurrency'],
-  'logicprobe-datamodel': ['Use when', 'migration', 'data invariants', 'rollback', 'sibling logicprobe'],
+  // The entry point: broad intent, the doctrine, and the route to each domain skill.
+  logicprobe: ['Use when', 'verify', 'file:line', 'S1-S8', 'logicprobe-uml', 'logicprobe-concurrency', 'logicprobe-datamodel'],
+  'logicprobe-uml': ['Use when', 'diagram', 'round-trip', 'refused', 'logicprobe skill'],
+  'logicprobe-concurrency': ['Use when', 'thread-safe', 'ISR-safe', 'does not prove', 'logicprobe skill'],
+  'logicprobe-datamodel': ['Use when', 'migration', 'data invariants', 'rollback', 'logicprobe-uml'],
+  // The architecture/dependency domain: the intent ("review this architecture") must
+  // reach this skill, and the description must not promise more than the checks do.
+  'logicprobe-structure': ['Use when', 'architecture', 'dependency', 'cycle', 'layer', 'logicprobe skill'],
 }
 
 const skillsRoot = fileURLToPath(new URL('../../skills/', import.meta.url))

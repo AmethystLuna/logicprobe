@@ -1,0 +1,1 @@
+We're about to split the motion module into two layers. Before we start, can you look at our component diagram and tell me whether the dependencies between the modules and the HAL are sound, and whether the layering holds?
