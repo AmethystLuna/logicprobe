@@ -1713,7 +1713,7 @@ async function runReportContractTests() {
   const typo = { ...JSON.parse(JSON.stringify(bare)), sttes: [] }
   if (runVerification(typo).ok) throw new Error('a mistyped top-level key must still be rejected')
 
-  // hashSpec: v1 excludes metadata, v0 is the pre-0.10.0 behaviour, and both are
+  // hashSpec: v1 excludes metadata, v0 is the pre-1.0.0 behaviour, and both are
   // byte-identical for a model without `_` keys (so archived hashes stay valid).
   if (archivedReport.hashSpec !== 'v1') throw new Error('the report must name the hash spec it used')
   if (modelHash(archived, 'v1') === modelHash(archived, 'v0')) throw new Error('v0 and v1 must differ when metadata is present')

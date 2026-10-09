@@ -19,7 +19,7 @@
  * `hooks/session-start-content.md`: behavior rules
  * (1% Rule / Red Flags / proactive suggestion) stay in sync, while
  * presentation is adapted to dsh's native skill catalog — the per-domain trigger
- * lists live in the four skill descriptions, and the gate names the entry point
+ * lists live in the skill descriptions, and the gate names the entry point
  * and its routes rather than duplicating them. Deployments
  * override via Config.
  *

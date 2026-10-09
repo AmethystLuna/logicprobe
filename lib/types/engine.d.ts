@@ -271,9 +271,9 @@ export declare function canonicalJson(value: unknown): string;
  * Published model-hash specifications. The full normalization rules, the list of
  * excluded keys and a one-line recompute command are in `references/hash-spec.md`.
  *
- * - `v1` (0.10.0) drops every `_`-prefixed metadata key at every level before hashing,
+ * - `v1` (1.0.0) drops every `_`-prefixed metadata key at every level before hashing,
  *   so archiving `_source` / `_verified` next to a model cannot change its hash.
- * - `v0` is the pre-0.10.0 behaviour (no metadata filtering), kept so an archived hash
+ * - `v0` is the pre-1.0.0 behaviour (no metadata filtering), kept so an archived hash
  *   can still be checked against the old engine.
  *
  * For a model that carries no `_` keys the two specs are byte-identical.

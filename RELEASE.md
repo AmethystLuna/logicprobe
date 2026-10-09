@@ -4,7 +4,7 @@ Shipping checklist for this plugin across the DeepSeek Harness (dsh) ecosystem a
 
 ## Version policy
 
-Strict semver (`X.Y.Z`); the current pre-1.0 line is `0.Y.Z`:
+Strict semver (`X.Y.Z`); the 1.0 line is the first stable one, and the `0.Y.Z` line that precedes it is closed:
 
 - **Patch** (`0.5.2 → 0.5.3`): bug fixes, docs, dependency bumps, CI/tooling changes. The default for routine updates.
 - **Minor** (`0.5.3 → 0.6.0`): new features, new checks/tools, or backward-compatible behavior changes.

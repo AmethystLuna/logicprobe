@@ -9,8 +9,8 @@ tests (`tests/engine/run.mjs`, `tests/python/run.mjs`).
 
 | Spec | Since | Normalization |
 |------|-------|---------------|
-| `v1` | 0.10.0 | sorted keys, no insignificant whitespace, UTF-8 with non-ASCII preserved, **every `_`-prefixed key removed at every level** |
-| `v0` | never published | the same normalization **without** metadata filtering — the pre-0.10.0 behaviour, kept only so an archived hash can be checked against the old engine |
+| `v1` | 1.0.0 | sorted keys, no insignificant whitespace, UTF-8 with non-ASCII preserved, **every `_`-prefixed key removed at every level** |
+| `v0` | never published | the same normalization **without** metadata filtering — the pre-1.0 behaviour, kept only so an archived hash can be checked against the old engine |
 
 `v0` was never a specification; it is the behaviour that existed before this document
 did. Do not record new hashes with it.
@@ -125,4 +125,4 @@ uses `v1`.
 
 | Release | Hash change | Affected models |
 |---------|-------------|-----------------|
-| 0.10.0 | `hashSpec: "v1"` published; `_`-prefixed keys are now excluded from the hash (and accepted by the schema) | **None.** Before 0.10.0 a model carrying `_` keys was rejected outright, so no accepted model's hash moves. `v0` reproduces the old behaviour for archived values, and the two specs are byte-identical for a model without `_` keys — pinned by golden tests on `happy-path.json` and `narrative-complete.json`. |
+| 1.0.0 | `hashSpec: "v1"` published; `_`-prefixed keys are now excluded from the hash (and accepted by the schema) | **None.** Before 1.0.0 a model carrying `_` keys was rejected outright, so no accepted model's hash moves. `v0` reproduces the old behaviour for archived values, and the two specs are byte-identical for a model without `_` keys — pinned by golden tests on `happy-path.json` and `narrative-complete.json`. |

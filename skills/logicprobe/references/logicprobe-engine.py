@@ -87,8 +87,8 @@ def stable_stringify(value):
 
 # Published model-hash specifications. The full normalization rules, the excluded
 # keys and a one-line recompute command are in references/hash-spec.md.
-#   v1 (0.10.0) drops every `_`-prefixed metadata key at every level before hashing.
-#   v0 is the pre-0.10.0 behaviour (no metadata filtering), kept for archived hashes.
+#   v1 (1.0.0) drops every `_`-prefixed metadata key at every level before hashing.
+#   v0 is the pre-1.0.0 behaviour (no metadata filtering), kept for archived hashes.
 # For a model without `_` keys the two are byte-identical.
 PUBLISHED_HASH_SPECS = ('v0', 'v1')
 DEFAULT_HASH_SPEC = 'v1'
@@ -6360,7 +6360,7 @@ def _build_parser():
     p_verify.add_argument('--max-states', type=int)
     p_verify.add_argument('--max-permutation-events', type=int)
     p_verify.add_argument('--hash-spec', choices=list(PUBLISHED_HASH_SPECS), default=DEFAULT_HASH_SPEC,
-                          help='model-hash specification to report (default v1; v0 = pre-0.10.0 behaviour)')
+                          help='model-hash specification to report (default v1; v0 = pre-1.0.0 behaviour)')
     p_verify.add_argument('--baseline', metavar='REPORT',
                           help='compare against an earlier report of the same family and print the diff (a new error finding fails it)')
     p_verify.add_argument('--hash-check', metavar='HEX',

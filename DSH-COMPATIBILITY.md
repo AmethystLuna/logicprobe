@@ -13,8 +13,8 @@ releases listed in `dsh.compatibility.dshReleases` (author-remediation track
 | Node.js | v24.17.0 |
 | npm | 11.13.0 |
 | pnpm | 11.21.0 |
-| Test date | 2026-09-25 (headless rounds) · 2026-09-29 (live-field and degradation rounds) · 2026-10-05 (headless round for 0.2.1-alpha.1) · 2026-10-06 (headless round for 0.9.0 on 0.1.7-rc.2) |
-| Package under test | `dsh-logicprobe` 0.10.0 (bundle patch `cordis.patch.yml`, entry id `logicprobe`) |
+| Test date | 2026-09-25 (headless rounds) · 2026-09-29 (live-field and degradation rounds) · 2026-10-05 (headless round for 0.2.1-alpha.1) · 2026-10-06 (headless round for 0.9.0 on 0.1.7-rc.2) · 2026-10-09 (headless round for 1.0.0 on 0.2.1-alpha.2) |
+| Package under test | `dsh-logicprobe` 1.0.0 (bundle patch `cordis.patch.yml`, entry id `logicprobe`) |
 
 ## Method (one disposable profile per version)
 
@@ -66,6 +66,27 @@ dsh --profile headless --dump-config                       # no logicprobe row
 The headless `AUTH` rejection proves the profile booted with the plugin applied
 (any bundle apply error would surface before the provider call). End-to-end
 model calls were not exercised (no real provider key used).
+
+The 2026-10-09 round (`1.0.0`) reused that procedure against `0.2.1-alpha.2`. Two things
+differ: both plugins were added to the **same** disposable `headless` profile in one pass
+and both were removed from it afterwards, and the install prefix and the `DSH_HOME` were
+fresh directories under one task scratch root, so nothing from an earlier round was in
+play. `DSH_HOME` is set explicitly for every command and never inherited: this host's own
+`DSH_HOME` points at the real user home, which the round must not touch.
+
+```bash
+npm install --prefix <scratch>/dsh-0.2.1-alpha.2 @deepseek-ai/dsh@0.2.1-alpha.2
+# -> added 559 packages in 2m
+export DSH_HOME=<scratch>/home            # fresh; asserted to sit under the scratch root
+<prefix>/node_modules/.bin/dsh plugin --profile headless add "file:<this-repo>"
+<prefix>/node_modules/.bin/dsh plugin --profile headless add "file:<embedded-workbench>"
+```
+
+The same commands were run for the sibling `dsh-embedded-workbench` 0.9.2 checkout; both
+packages were installed into that one profile and both were removed from it. The round was
+run against the **frozen** checkouts: the manifests printed `1.0.0` and `0.9.2` respectively,
+after the version bump and the compatibility-declaration change, so the log describes the
+artifacts this document declares rather than a pre-release intermediate.
 
 The live-field round (2026-09-29) used a different procedure, because the
 capability it measures lives in the Web client rather than the headless path:
@@ -146,13 +167,84 @@ carries the `logicprobe:mode` section. The 0.1.5-alpha.2, 0.1.5-rc.1, 0.1.5-rc.2
 
 ## Results
 
-The results fall into four groups, kept apart on purpose. The first group is the row
-measured for 0.9.0 on dsh 0.1.7-rc.2. The second group is the row re-measured on the
-0.8.x builds (0.2.1-alpha.1). The third group is the rows re-measured against the 0.7.1
-build on 2026-09-29. The last group is the rows carried over from earlier rounds. A
-carried-over row is still declared compatible. It was produced by an earlier round's
-procedure, though, and was not re-run against this build, so presenting it as newly
-verified would overstate the evidence.
+The results fall into five groups, kept apart on purpose. The first group is the row measured
+for 1.0.0 on dsh 0.2.1-alpha.2. The second group is the row measured for 0.9.0 on dsh
+0.1.7-rc.2. The third group is the row re-measured on the 0.8.x builds (0.2.1-alpha.1). The
+fourth group is the rows re-measured against the 0.7.1 build on 2026-09-29. The last group is
+the rows carried over from earlier rounds. A carried-over row is still declared compatible. It
+was produced by an earlier round's procedure, though, and was not re-run against this build, so
+presenting it as newly verified would overstate the evidence.
+
+### Re-measured on `0.2.1-alpha.2` (`1.0.0` on 2026-10-09)
+
+| dsh release | install | host boot | uninstall | rows active | client bundles in `__DSH_BOOT__` | settings namespace served | Web switch |
+|---|---|---:|---:|---|---:|---:|---|
+| 0.2.1-alpha.2 | pass | pass | pass | not probed (headless round) | not probed | not probed | not probed |
+
+All four steps ran for **both** plugins against one fresh `DSH_HOME` on one disposable
+`headless` profile, which was added with `file:<this-repo>` (and the sibling's checkout) and
+removed again afterwards. Nine assertions were checked mechanically, not by eye; all nine
+passed:
+
+| assertion | result |
+|---|---|
+| `plugin add` for this package exits 0 | pass |
+| `plugin add` for the sibling exits 0 | pass |
+| neither add reports the preflight refusal wording (`incompatible`, `nothing was installed`, `crashes or data loss`) | pass |
+| `--dump-config` carries `id: logicprobe` / `dsh-logicprobe` | pass |
+| `--dump-config` carries `id: embedded-workbench` / `dsh-embedded-workbench` | pass |
+| `--dump-config` carries no `disabling profile plugin` line | pass |
+| the boot reaches the model provider (`AUTH` only) | pass |
+| the boot log has no plugin load error (`plugin tree failed to load`, `volatile is not a function`, `ERR_MODULE_NOT_FOUND`, `Cannot find module`, `incompatible`, `skipping profile bundle`) | pass |
+| after `plugin remove`, neither row is in `--dump-config` | pass |
+
+The composed tree shows both rows enabled, patched in at the end of the base tree:
+
+```text
+# == dsh-logicprobe
+- id: logicprobe
+  name: dsh-logicprobe
+  config:
+    enabled: true
+    interaction: follow-approval
+# == dsh-embedded-workbench
+- id: embedded-workbench
+  name: dsh-embedded-workbench
+  config:
+    enabled: true
+```
+
+The boot output is one line and nothing else — no plugin error precedes it:
+
+```text
+dsh: AUTH: Authentication Fails, Your api key: ****test is invalid (request_id: …)
+```
+
+Two method caveats belong here, and they make this row weaker than the 0.7.1 rows below,
+not stronger. It is a **headless** round: `rows active`, `__DSH_BOOT__`, the settings
+namespace and the live Web switch were not probed, so those cells read "not probed" rather
+than inheriting the 2026-09-29 result. And because the boot stops at provider
+authentication, no session was opened, so **the session-log seam scan was not re-run** for
+this release.
+
+This release host ships `schemastery` 3.18.5-alpha.1 (the round's install prefix was
+inspected directly), so the guarded live field is available and the Web switch is expected
+to work exactly as the 2026-09-29 rows measured it; that expectation is not a measurement,
+which is why the switch column stays unprobed. pnpm printed its advisory
+`[WARN] Issues with peer dependencies found` on both the add and the remove, exited 0 every
+time, and the mount, boot and uninstall steps all passed — the same advisory the 0.8.x rows
+record.
+
+**What 1.0.0 changed on the host-facing surface, and what that means for the older rows.**
+A version bump resets old-version evidence, so this row is the one that speaks for 1.0.0.
+The release adds a seventh tool (`logicprobe_report_diff`), a second boolean to the inspect
+status (`reportDiffToolRegistered`, alongside `structureToolRegistered`), the multi-level
+`diagrams` parameter on the structure tool, and the `logicprobe-structure` skill, so the
+`logicprobe_*` tool catalog is now eight entries rather than the five the 2026-09-29
+session-log scans asserted. Every one of those is the same `ctx.tools.register`,
+`cordisInspect` provider and `ctx.skills` provider call this package has made since
+0.1.0-rc.7 — no new seam — but a seam-scan round run against 1.0.0 must assert eight tools
+and five skills, not five and two.
 
 ### Re-measured on `0.1.7-rc.2` (`0.9.0` on 2026-10-06)
 
@@ -315,7 +407,7 @@ unverified.
 
 ## Declared compatibility (package.json)
 
-Quoted from the manifest of 0.8.0. The `peerDependencies` block is included because
+Quoted from the manifest of 1.0.0. The `peerDependencies` block is included because
 the install preflight evaluates it, not `dshReleases`
 (`@deepseek-ai/dsh-app-boot/lib/index.js:289-293`).
 
@@ -323,17 +415,17 @@ the install preflight evaluates it, not `dshReleases`
 "engines": { "node": ">=20" },
 "peerDependencies": {
   "@deepseek-ai/cordis": "^4.0.4",
-  "@deepseek-ai/dsh-agent": "^0.1.0-rc.6 || ^0.2.0-rc.1 || ^0.2.1-alpha.1",
-  "@deepseek-ai/dsh-llm": "^0.1.0-rc.6 || ^0.2.0-rc.1 || ^0.2.1-alpha.1",
-  "@deepseek-ai/dsh-session": "^0.1.0-rc.6 || ^0.2.0-rc.1 || ^0.2.1-alpha.1",
-  "@deepseek-ai/dsh-skill-filesystem": "^0.1.0-rc.8 || ^0.2.0-rc.1 || ^0.2.1-alpha.1",
-  "@deepseek-ai/dsh-tools": "^0.1.0-rc.6 || ^0.2.0-rc.1 || ^0.2.1-alpha.1",
+  "@deepseek-ai/dsh-agent": "^0.1.0-rc.6 || ^0.2.0-rc.1 || ^0.2.1-alpha.1 || ^0.2.1-alpha.2",
+  "@deepseek-ai/dsh-llm": "^0.1.0-rc.6 || ^0.2.0-rc.1 || ^0.2.1-alpha.1 || ^0.2.1-alpha.2",
+  "@deepseek-ai/dsh-session": "^0.1.0-rc.6 || ^0.2.0-rc.1 || ^0.2.1-alpha.1 || ^0.2.1-alpha.2",
+  "@deepseek-ai/dsh-skill-filesystem": "^0.1.0-rc.8 || ^0.2.0-rc.1 || ^0.2.1-alpha.1 || ^0.2.1-alpha.2",
+  "@deepseek-ai/dsh-tools": "^0.1.0-rc.6 || ^0.2.0-rc.1 || ^0.2.1-alpha.1 || ^0.2.1-alpha.2",
   "@deepseek-ai/schemastery": "^3.18.4"
 },
 "dsh": {
   "engines": { "dsh": ">=0.1.0-rc.7" },
   "compatibility": {
-    "dsh": "^0.1.0-rc.7 || ^0.1.1-rc.1 || ^0.1.2-alpha.2 || ^0.1.2-alpha.3 || ^0.1.2-alpha.4 || ^0.1.2-alpha.5 || ^0.1.2-rc.1 || ^0.1.3-alpha.1 || ^0.1.3-alpha.2 || ^0.1.5-alpha.1 || ^0.1.5-rc.1 || ^0.1.5-alpha.2 || ^0.1.5-rc.2 || ^0.1.5-rc.3 || ^0.1.6-alpha.1 || ^0.1.6-alpha.2 || ^0.1.7-alpha.1 || ^0.1.7-alpha.2 || ^0.1.7-rc.1 || ^0.1.7-rc.2 || ^0.2.0-rc.1 || ^0.2.1-alpha.1",
+    "dsh": "^0.1.0-rc.7 || ^0.1.1-rc.1 || ^0.1.2-alpha.2 || ^0.1.2-alpha.3 || ^0.1.2-alpha.4 || ^0.1.2-alpha.5 || ^0.1.2-rc.1 || ^0.1.3-alpha.1 || ^0.1.3-alpha.2 || ^0.1.5-alpha.1 || ^0.1.5-rc.1 || ^0.1.5-alpha.2 || ^0.1.5-rc.2 || ^0.1.5-rc.3 || ^0.1.6-alpha.1 || ^0.1.6-alpha.2 || ^0.1.7-alpha.1 || ^0.1.7-alpha.2 || ^0.1.7-rc.1 || ^0.1.7-rc.2 || ^0.2.0-rc.1 || ^0.2.1-alpha.1 || ^0.2.1-alpha.2",
     "dshReleases": {
       "0.1.0-rc.7": "compatible",
       "0.1.0-rc.8": "compatible",
@@ -359,7 +451,8 @@ the install preflight evaluates it, not `dshReleases`
       "0.1.7-rc.2": "compatible",
       "0.2.0-rc.1": "compatible",
       "0.2.0-rc.2": "compatible",
-      "0.2.1-alpha.1": "compatible"
+      "0.2.1-alpha.1": "compatible",
+      "0.2.1-alpha.2": "compatible"
     },
     "profiles": ["headless", "web"]
   }
@@ -379,13 +472,43 @@ a measurement, not an assumption. The extra `|| ^0.2.1-alpha.1` branch therefore
 records the release this package was actually run against. It is not a gate the host
 imposes.
 
+The `|| ^0.2.1-alpha.2` branch is there for the same reason and from the same kind of
+measurement (2026-10-09): that is the release this package was installed, mounted,
+booted and uninstalled against, and its `plugin add` did not report the preflight
+refusal. The branch records what was run, not a boundary the host enforces. Note also
+that `0.2.1-alpha.2` ships `schemastery` 3.18.5-alpha.1, which satisfies the declared
+`^3.18.4` peer, so the preflight has no schemastery reason to refuse this bundle there
+either.
+
 ## Notes
 
 These bullets are grouped by the round that produced them. The first governs
-0.7.1. Several later ones describe what an **older** plugin version was verified
+1.0.0. Several later ones describe what an **older** plugin version was verified
 against, so where one reads "keeps 0.1.0-rc.7 … X working" it means that round's
 plugin version, not this one. The Results tables above are the authoritative
-statement for 0.8.0.
+statement for 1.0.0.
+
+- **The 0.2.1-alpha.2 round measured four steps, not the Web half.** Install,
+  mount, headless boot and uninstall were re-run on 2026-10-09 for this plugin and
+  its sibling `dsh-embedded-workbench` 0.9.2, both in one disposable `headless`
+  profile against a fresh `DSH_HOME`. See the Results section. `rows active`,
+  `__DSH_BOOT__`, the settings namespace and the live Web switch were **not**
+  probed, so those cells read "not probed" instead of inheriting the 2026-09-29
+  result, and the session-log seam scan was not re-run because the boot stops at
+  provider authentication. What the row does establish is that the bundle installs,
+  composes and applies on the new release: both rows appear enabled in
+  `--dump-config`, the boot reaches the model provider with no plugin load error,
+  and both rows disappear again after `plugin remove`.
+- **1.0.0 adds tools and a skill but no new host seam.** The `logicprobe_*` catalog
+  is now eight tools (the six of 0.9.0 plus `logicprobe_structure_verify` and
+  `logicprobe_report_diff`) and the skill catalog is five (`logicprobe`,
+  `logicprobe-datamodel`, `logicprobe-uml`, `logicprobe-concurrency`,
+  `logicprobe-structure`). Registration is unchanged: the same `ctx.tools.register`
+  calls, the same `cordisInspect` provider (now with two extra boolean fields in its
+  status projection) and the same `ctx.skills` filesystem provider. The older rows
+  above stay the reference for the seams they exercised, and the numbers a
+  session-log seam-scan round must assert on 1.0.0 are eight tools and five skills,
+  not five and two.
 
 - **The 0.2.1-alpha.1 round measured four steps, not the Web half.** Install,
   mount, headless boot and uninstall were re-run for both plugins on 2026-10-05.
