@@ -173,7 +173,7 @@ block is valid. What must hold is that whatever is written is *right*:
 | Case | Result |
 |---|---|
 | `narrative` absent | Valid. The review reports `UML013_NO_NARRATIVE` (info); `logicprobe_verify` reports no coverage at all. |
-| One or two of `states` / `events` / `scenarios` given | Valid. The report adds `narrativeCoverage: {states: "5/5", events: "3/9", scenarios: "0/12"}` (covered/total per dimension), and `nextSteps` names the gap. A `UML027_NARRATIVE_PARTIAL` (info) finding appears in a UML review. |
+| One or two of `states` / `events` / `scenarios` given | Valid. The report adds `narrativeCoverage: {states: "5/5", events: "3/9", scenarios: "0/12"}` (covered/total per dimension), and `nextSteps` names the gap. Both sides also report it as a finding: `logicprobe_verify` carries `NARRATIVE_PARTIAL` (info) and a UML review carries `UML027_NARRATIVE_PARTIAL` (info). An `info` finding never changes `verdict`, `summary.errors`, `summary.warnings` or the check count. |
 | `narrative` present but `{}` | **Error**: an empty block claims documentation that does not exist. Give at least one dimension. |
 | Unknown state/event id, empty description, duplicate `(from, event)` scenario | **Error**: the narrative is wrong, not merely incomplete. |
 

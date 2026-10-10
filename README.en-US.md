@@ -102,7 +102,7 @@ Every report separates "the tool ran" from "the review passed":
 | `hashSpec` | The published specification `modelHash` follows — see [`hash-spec.md`](skills/logicprobe/references/hash-spec.md). |
 | `hashes` | Every hash the report carries, in one place (model, diagram/matrix, before/after). |
 | `metadataKeys` | Paths of the `_`-prefixed annotation keys the input carried. |
-| `narrativeCoverage` | `{states: "5/5", events: "3/9", scenarios: "0/12"}` — a narrative may cover part of the model, and this is how much is still undocumented. |
+| `narrativeCoverage` | `{states: "5/5", events: "3/9", scenarios: "0/12"}` — a narrative may cover part of the model, and this is how much is still undocumented. The gap is also a `NARRATIVE_PARTIAL` (info) finding, so a gate need not parse `nextSteps` text. |
 | `nextSteps` | What to do next, derived from the findings; never empty, and identical for two runs over the same input. |
 
 Reading `ok` turns a model with a deadlock into a pass; the verdict is the judgement. The non-DSH Python CLI follows the verdict with its exit code: `pass`/`pass_with_findings` → `0`, `fail` or a refusal → `2`.
@@ -136,11 +136,12 @@ pnpm records that version in a `minimumReleaseAgeExclude` entry in the profile's
 
 ## UML Modelling and Review
 
-`logicprobe_uml` draws a LogicModelV1 as UML. It also reads a hand-drawn UML diagram back into a model, and it reviews the modelling itself. It has three actions:
+`logicprobe_uml` draws a LogicModelV1 as UML. It also reads a hand-drawn UML diagram back into a model, reviews the modelling itself, and prints the label and comment conventions the parser accepts. It has four actions:
 
 - **render**: model to diagram. Mermaid covers state, activity flowchart and sequence views. PlantUML covers state and sequence. Any construct the notation cannot express becomes a warning instead of a silent drop. PlantUML activity is refused, because that syntax cannot carry a graph with merges or cycles faithfully.
 - **parse**: diagram to model. It reads Mermaid and PlantUML state or activity diagrams, so a hand-drawn diagram can go straight into `logicprobe_verify`. Two inputs are refused because they cannot become a machine: a sequence diagram (a trace cannot reconstruct a machine), and any other Mermaid family (`classDiagram`, `erDiagram`, `gantt`, `mindmap`, …), which comes back as `errorCode: "UML_NOT_A_STATE_DIAGRAM"` naming the family.
 - **review**: audits the modelling. It reports structural defects and documentation gaps. The structural defects are unreachable states, dead ends, ambiguous branches, self-loops with no exit, and duplicate transitions. The documentation gaps are a missing narrative, unbounded variables, states a reader cannot map back to code, and label drift between diagram and narrative. It also runs the fidelity check: it parses the diagram back into a model and reports every structural difference.
+- **explain-labels**: prints the label spellings and ignored-line rules the parser applies (`directiveLines`, `acceptedLabelForms`, `renderedForm`, `ignoredLines`, `rules`), with no diagram needed. Reach for it when a hand-drawn diagram and a rendered one disagree; the CLI mirror is `uml-review --explain-labels`.
 
 **A structure diagram is the dangerous case, because it parses.** A PlantUML component, package, class or deployment diagram declares no diagram kind, so the parser meets its keywords line by line. The arrows look like transitions, so `parse` returns a by-product model — now together with an error finding `UML_NOT_A_STATE_DIAGRAM`, `discardedConstructs` (every declaration it could not represent, with line and text), `discardedEdges` (the arrows misread as transitions) and `verdict: "fail"`. Read that as: **this file has no model and this diagram was not reviewed.** Do not feed the by-product to `logicprobe_verify` and call the result an architecture review. Structural checks over a real dependency graph (allowed-edge matrices, cycles, isolated nodes) do not exist yet; the codes `UML020`+ are reserved for them.
 
@@ -201,7 +202,7 @@ Outside dsh (Claude Code, Cursor, Codex, a terminal, CI) the install is the **re
 - `verify` runs S1-S8 / A1-A14 / D1-D4
 - `compose` runs the C1 / C2 composition
 - `export` emits UPPAAL, TLA+, PRISM and SPIN input
-- `uml-render`, `uml-parse` and `uml-review` cover the UML front end
+- `uml-render`, `uml-parse` and `uml-review` cover the UML front end (`uml-review --explain-labels` prints the label and comment conventions the parser accepts)
 
 Its output is byte-identical to the dsh tools, cross-checked by `tests/python/run.mjs`. When the model exists only as extracted tables, fill in `tools/python/verification-harness.py`. Data-model checks use `tools/python/data-model-harness.py`. When Python is unavailable, for example on an air-gapped machine, the matching guide describes a manual verification mode.
 

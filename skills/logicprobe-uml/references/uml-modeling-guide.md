@@ -227,10 +227,10 @@ Now delete the `ERROR --cooldown--> STARTING` arrow and review again. `ACTIVE` a
 ## Labels and comments: what the parser expects
 
 Two things cause most of the friction with hand-written diagrams. Both are printed by the
-tool itself: `logicprobe_uml` does not have a flag for it (it documents the convention in
-its description), and the CLI has `uml-review --explain-labels` (add `--notation
-plantuml` for that flavour), which prints exactly the table below from the same rules the
-parser applies.
+tools themselves: `logicprobe_uml action="explain-labels"` returns the convention (pass
+`notation: "plantuml"` for that flavour), and the CLI mirror is `uml-review
+--explain-labels` (with `--notation plantuml`). Either one prints exactly the table below,
+from the same rules the parser applies.
 
 **1. State meanings, in the spellings the parser accepts.** A label carries a *meaning*
 when it differs from the bare id. Accepted, in this order:

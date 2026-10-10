@@ -170,7 +170,7 @@ UML modelling variant (the task is to draw a flow, not to check a claim):
 | `logicprobe_compose_verify` | Two or more machines checked together (rendezvous handshake semantics): C1 composition deadlock, C2 rendezvous never fires. |
 | `logicprobe_concurrency_scan` | Mines concurrency claims (thread-safe, lock-free, race condition, mutex, ISR-safe) and routes them to dedicated verification. It does not prove concurrency safety. |
 | `logicprobe_export` | Emits external-checker input from a verified model: UPPAAL, TLA+, PRISM, SPIN. |
-| `logicprobe_uml` | render / parse / review for UML modelling — the diagram domain belongs to the `logicprobe-uml` skill. |
+| `logicprobe_uml` | render / parse / review / explain-labels for UML modelling — the diagram domain belongs to the `logicprobe-uml` skill. |
 
 The repository engine mirrors the same checks and carries the `compose` and `export` subcommands for hosts without the native tools.
 
@@ -189,7 +189,7 @@ Every tool report carries the same outcome contract. **`ok` says a report was pr
 | `hashes` | Every hash the report carries, in one place (a model hash, a diagram hash, before/after hashes). |
 | `nextSteps[]` | What to do next, derived from the findings; never empty, and identical for two runs over the same input. |
 | `metadataKeys[]` | Paths of the `_`-prefixed annotation keys the schema ignored, e.g. `["_source", "_verified", "states[0]._note"]` (present only when the input carried any). |
-| `narrativeCoverage` | `{states: "5/5", events: "3/9", scenarios: "0/12"}` when the model carries a narrative — a partial narrative is valid, and this is how much is still undocumented. |
+| `narrativeCoverage` | `{states: "5/5", events: "3/9", scenarios: "0/12"}` when the model carries a narrative — a partial narrative is valid, and this is how much is still undocumented. The gap is also a `NARRATIVE_PARTIAL` (info) finding, so a gate can read it without parsing `nextSteps` text. |
 
 Turn the verdict into an answer, never into a summary of `ok`:
 
@@ -395,7 +395,7 @@ This skill owns behavioural claims. Three neighbouring domains have their own sk
 
 | Domain | Skill |
 |---|---|
-| Drawing a code flow as UML, or auditing a diagram somebody drew (render / parse / review, round-trip fidelity, component and class diagrams refused) | `logicprobe-uml` |
+| Drawing a code flow as UML, or auditing a diagram somebody drew (render / parse / review / explain-labels, round-trip fidelity, component and class diagrams refused) | `logicprobe-uml` |
 | Reviewing architecture, module structure or a dependency diagram (isolated nodes, dangling endpoints, cycles, allowed-dependency and layer violations, missing required edges) | `logicprobe-structure` |
 | Concurrency claims — "thread-safe", "lock-free", "no data race", "ISR-safe" — mined and routed to TSan/Helgrind/CBMC/TLA+, never proven here | `logicprobe-concurrency` |
 | Entities, fields, relationships, data invariants, schema migrations (DS1-DS4, DA1-DA12, DD1-DD4) | `logicprobe-datamodel` |

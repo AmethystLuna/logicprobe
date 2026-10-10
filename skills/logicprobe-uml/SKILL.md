@@ -16,6 +16,7 @@ This skill covers the diagram half of the Logic Probe toolbox. The claim-verific
 | Modelling a code flow as a state, activity or sequence diagram | `logicprobe_uml action=render`: model to diagram source, with a citation per state, event, guard and action |
 | Reading a hand-drawn diagram back into a model | `action=parse`: Mermaid or PlantUML state/activity text into a LogicModelV1 that `logicprobe_verify` can check |
 | Auditing a diagram somebody drew | `action=review`: structural defects, documentation gaps, and render-versus-model round-trip fidelity |
+| Printing what the parser accepts for labels and comments | `action=explain-labels`: the accepted label spellings, the form the renderer writes, and which lines are ignored (the CLI mirror is `uml-review --explain-labels`) |
 | A diagram whose claims must be tied to the code | Every element needs a source citation; the review says what the diagram says, not whether the code is correct |
 
 Pipeline (DSH):
@@ -29,8 +30,9 @@ code flow → model (citation per element) → logicprobe_uml action=render → 
 - **render** — model to diagram. Mermaid covers `state`, `activity` and `sequence`. PlantUML covers `state` and `sequence`. Any construct the notation cannot carry becomes a warning, never a silent drop. PlantUML activity is refused instead of approximated.
 - **parse** — diagram to model. It reads Mermaid and PlantUML state or activity text, so a hand-drawn diagram can be verified like any other model. Two inputs are refused because they cannot become a machine: a sequence diagram (a trace cannot reconstruct a machine) and a different Mermaid family (`classDiagram`, `erDiagram`, `gantt`, `mindmap`, …) — both come back as `errorCode: "UML_NOT_A_STATE_DIAGRAM"` with the discarded construct named.
 - **review** — it answers one of three questions. Give it a model: is the machine well-modelled? Give it a diagram: what does the diagram say? Give it both: does the diagram match the model?
+- **explain-labels** — the parser's own account of labels and comments: the accepted spellings, the form the renderer writes, and which lines it ignores. No diagram needed. It answers "why does my hand-drawn diagram report drift or ignored lines?" without reading the source.
 
-A host without the tools runs the same three actions through the repository engine. The engine is deliberately single-source — do not copy it into this skill.
+A host without the tools runs the same four actions through the repository engine. The engine is deliberately single-source — do not copy it into this skill.
 
 ## A Structure Diagram Is the Dangerous Case, Because It Parses
 

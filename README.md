@@ -100,7 +100,7 @@ git clone https://github.com/AmethystLuna/logicprobe.git ~/.claude/plugins/dev/l
 | `hashSpec` | `modelHash` 依据的已发布规范（见 [`hash-spec.md`](skills/logicprobe/references/hash-spec.md)）。 |
 | `hashes` | 本次报告涉及的全部哈希集中一处（模型哈希、图/矩阵哈希、前后模型哈希）。 |
 | `metadataKeys` | 输入里带 `_` 前缀的注记键路径（仅当存在时出现）。 |
-| `narrativeCoverage` | `{states: "5/5", events: "3/9", scenarios: "0/12"}`：narrative **允许部分覆盖**，这里报告还差多少。 |
+| `narrativeCoverage` | `{states: "5/5", events: "3/9", scenarios: "0/12"}`：narrative **允许部分覆盖**，这里报告还差多少；缺口同时是一条 `NARRATIVE_PARTIAL`（info）发现，门禁不必去解析 `nextSteps` 文本。 |
 | `nextSteps` | 由发现推导的下一步，永不为空，同一输入两次运行逐字一致。 |
 
 只看 `ok` 会把「有死锁」的模型读成通过——判据是 `verdict`。非 DSH 的 Python CLI 退出码跟随 verdict：`pass`/`pass_with_findings` → `0`，`fail` 或拒绝 → `2`。
@@ -134,11 +134,12 @@ pnpm 会把该版本写进 profile 的 `pnpm-workspace.yaml` 的 `minimumRelease
 
 ## UML 建模与审查
 
-`logicprobe_uml` 把一份 LogicModelV1 画成 UML，也可以把手绘的 UML 读回模型，还可以审查建模本身。它有 3 个动作：
+`logicprobe_uml` 把一份 LogicModelV1 画成 UML，也可以把手绘的 UML 读回模型，还可以审查建模本身，或打印解析器接受的标签与注释口径。它有 4 个动作：
 
 - **render**：模型 → 图。Mermaid 支持状态图、活动流程图、时序图；PlantUML 支持状态图与时序图。notation 表达不了的构造会变成 warning，不会被悄悄丢掉。PlantUML 活动图直接拒绝，因为它的语法无法忠实承载带合流或环的图。
 - **parse**：图 → 模型。支持 Mermaid 与 PlantUML 的状态图、活动图，因此手绘的图也能送进 `logicprobe_verify` 验证。两类输入会被拒绝，因为它们无法变成状态机：时序图（迹无法重建机），以及**其它 Mermaid 图族**（`classDiagram`、`erDiagram`、`gantt`、`mindmap`…），返回 `errorCode: "UML_NOT_A_STATE_DIAGRAM"` 并点名该图族。
 - **review**：审查建模。它报告两类问题。结构缺陷包括不可达状态、死端、歧义分支、无出口自环、重复迁移。文档缺口包括缺 narrative、变量无界、状态无可读标注、图与 narrative 标签漂移。它还会做保真度检查：把图重新解析回模型，任何结构性差异都报出来。
+- **explain-labels**：打印解析器接受的标签写法与忽略行口径（`directiveLines`、`acceptedLabelForms`、`renderedForm`、`ignoredLines`、`rules`），不需要给图。手绘图与渲染图对不齐时先看它；命令行对应 `uml-review --explain-labels`。
 
 **结构图是最危险的一类，因为它「能解析」。** PlantUML 的组件图 / 包图 / 类图 / 部署图不声明图类型，解析器会逐行碰上它的关键字。箭头看起来就是迁移，于是 `parse` 会返回一个副产品模型——但现在同时给出 error 级发现 `UML_NOT_A_STATE_DIAGRAM`、`discardedConstructs`（每条无法表达的声明及其行号与原文）、`discardedEdges`（被误读成迁移的箭头数），以及 `verdict: "fail"`。意思是：**这份文件没有被建模，这张图没有被审查。** 不要把那个副产品喂给 `logicprobe_verify` 当作架构审查结论。针对真正依赖图的结构检查（允许依赖矩阵、环、孤立节点）尚未实现，编号 `UML020`+ 已为其保留。
 
@@ -199,7 +200,7 @@ pnpm 会把该版本写进 profile 的 `pnpm-workspace.yaml` 的 `minimumRelease
 - `verify` 跑 S1-S8 / A1-A14 / D1-D4
 - `compose` 跑 C1 / C2 组合
 - `export` 生成 UPPAAL、TLA+、PRISM、SPIN 输入
-- `uml-render`、`uml-parse`、`uml-review` 覆盖 UML 前端
+- `uml-render`、`uml-parse`、`uml-review` 覆盖 UML 前端（`uml-review --explain-labels` 打印解析器接受的标签与注释口径）
 
 它与 dsh 工具逐字节一致，对照见 `tests/python/run.mjs`。模型只有抽取出的状态表时，填充模板 `tools/python/verification-harness.py`。数据模型验证使用 `tools/python/data-model-harness.py`。Python 不可用（例如离线开发机）时，对应 guide 提供手动验证模式。
 

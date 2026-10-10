@@ -93,8 +93,8 @@
 
 ### D6 组合维 —— 多机 / 跨子系统协议
 
-- 现状（v1 已落地）：新增 `runCompositionVerification(machines, { rendezvous })` —— 两台机组合 BFS：非 rendezvous 事件由触发方单独推进，rendezvous 事件需双方同使能（含守卫）才同步推进，终态机视为停机不再参与；产出 C1 组合死锁（无可推进且非双方终态）与 C2 握手永不触发（warning）。
-- 仍缺：>2 机、非对称广播/缓冲队列语义、DSH 工具封装（现为引擎函数，尚未注册 tool）。
+- 现状（v1 已落地）：新增 `runCompositionVerification(machines, { rendezvous })` —— N 台机组合 BFS：非 rendezvous 事件由触发方单独推进，rendezvous 事件需**所有声明它的非终态机同时使能**（含守卫）才同步推进，终态机视为停机不再参与；产出 C1 组合死锁（无可推进且非双方终态）与 C2 握手永不触发（**error**，与 C1 同严重度——握手永不触发等于组合无法推进，只看 `verdict` 的门禁必须能拦住它）。
+- DSH 工具 `logicprobe_compose_verify` 已注册（入参 `machines` + `rendezvous`；实测 2 台与 3 台均可，未声明会合事件的机器不参与也不阻塞）。仍缺：非对称广播 / 缓冲队列语义，以及**跨机共享变量通道**——compose 只有 rendezvous 一种耦合，每台机的 `variables` 私有，跨模块共享状态必须建模在单机内或用显式握手（见 `skills/logicprobe/references/dsh-model-schema.md` 的 Composition verification 节）。
 
 ### D7 动作语义维 —— entry/exit/do-action 与副作用
 
