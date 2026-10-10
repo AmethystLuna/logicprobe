@@ -23,6 +23,48 @@ logicprobe 核验声称与实物是否一致。事实类对着源码查。行为
 
 模型永远先以转换表形式展示，**经用户确认后才运行**。模型提取错误是验证的头号失败模式。
 
+## 工具与报告
+
+下面两份清单（原生工具清单，以及怎么读它们的报告）与**安装方式无关**：dsh 走原生工具，Claude Code / Codex / Cursor / 终端 / CI 走同一套技能与 Python CLI 引擎（见「使用」）。
+
+工具清单：
+
+| 工具 | 作用 |
+|------|------|
+| `logicprobe_verify` | 状态机验证：S1-S8 结构检查 + A1-A14 对抗探针。传 `beforeModel` 与 `stateMapping` 可加做 D1-D4 前后回归。 |
+| `logicprobe_datamodel_verify` | 数据模型验证：DataModelV1、迁移覆盖、copy 一致性、DD1-DD4 数据回归。 |
+| `logicprobe_concurrency_scan` | 扫描并发风险声称（thread-safe、lock-free、race condition、mutex 等），标注需要专用验证。 |
+| `logicprobe_compose_verify` | 两台及以上状态机组合验证（握手 rendezvous 语义）：C1 组合死锁、C2 握手永不触发。 |
+| `logicprobe_export` | 导出外部工具原生输入：UPPAAL（`.xta` + queries）、TLA+（TLC 模块）、PRISM（DTMC `.pm` + `.pctl`）、SPIN（Promela + ltl）。 |
+| `logicprobe_uml` | 用 UML 建模代码流程，并审查这份建模。见下方「UML 建模与审查」。 |
+| `logicprobe_structure_verify` | 把组件/包/类/部署图当**依赖图**审查（UML020-UML026）：孤立节点、悬空端点、依赖环、违反允许依赖矩阵的边、跨层反向依赖、矩阵要求却缺失的边；每条被判定的边都会报出命中的规则 id。它审的是**图**，代码侧要用 include/依赖扫描对账。 |
+| `logicprobe_report_diff` | 对比两份同族报告（baseline vs current），给出新增/消除/变化的发现与**增量**判定：按 `检查 id + code + 机器可读定位（evidence/path）` 匹配，改措辞只会算作 `changed`；新增 error 判 fail，而 `currentVerdict` 仍保留本次运行的绝对结论。"违规不增"的验收判据，算出来而不是看出来的。 |
+
+迁移代价用 `cost`（缺省 1），配 `budget` 不变量即由 A12 检查最坏路径代价，正成本环会被判为无界。迁移权重用 `weight`（缺省 1），配 `probability` 不变量即由 A13 计算概率可达。状态上的 `onEntry`/`onExit` 动作由 A4 自动纳入配对检查，`maxTicks` 加 `tickEvents` 由 A14 检查期限。
+
+### 怎么读报告（`ok` 不是结论）
+
+所有报告都同时给「工具跑成功」与「审查通过」两件事：
+
+| 字段 | 含义 |
+|------|------|
+| `schema` | 版本化报告契约（`logicprobe/verify/v1`、`logicprobe/uml/review/v1`…），消费方按它分支而不是猜字段。 |
+| `ok` | 引擎产出了报告。对 `verify` 只在**模型校验失败**时为 `false`；它**不是**结论。 |
+| `ran` | 工具确实执行了。仅在工具层拒绝请求（带 `errorCode`/`error`）时为 `false`。 |
+| `verdict` | `pass` / `pass_with_findings` / `fail`。任何 `severity: "error"` 的发现、或校验失败，都会是 `fail`。 |
+| `verdictReason` | 一行说明，例如 `1 error finding(s) (first: S2_NO_TRANSITIONS)`。 |
+| `hashSpec` | `modelHash` 依据的已发布规范（见 [`hash-spec.md`](skills/logicprobe/references/hash-spec.md)）。 |
+| `hashes` | 本次报告涉及的全部哈希集中一处（模型哈希、图/矩阵哈希、前后模型哈希）。 |
+| `metadataKeys` | 输入里带 `_` 前缀的注记键路径（仅当存在时出现）。 |
+| `narrativeCoverage` | `{states: "5/5", events: "3/9", scenarios: "0/12"}`：narrative **允许部分覆盖**，这里报告还差多少；缺口同时是一条 `NARRATIVE_PARTIAL`（info）发现，门禁不必去解析 `nextSteps` 文本。 |
+| `nextSteps` | 由发现推导的下一步，永不为空，同一输入两次运行逐字一致。 |
+
+只看 `ok` 会把「有死锁」的模型读成通过——判据是 `verdict`。非 DSH 的 Python CLI 退出码跟随 verdict：`pass`/`pass_with_findings` → `0`，`fail` 或拒绝 → `2`。
+
+### 模型自带的归档记录（`_` 前缀键）
+
+任何以 `_` 开头的键（任意层级，如 `_source`、`_verified`、`_extraction_caveats`、`states[0]._note`）都是**注记元数据**：schema 跳过、`modelHash` 排除、报告以 `metadataKeys` 回显。这样来源与验证快照可以跟模型放在同一个文件里，不必再维护一个会漂移的 sidecar，而模型的哈希身份不变。其余键仍然闭合——拼错的 `sttes` 依旧报错。用 `verify model.json --hash-check <hex>` 可回答某个历史哈希是否属于任何已发布规范。
+
 ## 安装
 
 ### Claude Code 安装（推荐）
@@ -71,45 +113,7 @@ git clone https://github.com/AmethystLuna/logicprobe.git ~/.claude/plugins/dev/l
 2. **注入门禁文本。** 每个会话的第一个模型步骤会收到 claim 验证门禁（1% Rule / Red Flags / 主动建议）。这是 Claude `SessionStart` hook 在 dsh 上的对应物。
 3. **注册原生工具与上下文。** 工具挂在 `ctx.tools` 上，另有一条策略感知上下文 `logicprobe:mode`（`ctx.systemPrompt`），以及模型可见目录条目（`cordis_inspect`）。
 
-工具清单：
-
-| 工具 | 作用 |
-|------|------|
-| `logicprobe_verify` | 状态机验证：S1-S8 结构检查 + A1-A14 对抗探针。传 `beforeModel` 与 `stateMapping` 可加做 D1-D4 前后回归。 |
-| `logicprobe_datamodel_verify` | 数据模型验证：DataModelV1、迁移覆盖、copy 一致性、DD1-DD4 数据回归。 |
-| `logicprobe_concurrency_scan` | 扫描并发风险声称（thread-safe、lock-free、race condition、mutex 等），标注需要专用验证。 |
-| `logicprobe_compose_verify` | 两台及以上状态机组合验证（握手 rendezvous 语义）：C1 组合死锁、C2 握手永不触发。 |
-| `logicprobe_export` | 导出外部工具原生输入：UPPAAL（`.xta` + queries）、TLA+（TLC 模块）、PRISM（DTMC `.pm` + `.pctl`）、SPIN（Promela + ltl）。 |
-| `logicprobe_uml` | 用 UML 建模代码流程，并审查这份建模。见下方「UML 建模与审查」。 |
-| `logicprobe_structure_verify` | 把组件/包/类/部署图当**依赖图**审查（UML020-UML026）：孤立节点、悬空端点、依赖环、违反允许依赖矩阵的边、跨层反向依赖、矩阵要求却缺失的边；每条被判定的边都会报出命中的规则 id。它审的是**图**，代码侧要用 include/依赖扫描对账。 |
-| `logicprobe_report_diff` | 对比两份同族报告（baseline vs current），给出新增/消除/变化的发现与**增量**判定：按 `检查 id + code + 机器可读定位（evidence/path）` 匹配，改措辞只会算作 `changed`；新增 error 判 fail，而 `currentVerdict` 仍保留本次运行的绝对结论。"违规不增"的验收判据，算出来而不是看出来的。 |
-
-迁移代价用 `cost`（缺省 1），配 `budget` 不变量即由 A12 检查最坏路径代价，正成本环会被判为无界。迁移权重用 `weight`（缺省 1），配 `probability` 不变量即由 A13 计算概率可达。状态上的 `onEntry`/`onExit` 动作由 A4 自动纳入配对检查，`maxTicks` 加 `tickEvents` 由 A14 检查期限。
-
-### 怎么读报告（`ok` 不是结论）
-
-所有报告都同时给「工具跑成功」与「审查通过」两件事：
-
-| 字段 | 含义 |
-|------|------|
-| `schema` | 版本化报告契约（`logicprobe/verify/v1`、`logicprobe/uml/review/v1`…），消费方按它分支而不是猜字段。 |
-| `ok` | 引擎产出了报告。对 `verify` 只在**模型校验失败**时为 `false`；它**不是**结论。 |
-| `ran` | 工具确实执行了。仅在工具层拒绝请求（带 `errorCode`/`error`）时为 `false`。 |
-| `verdict` | `pass` / `pass_with_findings` / `fail`。任何 `severity: "error"` 的发现、或校验失败，都会是 `fail`。 |
-| `verdictReason` | 一行说明，例如 `1 error finding(s) (first: S2_NO_TRANSITIONS)`。 |
-| `hashSpec` | `modelHash` 依据的已发布规范（见 [`hash-spec.md`](skills/logicprobe/references/hash-spec.md)）。 |
-| `hashes` | 本次报告涉及的全部哈希集中一处（模型哈希、图/矩阵哈希、前后模型哈希）。 |
-| `metadataKeys` | 输入里带 `_` 前缀的注记键路径（仅当存在时出现）。 |
-| `narrativeCoverage` | `{states: "5/5", events: "3/9", scenarios: "0/12"}`：narrative **允许部分覆盖**，这里报告还差多少；缺口同时是一条 `NARRATIVE_PARTIAL`（info）发现，门禁不必去解析 `nextSteps` 文本。 |
-| `nextSteps` | 由发现推导的下一步，永不为空，同一输入两次运行逐字一致。 |
-
-只看 `ok` 会把「有死锁」的模型读成通过——判据是 `verdict`。非 DSH 的 Python CLI 退出码跟随 verdict：`pass`/`pass_with_findings` → `0`，`fail` 或拒绝 → `2`。
-
-### 模型自带的归档记录（`_` 前缀键）
-
-任何以 `_` 开头的键（任意层级，如 `_source`、`_verified`、`_extraction_caveats`、`states[0]._note`）都是**注记元数据**：schema 跳过、`modelHash` 排除、报告以 `metadataKeys` 回显。这样来源与验证快照可以跟模型放在同一个文件里，不必再维护一个会漂移的 sidecar，而模型的哈希身份不变。其余键仍然闭合——拼错的 `sttes` 依旧报错。用 `verify model.json --hash-check <hex>` 可回答某个历史哈希是否属于任何已发布规范。
-
-安装（原生 bundle，推荐）：
+### 安装（原生 bundle，推荐）
 
 ```bash
 # 从 npm 安装（包名 dsh-logicprobe）

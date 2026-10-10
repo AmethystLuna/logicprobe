@@ -25,6 +25,48 @@ logicprobe checks a claim against the thing it describes. Facts go against the s
 
 The model is always shown as a transition table first, and **confirmed with the user before it runs**. Extraction errors are the dominant failure mode.
 
+## Tools and Reports
+
+The two lists below (the native tools, and how to read their reports) do not depend on how you install: dsh uses the native tools, while Claude Code / Codex / Cursor / a terminal / CI use the same skills and the Python CLI engine (see "Usage").
+
+The tools:
+
+| Tool | What it does |
+|------|------|
+| `logicprobe_verify` | State-machine verification: S1-S8 structural checks plus A1-A14 adversarial probes. Pass `beforeModel` and `stateMapping` to add the D1-D4 before/after regression. |
+| `logicprobe_datamodel_verify` | Data-model verification: DataModelV1, migration coverage, copy consistency, DD1-DD4 data regression. |
+| `logicprobe_concurrency_scan` | Mines concurrency risk claims (thread-safe, lock-free, race condition, mutex) and flags them for dedicated verification. |
+| `logicprobe_compose_verify` | Composition verification of two or more machines (rendezvous handshake semantics): C1 composition deadlock, C2 rendezvous never fires. |
+| `logicprobe_export` | Exports external-tool input: UPPAAL (`.xta` + queries), TLA+ (TLC module), PRISM (DTMC `.pm` + `.pctl`), SPIN (Promela + ltl). |
+| `logicprobe_uml` | Models a code flow as UML and reviews the modelling. See "UML modelling and review" below. |
+| `logicprobe_structure_verify` | Audits a component/package/class/deployment diagram as a **dependency graph** (UML020-UML026): isolated nodes, dangling endpoints, dependency cycles, edges that violate an allowed-dependency matrix, upward cross-layer edges, and required edges the diagram is missing — every judged edge names the rule ids it matched. It audits the diagram; reconcile it with a source-side include scan. |
+| `logicprobe_report_diff` | Compares two reports of the same family (baseline vs current) and reports the added, removed and changed findings with a **delta** verdict. Findings are matched by `check id + code + machine-readable locator (evidence/path)`, so a reworded message only counts as `changed`; a newly added error fails it, while `currentVerdict` keeps the run's absolute result visible. The "violations must not increase" criterion, computed instead of eyeballed. |
+
+Transition `cost` (default 1) plus a `budget` invariant makes A12 check the worst-case path cost. A reachable cycle with positive cost counts as unbounded. Transition `weight` (default 1) plus a `probability` invariant makes A13 compute probability reachability. State `onEntry`/`onExit` actions enter A4 pair symmetry automatically, and `maxTicks` plus `tickEvents` drive the A14 deadline check.
+
+### How to read a report (`ok` is not a verdict)
+
+Every report separates "the tool ran" from "the review passed":
+
+| Field | Meaning |
+|-------|---------|
+| `schema` | The versioned report contract (`logicprobe/verify/v1`, `logicprobe/uml/review/v1`, …) — branch on it instead of sniffing fields. |
+| `ok` | The engine produced a report. For `verify` it is `false` only when model *validation* failed. It is **not** a verdict. |
+| `ran` | The tool executed. `false` only for a tool-level refusal (which carries `errorCode`/`error`). |
+| `verdict` | `pass` / `pass_with_findings` / `fail`. Any `severity: "error"` finding — or a validation failure — makes it `fail`. |
+| `verdictReason` | One line, e.g. `1 error finding(s) (first: S2_NO_TRANSITIONS)`. |
+| `hashSpec` | The published specification `modelHash` follows — see [`hash-spec.md`](skills/logicprobe/references/hash-spec.md). |
+| `hashes` | Every hash the report carries, in one place (model, diagram/matrix, before/after). |
+| `metadataKeys` | Paths of the `_`-prefixed annotation keys the input carried. |
+| `narrativeCoverage` | `{states: "5/5", events: "3/9", scenarios: "0/12"}` — a narrative may cover part of the model, and this is how much is still undocumented. The gap is also a `NARRATIVE_PARTIAL` (info) finding, so a gate need not parse `nextSteps` text. |
+| `nextSteps` | What to do next, derived from the findings; never empty, and identical for two runs over the same input. |
+
+Reading `ok` turns a model with a deadlock into a pass; the verdict is the judgement. The non-DSH Python CLI follows the verdict with its exit code: `pass`/`pass_with_findings` → `0`, `fail` or a refusal → `2`.
+
+### The model carries its own archive record (`_`-prefixed keys)
+
+Any key starting with `_` — at any level: `_source`, `_verified`, `_extraction_caveats`, `states[0]._note` — is **annotation metadata**: the schema skips it, `modelHash` excludes it, and the report echoes it as `metadataKeys`. Provenance and verification snapshots can therefore live inside the model file instead of a sidecar that drifts away from it, without changing the model's hash identity. Every other key stays closed: a mistyped `sttes` is still an error. `verify model.json --hash-check <hex>` answers whether a recorded hash belongs to any published specification.
+
 ## Installation
 
 ### Claude Code install (recommended)
@@ -73,45 +115,7 @@ The bundle does three things:
 2. **Injects the gate text.** The first model step of every session receives the claim-verification gate (1% Rule / Red Flags / proactive suggestion). This is the dsh counterpart of the Claude `SessionStart` hook.
 3. **Registers the native tools and a context.** The tools live on `ctx.tools`. A policy-aware `logicprobe:mode` context lives on `ctx.systemPrompt`. A model-visible catalog entry is available through `cordis_inspect`.
 
-The tools:
-
-| Tool | What it does |
-|------|------|
-| `logicprobe_verify` | State-machine verification: S1-S8 structural checks plus A1-A14 adversarial probes. Pass `beforeModel` and `stateMapping` to add the D1-D4 before/after regression. |
-| `logicprobe_datamodel_verify` | Data-model verification: DataModelV1, migration coverage, copy consistency, DD1-DD4 data regression. |
-| `logicprobe_concurrency_scan` | Mines concurrency risk claims (thread-safe, lock-free, race condition, mutex) and flags them for dedicated verification. |
-| `logicprobe_compose_verify` | Composition verification of two or more machines (rendezvous handshake semantics): C1 composition deadlock, C2 rendezvous never fires. |
-| `logicprobe_export` | Exports external-tool input: UPPAAL (`.xta` + queries), TLA+ (TLC module), PRISM (DTMC `.pm` + `.pctl`), SPIN (Promela + ltl). |
-| `logicprobe_uml` | Models a code flow as UML and reviews the modelling. See "UML modelling and review" below. |
-| `logicprobe_structure_verify` | Audits a component/package/class/deployment diagram as a **dependency graph** (UML020-UML026): isolated nodes, dangling endpoints, dependency cycles, edges that violate an allowed-dependency matrix, upward cross-layer edges, and required edges the diagram is missing — every judged edge names the rule ids it matched. It audits the diagram; reconcile it with a source-side include scan. |
-| `logicprobe_report_diff` | Compares two reports of the same family (baseline vs current) and reports the added, removed and changed findings with a **delta** verdict. Findings are matched by `check id + code + machine-readable locator (evidence/path)`, so a reworded message only counts as `changed`; a newly added error fails it, while `currentVerdict` keeps the run's absolute result visible. The "violations must not increase" criterion, computed instead of eyeballed. |
-
-Transition `cost` (default 1) plus a `budget` invariant makes A12 check the worst-case path cost. A reachable cycle with positive cost counts as unbounded. Transition `weight` (default 1) plus a `probability` invariant makes A13 compute probability reachability. State `onEntry`/`onExit` actions enter A4 pair symmetry automatically, and `maxTicks` plus `tickEvents` drive the A14 deadline check.
-
-### How to read a report (`ok` is not a verdict)
-
-Every report separates "the tool ran" from "the review passed":
-
-| Field | Meaning |
-|-------|---------|
-| `schema` | The versioned report contract (`logicprobe/verify/v1`, `logicprobe/uml/review/v1`, …) — branch on it instead of sniffing fields. |
-| `ok` | The engine produced a report. For `verify` it is `false` only when model *validation* failed. It is **not** a verdict. |
-| `ran` | The tool executed. `false` only for a tool-level refusal (which carries `errorCode`/`error`). |
-| `verdict` | `pass` / `pass_with_findings` / `fail`. Any `severity: "error"` finding — or a validation failure — makes it `fail`. |
-| `verdictReason` | One line, e.g. `1 error finding(s) (first: S2_NO_TRANSITIONS)`. |
-| `hashSpec` | The published specification `modelHash` follows — see [`hash-spec.md`](skills/logicprobe/references/hash-spec.md). |
-| `hashes` | Every hash the report carries, in one place (model, diagram/matrix, before/after). |
-| `metadataKeys` | Paths of the `_`-prefixed annotation keys the input carried. |
-| `narrativeCoverage` | `{states: "5/5", events: "3/9", scenarios: "0/12"}` — a narrative may cover part of the model, and this is how much is still undocumented. The gap is also a `NARRATIVE_PARTIAL` (info) finding, so a gate need not parse `nextSteps` text. |
-| `nextSteps` | What to do next, derived from the findings; never empty, and identical for two runs over the same input. |
-
-Reading `ok` turns a model with a deadlock into a pass; the verdict is the judgement. The non-DSH Python CLI follows the verdict with its exit code: `pass`/`pass_with_findings` → `0`, `fail` or a refusal → `2`.
-
-### The model carries its own archive record (`_`-prefixed keys)
-
-Any key starting with `_` — at any level: `_source`, `_verified`, `_extraction_caveats`, `states[0]._note` — is **annotation metadata**: the schema skips it, `modelHash` excludes it, and the report echoes it as `metadataKeys`. Provenance and verification snapshots can therefore live inside the model file instead of a sidecar that drifts away from it, without changing the model's hash identity. Every other key stays closed: a mistyped `sttes` is still an error. `verify model.json --hash-check <hex>` answers whether a recorded hash belongs to any published specification.
-
-Install (native bundle, recommended):
+### Install (native bundle, recommended)
 
 ```bash
 # from npm (package name: dsh-logicprobe)
