@@ -67,77 +67,6 @@ Reading `ok` turns a model with a deadlock into a pass; the verdict is the judge
 
 Any key starting with `_` — at any level: `_source`, `_verified`, `_extraction_caveats`, `states[0]._note` — is **annotation metadata**: the schema skips it, `modelHash` excludes it, and the report echoes it as `metadataKeys`. Provenance and verification snapshots can therefore live inside the model file instead of a sidecar that drifts away from it, without changing the model's hash identity. Every other key stays closed: a mistyped `sttes` is still an error. `verify model.json --hash-check <hex>` answers whether a recorded hash belongs to any published specification.
 
-## Installation
-
-### Claude Code install (recommended)
-
-Add the marketplace to **Claude Code**'s `~/.claude/settings.json`:
-
-```json
-{
-  "extraKnownMarketplaces": {
-    "logicprobe": {
-      "source": { "source": "github", "repo": "AmethystLuna/logicprobe" }
-    }
-  }
-}
-```
-
-Then install from the CLI:
-
-```bash
-claude plugin install logicprobe@logicprobe
-```
-
-### Claude Code manual install
-
-```bash
-git clone https://github.com/AmethystLuna/logicprobe.git ~/.claude/plugins/dev/logicprobe
-```
-
-Then enable it in `~/.claude/settings.json`:
-
-```json
-{
-  "enabledPlugins": {
-    "logicprobe@dev": true
-  }
-}
-```
-
-## DeepSeek Harness (dsh)
-
-Native dsh support ships as a cordis plugin bundle at the repository root, declared by `dsh.bundle` in the root `package.json`.
-
-The bundle does three things:
-
-1. **Registers the skills.** They follow the Agent Skills open standard and are discovered as-is by dsh's `skill-filesystem` provider. No extra code.
-2. **Injects the gate text.** The first model step of every session receives the claim-verification gate (1% Rule / Red Flags / proactive suggestion). This is the dsh counterpart of the Claude `SessionStart` hook.
-3. **Registers the native tools and a context.** The tools live on `ctx.tools`. A policy-aware `logicprobe:mode` context lives on `ctx.systemPrompt`. A model-visible catalog entry is available through `cordis_inspect`.
-
-### Install (native bundle, recommended)
-
-```bash
-# from npm (package name: dsh-logicprobe)
-dsh plugin --profile web add dsh-logicprobe
-# or from GitHub source
-dsh plugin --profile web add "github:AmethystLuna/logicprobe"
-# when dsh is not installed globally
-npx -p @deepseek-ai/dsh dsh plugin --profile web add dsh-logicprobe
-```
-
-Restart the profile afterwards. `dsh --profile web --dump-config` must show the `id: logicprobe` row with `enabled: true`. More options (plain skill copy, project-level install) are in [`.dsh/INSTALL.md`](.dsh/INSTALL.md).
-
-pnpm 11 has a release-age gate. It holds back versions published less than a day ago (`minimumReleaseAge`, default 1440 minutes), and its default is non-strict, so a bare-name install **silently resolves to the previous version**. The profile then looks like the release never happened. To get the newest version within about 24 hours of a release, pin it:
-
-```bash
-dsh plugin --profile web add dsh-logicprobe@<version>
-```
-
-pnpm records that version in a `minimumReleaseAgeExclude` entry in the profile's `pnpm-workspace.yaml`. That entry is pnpm's documented escape hatch.
-
-> Package name note: the npm package is `dsh-logicprobe`, with no scope. In the web profile's `package.json`, both the dependency key and the `dsh.profile.bundles` entry must use that name. On a mismatch the dsh loader cannot find `node_modules/dsh-logicprobe` and the boot fails.
-
 ## UML Modelling and Review
 
 `logicprobe_uml` draws a LogicModelV1 as UML. It also reads a hand-drawn UML diagram back into a model, reviews the modelling itself, and prints the label and comment conventions the parser accepts. It has four actions:
@@ -212,11 +141,78 @@ Its output is byte-identical to the dsh tools, cross-checked by `tests/python/ru
 
 Sample models live under [`examples/`](examples/README.md): an order state machine before/after, an e-commerce data model, and a User field migration.
 
-## Codex CLI
+## Installation
+
+### Claude Code (recommended)
+
+Add the marketplace to **Claude Code**'s `~/.claude/settings.json`:
+
+```json
+{
+  "extraKnownMarketplaces": {
+    "logicprobe": {
+      "source": { "source": "github", "repo": "AmethystLuna/logicprobe" }
+    }
+  }
+}
+```
+
+Then install from the CLI:
+
+```bash
+claude plugin install logicprobe@logicprobe
+```
+
+### Claude Code manual install
+
+```bash
+git clone https://github.com/AmethystLuna/logicprobe.git ~/.claude/plugins/dev/logicprobe
+```
+
+Then enable it in `~/.claude/settings.json`:
+
+```json
+{
+  "enabledPlugins": {
+    "logicprobe@dev": true
+  }
+}
+```
+
+### DeepSeek Harness (dsh)
+
+Native dsh support ships as a cordis plugin bundle at the repository root, declared by `dsh.bundle` in the root `package.json`.
+
+The bundle does three things:
+
+1. **Registers the skills.** They follow the Agent Skills open standard and are discovered as-is by dsh's `skill-filesystem` provider. No extra code.
+2. **Injects the gate text.** The first model step of every session receives the claim-verification gate (1% Rule / Red Flags / proactive suggestion). This is the dsh counterpart of the Claude `SessionStart` hook.
+3. **Registers the native tools and a context.** The tools live on `ctx.tools`. A policy-aware `logicprobe:mode` context lives on `ctx.systemPrompt`. A model-visible catalog entry is available through `cordis_inspect`.
+
+```bash
+# from npm (package name: dsh-logicprobe)
+dsh plugin --profile web add dsh-logicprobe
+# or from GitHub source
+dsh plugin --profile web add "github:AmethystLuna/logicprobe"
+# when dsh is not installed globally
+npx -p @deepseek-ai/dsh dsh plugin --profile web add dsh-logicprobe
+```
+
+Restart the profile afterwards. `dsh --profile web --dump-config` must show the `id: logicprobe` row with `enabled: true`. More options (plain skill copy, project-level install) are in [`.dsh/INSTALL.md`](.dsh/INSTALL.md).
+
+pnpm 11 has a release-age gate. It holds back versions published less than a day ago (`minimumReleaseAge`, default 1440 minutes), and its default is non-strict, so a bare-name install **silently resolves to the previous version**. The profile then looks like the release never happened. To get the newest version within about 24 hours of a release, pin it:
+
+```bash
+dsh plugin --profile web add dsh-logicprobe@<version>
+```
+
+pnpm records that version in a `minimumReleaseAgeExclude` entry in the profile's `pnpm-workspace.yaml`. That entry is pnpm's documented escape hatch.
+
+> Package name note: the npm package is `dsh-logicprobe`, with no scope. In the web profile's `package.json`, both the dependency key and the `dsh.profile.bundles` entry must use that name. On a mismatch the dsh loader cannot find `node_modules/dsh-logicprobe` and the boot fails.
+
+### Codex CLI
 
 This plugin also supports OpenAI Codex CLI. Skills follow the Agent Skills standard and work identically on both platforms.
-
-### Codex install
 
 ```bash
 # Add as a marketplace
@@ -234,11 +230,9 @@ git clone https://github.com/AmethystLuna/logicprobe.git ~/.codex/plugins/logicp
 
 Skills are invoked with `$logicprobe`, or selected automatically by Codex from the task context.
 
-## Cursor
+### Cursor
 
 Cursor 2.5+ has built-in plugin support.
-
-### Cursor install
 
 ```bash
 # Clone to Cursor plugins directory
@@ -247,11 +241,9 @@ git clone https://github.com/AmethystLuna/logicprobe.git ~/.cursor/plugins/logic
 
 Or install from the Cursor plugin marketplace UI: `/add-plugin AmethystLuna/logicprobe`
 
-## Kimi CLI
+### Kimi CLI
 
 Kimi CLI discovers skills from `.claude/skills/` paths automatically. The `.kimi-plugin/plugin.json` manifest registers the plugin for Kimi's plugin manager.
-
-### Kimi install
 
 ```bash
 # Via Kimi plugin manager
@@ -263,7 +255,7 @@ git clone https://github.com/AmethystLuna/logicprobe.git ~/.kimi/plugins/logicpr
 
 Skills are invoked with `/skill:logicprobe`.
 
-## OpenCode
+### OpenCode
 
 Skills are auto-discovered from `.claude/skills/` and `.codex/skills/` paths. Add this to your `opencode.json`:
 
@@ -275,7 +267,7 @@ Skills are auto-discovered from `.claude/skills/` and `.codex/skills/` paths. Ad
 
 Or install through `skop`, which consumes the Claude marketplace manifest. See `.opencode/INSTALL.md`.
 
-## ZCode (Z.AI)
+### ZCode (Z.AI)
 
 ZCode 3.0+ follows the Agent Skills standard. It has no plugin marketplace, so copy the skills yourself:
 

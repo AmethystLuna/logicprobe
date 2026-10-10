@@ -65,77 +65,6 @@ logicprobe 核验声称与实物是否一致。事实类对着源码查。行为
 
 任何以 `_` 开头的键（任意层级，如 `_source`、`_verified`、`_extraction_caveats`、`states[0]._note`）都是**注记元数据**：schema 跳过、`modelHash` 排除、报告以 `metadataKeys` 回显。这样来源与验证快照可以跟模型放在同一个文件里，不必再维护一个会漂移的 sidecar，而模型的哈希身份不变。其余键仍然闭合——拼错的 `sttes` 依旧报错。用 `verify model.json --hash-check <hex>` 可回答某个历史哈希是否属于任何已发布规范。
 
-## 安装
-
-### Claude Code 安装（推荐）
-
-在 **Claude Code** 的 `~/.claude/settings.json` 中添加 marketplace：
-
-```json
-{
-  "extraKnownMarketplaces": {
-    "logicprobe": {
-      "source": { "source": "github", "repo": "AmethystLuna/logicprobe" }
-    }
-  }
-}
-```
-
-然后通过 CLI 安装：
-
-```bash
-claude plugin install logicprobe@logicprobe
-```
-
-### Claude Code 手动安装
-
-```bash
-git clone https://github.com/AmethystLuna/logicprobe.git ~/.claude/plugins/dev/logicprobe
-```
-
-然后在 `~/.claude/settings.json` 中启用：
-
-```json
-{
-  "enabledPlugins": {
-    "logicprobe@dev": true
-  }
-}
-```
-
-## DeepSeek Harness (dsh)
-
-原生 dsh 支持以 cordis 插件 bundle 的形式提供，位于**仓库根**，由根 `package.json` 的 `dsh.bundle` 声明。
-
-这个 bundle 做三件事：
-
-1. **注册技能。** 技能遵循 Agent Skills 开放标准，由 dsh 的 `skill-filesystem` provider 原样发现，不需要额外代码。
-2. **注入门禁文本。** 每个会话的第一个模型步骤会收到 claim 验证门禁（1% Rule / Red Flags / 主动建议）。这是 Claude `SessionStart` hook 在 dsh 上的对应物。
-3. **注册原生工具与上下文。** 工具挂在 `ctx.tools` 上，另有一条策略感知上下文 `logicprobe:mode`（`ctx.systemPrompt`），以及模型可见目录条目（`cordis_inspect`）。
-
-### 安装（原生 bundle，推荐）
-
-```bash
-# 从 npm 安装（包名 dsh-logicprobe）
-dsh plugin --profile web add dsh-logicprobe
-# 或从 GitHub 源码安装
-dsh plugin --profile web add "github:AmethystLuna/logicprobe"
-# 未全局安装 dsh 时可用 npx
-npx -p @deepseek-ai/dsh dsh plugin --profile web add dsh-logicprobe
-```
-
-装完重启 profile。运行 `dsh --profile web --dump-config` 应看到 `id: logicprobe` 且 `enabled: true`。更多方式（纯技能拷贝、项目级等）见 [`.dsh/INSTALL.md`](.dsh/INSTALL.md)。
-
-pnpm 11 有一个发布年龄闸门。它挡住发布不满一天的新版本（`minimumReleaseAge`，默认 1440 分钟），而且默认是非严格模式，所以裸名安装会**静默装到上一个版本**，profile 看起来像这次发版没发生。发版后约 24 小时内要装最新版，请带上版本号：
-
-```bash
-dsh plugin --profile web add dsh-logicprobe@<version>
-```
-
-pnpm 会把该版本写进 profile 的 `pnpm-workspace.yaml` 的 `minimumReleaseAgeExclude` 条目。那是它官方的豁免方式。
-
-> 注意包名。npm 包名是 `dsh-logicprobe`，没有 scope。在 web profile 的 `package.json` 中，依赖键与 `dsh.profile.bundles` 必须都写 `dsh-logicprobe`。写错时 dsh 加载器找不到 `node_modules/dsh-logicprobe`，启动会失败。
-
 ## UML 建模与审查
 
 `logicprobe_uml` 把一份 LogicModelV1 画成 UML，也可以把手绘的 UML 读回模型，还可以审查建模本身，或打印解析器接受的标签与注释口径。它有 4 个动作：
@@ -210,11 +139,78 @@ pnpm 会把该版本写进 profile 的 `pnpm-workspace.yaml` 的 `minimumRelease
 
 示例模型见 [`examples/`](examples/README.md)：订单状态机 before/after、电商数据模型、User 字段迁移。
 
-## Codex CLI
+## 安装
+
+### Claude Code（推荐）
+
+在 **Claude Code** 的 `~/.claude/settings.json` 中添加 marketplace：
+
+```json
+{
+  "extraKnownMarketplaces": {
+    "logicprobe": {
+      "source": { "source": "github", "repo": "AmethystLuna/logicprobe" }
+    }
+  }
+}
+```
+
+然后通过 CLI 安装：
+
+```bash
+claude plugin install logicprobe@logicprobe
+```
+
+### Claude Code 手动安装
+
+```bash
+git clone https://github.com/AmethystLuna/logicprobe.git ~/.claude/plugins/dev/logicprobe
+```
+
+然后在 `~/.claude/settings.json` 中启用：
+
+```json
+{
+  "enabledPlugins": {
+    "logicprobe@dev": true
+  }
+}
+```
+
+### DeepSeek Harness (dsh)
+
+原生 dsh 支持以 cordis 插件 bundle 的形式提供，位于**仓库根**，由根 `package.json` 的 `dsh.bundle` 声明。
+
+这个 bundle 做三件事：
+
+1. **注册技能。** 技能遵循 Agent Skills 开放标准，由 dsh 的 `skill-filesystem` provider 原样发现，不需要额外代码。
+2. **注入门禁文本。** 每个会话的第一个模型步骤会收到 claim 验证门禁（1% Rule / Red Flags / 主动建议）。这是 Claude `SessionStart` hook 在 dsh 上的对应物。
+3. **注册原生工具与上下文。** 工具挂在 `ctx.tools` 上，另有一条策略感知上下文 `logicprobe:mode`（`ctx.systemPrompt`），以及模型可见目录条目（`cordis_inspect`）。
+
+```bash
+# 从 npm 安装（包名 dsh-logicprobe）
+dsh plugin --profile web add dsh-logicprobe
+# 或从 GitHub 源码安装
+dsh plugin --profile web add "github:AmethystLuna/logicprobe"
+# 未全局安装 dsh 时可用 npx
+npx -p @deepseek-ai/dsh dsh plugin --profile web add dsh-logicprobe
+```
+
+装完重启 profile。运行 `dsh --profile web --dump-config` 应看到 `id: logicprobe` 且 `enabled: true`。更多方式（纯技能拷贝、项目级等）见 [`.dsh/INSTALL.md`](.dsh/INSTALL.md)。
+
+pnpm 11 有一个发布年龄闸门。它挡住发布不满一天的新版本（`minimumReleaseAge`，默认 1440 分钟），而且默认是非严格模式，所以裸名安装会**静默装到上一个版本**，profile 看起来像这次发版没发生。发版后约 24 小时内要装最新版，请带上版本号：
+
+```bash
+dsh plugin --profile web add dsh-logicprobe@<version>
+```
+
+pnpm 会把该版本写进 profile 的 `pnpm-workspace.yaml` 的 `minimumReleaseAgeExclude` 条目。那是它官方的豁免方式。
+
+> 注意包名。npm 包名是 `dsh-logicprobe`，没有 scope。在 web profile 的 `package.json` 中，依赖键与 `dsh.profile.bundles` 必须都写 `dsh-logicprobe`。写错时 dsh 加载器找不到 `node_modules/dsh-logicprobe`，启动会失败。
+
+### Codex CLI
 
 本插件同样支持 OpenAI Codex CLI。技能遵循 Agent Skills 标准，两个平台行为一致。
-
-### Codex 安装
 
 ```bash
 # 添加 marketplace
@@ -232,11 +228,9 @@ git clone https://github.com/AmethystLuna/logicprobe.git ~/.codex/plugins/logicp
 
 技能通过 `$logicprobe` 调用，或由 Codex 根据任务上下文自动选择。
 
-## Cursor
+### Cursor
 
 Cursor 2.5+ 内置插件支持。
-
-### Cursor 安装
 
 ```bash
 # 克隆到 Cursor 插件目录
@@ -245,11 +239,9 @@ git clone https://github.com/AmethystLuna/logicprobe.git ~/.cursor/plugins/logic
 
 或通过 Cursor 插件市场 UI 安装：`/add-plugin AmethystLuna/logicprobe`
 
-## Kimi CLI
+### Kimi CLI
 
 Kimi CLI 自动从 `.claude/skills/` 路径发现技能。`.kimi-plugin/plugin.json` 清单向 Kimi 插件管理器注册本插件。
-
-### Kimi 安装
 
 ```bash
 # 通过 Kimi 插件管理器
@@ -261,7 +253,7 @@ git clone https://github.com/AmethystLuna/logicprobe.git ~/.kimi/plugins/logicpr
 
 技能通过 `/skill:logicprobe` 调用。
 
-## OpenCode
+### OpenCode
 
 技能自动从 `.claude/skills/` 和 `.codex/skills/` 路径发现。在 `opencode.json` 中添加：
 
@@ -273,7 +265,7 @@ git clone https://github.com/AmethystLuna/logicprobe.git ~/.kimi/plugins/logicpr
 
 或通过 `skop` 安装（消费 Claude marketplace 清单）。详见 `.opencode/INSTALL.md`。
 
-## ZCode (Z.AI)
+### ZCode (Z.AI)
 
 ZCode 3.0+ 遵循 Agent Skills 标准。它没有插件市场，手动把技能复制过去：
 
