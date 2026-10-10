@@ -323,6 +323,19 @@ def verification_next_steps(checks, coverage):
     return steps
 
 
+def refusal_guidance(errors):
+    """Mirror of refusalGuidance: the repair a rejected model usually needs.
+
+    A refusal reports the offending path and the rule it broke, but not what to write
+    instead; for fields whose absence is a documented trap that is the difference between
+    "fix it" and "guess again". Derived only from the messages, so it stays deterministic.
+    """
+    steps = []
+    if any('.description' in message for message in errors):
+        steps.append('Add the required "description" string to every invariant (for example "description": "what this invariant guarantees"); a `_`-prefixed key is not a substitute, and the value takes part in `modelHash`.')
+    return steps
+
+
 # ---------------------------------------------------------------------------
 # Validation
 # ---------------------------------------------------------------------------
@@ -1126,7 +1139,9 @@ def _check_result(cid, name, findings, detail):
         suffix = ' (' + str(errors) + ' errors' + (', ' + str(warnings) + ' warnings' if warnings > 0 else '') + ')'
     elif warnings > 0:
         suffix = ' (' + str(warnings) + ' warnings)'
-    return {'id': cid, 'name': name, 'status': 'pass' if len(findings) == 0 else 'fail', 'detail': detail + suffix, 'findings': findings}
+    # An info finding is a note, not a defect: it must not flip a check to `fail`, or the
+    # check would be dragged into the "resolve the failing checks" list for a remark.
+    return {'id': cid, 'name': name, 'status': 'pass' if errors + warnings == 0 else 'fail', 'detail': detail + suffix, 'findings': findings}
 
 
 # ---------------------------------------------------------------------------
@@ -2891,7 +2906,7 @@ def run_verification(input_value, options=None):
             **metadata,
             'summary': {'states': 0, 'transitions': 0, 'errors': len(errors), 'warnings': 0, 'checksRun': 0},
             'checks': [model_check],
-            'nextSteps': verification_next_steps([model_check], None),
+            'nextSteps': refusal_guidance(errors) + verification_next_steps([model_check], None),
         }
     model = model_or_errors
     exploration = _explore(model, max_states)
@@ -2966,6 +2981,20 @@ def run_verification(input_value, options=None):
     warnings = sum(1 for check in checks for f in check['findings'] if f.get('severity') == 'warning')
     coverage_notes = compute_coverage_notes(model)
     narrative_coverage = narrative_coverage_of(model)
+    # R3: a partial narrative is valid, but the gap must be machine-readable instead of only a
+    # sentence in `nextSteps`. It rides on S5 — the check that already reports undocumented
+    # (state, event) combinations — so the documented check count stays 22.
+    if narrative_coverage is not None and not narrative_complete(narrative_coverage):
+        for check in checks:
+            if check['id'] == 'S5':
+                check['findings'].append({
+                    'code': 'NARRATIVE_PARTIAL',
+                    'severity': 'info',
+                    'message': 'Narrative coverage is partial (states ' + narrative_coverage['states']
+                               + ', events ' + narrative_coverage['events'] + ', scenarios ' + narrative_coverage['scenarios']
+                               + '): the checks still run over the whole model, but the undocumented symbols have to be re-derived by the reader.',
+                })
+                break
     report = {
         'ok': True,
         'ran': True,
@@ -3171,11 +3200,21 @@ def run_composition_verification(machines_input, options=None):
                 detail = ('empty event alphabet' if not machine['blocked']
                           else ', '.join(entry['event'] + ' (' + entry['reason'] + ')' for entry in machine['blocked']))
                 reasons.append('machine ' + str(machine['index']) + ' at ' + machine['state'] + ': ' + detail)
+            # A non-terminal state with no outgoing transition anywhere in its own model is a
+            # modelling gap, not a design defect: without this note the census reads as
+            # "the architecture deadlocks" when the model was simply left unfinished.
+            gaps = [{'index': index, 'state': runtime['state']}
+                    for index, runtime in enumerate(node['runtimes'])
+                    if not _is_terminal(models[index], runtime['state'])
+                    and not any(t['from'] == runtime['state'] for t in (models[index].get('transitions') or []))]
+            gap_note = ('' if not gaps else ' Modelling note: '
+                        + ', '.join('machine ' + str(gap['index']) + ' state ' + gap['state'] for gap in gaps)
+                        + ' has no outgoing transition in its own model, so this deadlock may be a modelling gap rather than a design defect.')
             c1_findings.append({
                 'code': 'C1_COMPOSITION_DEADLOCK',
                 'severity': 'error',
                 'message': 'Composition deadlock: no machine can advance from (' + ', '.join(r['state'] for r in node['runtimes']) + ') while at least one is not terminal.',
-                'detail': 'Shortest counterexample (breadth-first): ' + str(len(node['path'])) + ' step(s) to reach it. ' + ' | '.join(reasons),
+                'detail': 'Shortest counterexample (breadth-first): ' + str(len(node['path'])) + ' step(s) to reach it. ' + ' | '.join(reasons) + gap_note,
                 'evidence': {'steps': node['path'], 'states': [r['state'] for r in node['runtimes']],
                              'depth': len(node['path']), 'perMachine': per_machine, 'reasons': reasons},
             })
@@ -3219,7 +3258,7 @@ def run_composition_verification(machines_input, options=None):
                       if truncated else '')
             c2_findings.append({
                 'code': 'C2_RENDEZVOUS_NEVER_FIRES',
-                'severity': 'warning',
+                'severity': 'error',
                 'message': 'Rendezvous event ' + event + ' can never fire: ' + reason + '.' + caveat,
                 'detail': ' | '.join('machine ' + str(machine['index']) + (' declares' if machine['declares'] else ' does not declare')
                                      + (', enabled at ' + ('/'.join(machine['enabledAt']) if machine['enabledAt'] else 'no visited state')
@@ -3227,8 +3266,11 @@ def run_composition_verification(machines_input, options=None):
                 'evidence': {'event': event, 'machines': machines, 'declaring': [machine['index'] for machine in declaring],
                              'coEnabledNodes': co_enabled, 'reason': reason, 'truncated': truncated},
             })
-    errors = len(c1_findings)
-    warnings = len(c2_findings)
+    # C2 is an error, not a warning: a rendezvous that can never fire means the composition
+    # cannot advance through that handshake — the same "stuck forever" outcome C1 reports,
+    # so a gate that only reads `verdict` must be able to stop on it.
+    errors = len(c1_findings) + len(c2_findings)
+    warnings = 0
     if c1_findings:
         c1_detail = 'Composition deadlocks: ' + str(len(c1_findings))
     elif truncated:
@@ -3237,7 +3279,7 @@ def run_composition_verification(machines_input, options=None):
     else:
         c1_detail = 'No composition deadlock reachable'
     if c2_findings:
-        c2_detail = 'Rendezvous warnings: ' + str(len(c2_findings))
+        c2_detail = 'Rendezvous errors: ' + str(len(c2_findings))
     elif truncated:
         c2_detail = ('All rendezvous events fired, but the search was truncated at ' + str(max_states) + ' composite states')
     else:
@@ -3248,9 +3290,20 @@ def run_composition_verification(machines_input, options=None):
     ]
     next_steps = []
     if errors > 0:
-        next_steps.append('Resolve the error findings first: the composition deadlocks at a reachable state, so at least one machine is missing an exit or a handshake partner.')
-    if warnings > 0:
-        next_steps.append('Review the warning findings: a rendezvous event that can never fire means the handshake is declared but unreachable.')
+        why = ('the composition deadlocks at a reachable state, so at least one machine is missing an exit or a handshake partner'
+               if c1_findings else
+               'a rendezvous event can never fire, so the composition cannot advance through that handshake')
+        next_steps.append('Resolve the error findings first: ' + why + '.')
+    # Composition couples machines only through rendezvous: each machine's `variables` are
+    # private to it, so two machines cannot share one predicate. Name them when the input
+    # looks like it is trying to (two or more machines each declare variables).
+    owners = [{'index': index, 'names': [v['name'] for v in (models[index].get('variables') or [])]}
+              for index in range(len(models))]
+    owners = [entry for entry in owners if entry['names']]
+    if len(owners) >= 2:
+        next_steps.append('Each machine\'s variables are private to it ('
+                          + '; '.join('machine ' + str(entry['index']) + ': ' + ', '.join(entry['names']) for entry in owners)
+                          + '): composition couples machines only through rendezvous, so a value two machines must agree on has to be modelled as a handshake, or inside a single machine.')
     next_steps.append('Re-run the composition after the change; every machine must be able to advance, or explain why it is terminal.')
     return {
         'ok': errors == 0,
@@ -4263,20 +4316,24 @@ class UmlRefusal(ValueError):
 
 def parse_findings(parsed):
     """Findings a parse result carries on its own (mirror of the TypeScript parseFindings)."""
-    if not parsed['discardedConstructs']:
+    # A note block is reported in `discardedConstructs` for transparency, but it does not make
+    # the text "not a state diagram": the rest of the file still is one, so only the constructs
+    # that actually replace a state declaration count towards the refusal.
+    unsupported = [entry for entry in parsed['discardedConstructs'] if entry['construct'] != 'note']
+    if not unsupported:
         return []
     counts = {}
-    for entry in parsed['discardedConstructs']:
+    for entry in unsupported:
         counts[entry['construct']] = counts.get(entry['construct'], 0) + 1
     summary = ', '.join(name + ' ×' + str(counts[name]) for name in sorted(counts))
-    shown = ' | '.join('line ' + str(entry['line']) + ': ' + entry['text'] for entry in parsed['discardedConstructs'][:12])
+    shown = ' | '.join('line ' + str(entry['line']) + ': ' + entry['text'] for entry in unsupported[:12])
     return [{
         'code': 'UML_NOT_A_STATE_DIAGRAM',
         'severity': 'error',
-        'message': 'the text is not a state or activity diagram: ' + str(len(parsed['discardedConstructs']))
+        'message': 'the text is not a state or activity diagram: ' + str(len(unsupported))
                    + ' declaration(s) of unsupported construct(s) (' + summary + ') and ' + str(parsed['discardedEdges'])
                    + ' arrow(s) between them were read as states and transitions, so the parsed model is not this diagram.',
-        'detail': shown + (' | … ' + str(len(parsed['discardedConstructs']) - 12) + ' more' if len(parsed['discardedConstructs']) > 12 else ''),
+        'detail': shown + (' | … ' + str(len(unsupported) - 12) + ' more' if len(unsupported) > 12 else ''),
     }]
 
 
@@ -4576,6 +4633,11 @@ def _parse_state_diagram(text, notation):
         if in_note:
             continue
         if note_start and not re.search(r':\s*.+\Z', line):
+            # R7: a note block is a construct the notation carries and LogicModelV1 does not, so
+            # it is reported once in `discardedConstructs`. It stays out of `warnings` (no
+            # per-line noise) and `parse_findings` keeps it out of the "not a state diagram"
+            # verdict, so "the diagram hash changed and the report said nothing" cannot happen.
+            raw['discarded'].append({'construct': 'note', 'line': index + 1, 'text': line})
             in_note = True
             continue
         note = _STATE_NOTE_RE.match(line)
@@ -6307,7 +6369,7 @@ def explain_labels(notation='mermaid'):
             {'pattern': 'a `' + prefix + '` comment line that is not a `logicprobe:` directive',
              'behaviour': 'UML_PARSE_IGNORED_LINE warning: it carries no state-machine statement'},
             {'pattern': 'a `note …` block written over several lines',
-             'behaviour': 'skipped silently (a block is not a state meaning)'},
+             'behaviour': 'its body is skipped line by line (prose, not a statement) and the block itself is reported once in discardedConstructs'},
             {'pattern': 'notation chrome: @startuml/@enduml, stateDiagram-v2, direction, classDef/style/linkStyle/click, scale, skinparam, title, hide, autonumber',
              'behaviour': 'skipped silently'},
             {'pattern': 'anything else the parser cannot read',

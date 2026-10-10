@@ -177,7 +177,11 @@ export interface PathStep {
 }
 export interface Finding {
     code: string;
-    severity: 'error' | 'warning';
+    /**
+     * `info` is a note, not a defect: it is reported so a machine-readable reader can see it,
+     * and it never contributes to `verdict`, `summary.errors` or `summary.warnings`.
+     */
+    severity: 'error' | 'warning' | 'info';
     message: string;
     /** Longer explanation: the shortest-path note, the per-machine reasons, the quoted source lines. */
     detail?: string;
@@ -296,6 +300,7 @@ export declare const REPORT_SCHEMAS: {
     readonly umlRender: 'logicprobe/uml/render/v1';
     readonly umlParse: 'logicprobe/uml/parse/v1';
     readonly umlReview: 'logicprobe/uml/review/v1';
+    readonly umlExplainLabels: 'logicprobe/uml/explain-labels/v1';
     readonly structure: 'logicprobe/structure/v1';
     readonly granularity: 'logicprobe/granularity/v1';
     readonly baseline: 'logicprobe/baseline/v1';

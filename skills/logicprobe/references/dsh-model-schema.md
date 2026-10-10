@@ -77,6 +77,13 @@ it, and the report lists it under `metadataKeys`:
 "metadataKeys": ["_extraction_caveats", "_source", "_verified", "states[0]._note"]
 ```
 
+The list echoes *this input*, it is not a memory: a `_` key the current object does not
+carry is absent, even if an earlier version of the file had it. Nested keys are spelled
+the way the walker sees them (`states[0]._note`, `invariants[0]._probe`,
+`transitions[0]._why`), and the field is absent entirely when the input carries no `_`
+key at all. Read it as "what this run ignored", never as "what this model has ever
+recorded".
+
 Why it exists: provenance, verification snapshots and extraction caveats belong *with*
 the model. Pushed into a sidecar they drift away from it — nobody can say which hash
 belongs to which note. With this exemption the archive record travels inside the file
@@ -220,6 +227,13 @@ A guard is exactly one of:
 
 ## Invariants
 
+Every invariant carries `id` and **`description`** — both required strings — plus a
+`kind` and that kind's own fields. `description` is not decoration: it is echoed into
+the finding a violation produces, and it takes part in `modelHash`, so a model that
+gains one hashes differently. An invariant without it is rejected with `MODEL_INVALID`,
+and the report's `nextSteps` names the field to add; a `_`-prefixed key is not a
+substitute for it.
+
 | Kind | Shape | Checks |
 |---|---|---|
 | `never-states` | `{ states: ["ERROR"] }` | No reachable runtime state may be in the forbidden set |
@@ -314,6 +328,13 @@ Two or more machines can be checked together with `runCompositionVerification` (
 - non-rendezvous events advance exactly one firing machine;
 - a rendezvous (handshake) event fires only when at least two machines declare it **and** every such non-terminal machine has it jointly enabled (guards held); participants advance simultaneously. A machine whose alphabet does not contain the event does not participate, and a terminal machine is stopped;
 - therefore a machine that is *waiting* for a rendezvous is not blocked from everything else: it may take any number of its own non-rendezvous steps first. That is how different rates are modelled — there is **no rate ratio** and no fairness bound, so "the 1 ms pump runs N times while the ISR waits" is expressed by the pump's own tick event, not by a tempo setting. A bound would only prune interleavings, never add behaviour; if you need to *forbid* a fast machine from overtaking, encode that in the model (a guard on a counter the slow machine resets), not in the composition options.
+- **there is no cross-machine shared state.** Each machine's `variables` are private to
+  it: machine A's `ready` and machine B's `ready` are two different
+  quantities, and no guard can read another machine's variable. Rendezvous events are
+  the *only* coupling between machines. So "two machines must agree on one predicate"
+  cannot be modelled by giving each a copy of it — model the shared condition inside a
+  single machine, or make the agreement an explicit handshake. The report names the
+  variables it saw when two or more machines each declare some, in `nextSteps`.
 
 Inputs: the DSH tool takes an array of model objects (an agent reads the files and passes them); the CLI takes any number of files directly — `compose models/*.json --rendezvous req,ack` — so nothing has to be concatenated by hand.
 
@@ -321,8 +342,8 @@ Inputs: the DSH tool takes an array of model objects (an agent reads the files a
 
 Both findings carry the *why*, not just the *what*:
 
-- **C1_COMPOSITION_DEADLOCK** — the composite state, the number of steps to reach it (**shortest**, because the search is breadth-first), and `evidence.perMachine`: for every machine, its state, whether it is terminal, and every event in its alphabet with a reason — `rendezvous-needs-partner` (fewer than two machines declare it), `rendezvous-partner-not-ready` (a declaring partner is terminal or has no enabled transition), `no-enabled-transition` (guard false or no such transition), or `enabled`. An event this machine can fire on its own is never labelled `enabled` when the handshake itself is missing.
-- **C2_RENDEZVOUS_NEVER_FIRES** — `evidence.machines` gives, per machine, whether it declares the event, whether it ever had it enabled, and the states where it did. The reason distinguishes "fewer than two machines declare it" from "machine *i* declares it but never enables it".
+- **C1_COMPOSITION_DEADLOCK** — the composite state, the number of steps to reach it (**shortest**, because the search is breadth-first), and `evidence.perMachine`: for every machine, its state, whether it is terminal, and every event in its alphabet with a reason — `rendezvous-needs-partner` (fewer than two machines declare it), `rendezvous-partner-not-ready` (a declaring partner is terminal or has no enabled transition), `no-enabled-transition` (guard false or no such transition), or `enabled`. An event this machine can fire on its own is never labelled `enabled` when the handshake itself is missing. In practice a census only ever shows the three blocked reasons: it is emitted only when no machine can move, and "can move" is decided by the same predicate that would label an event `enabled`, so that fourth label is unreachable there. Treat the three observable values as the contract, and keep tolerating the literal.
+- **C2_RENDEZVOUS_NEVER_FIRES** — an **error**, the same severity as C1: a handshake that can never fire leaves the composition unable to advance through it, so a gate that reads only `verdict` stops on it. `evidence.machines` gives, per machine, whether it declares the event, whether it ever had it enabled, and the states where it did. The reason distinguishes "fewer than two machines declare it" from "machine *i* declares it but never enables it".
 
 `maxStates` caps the product space, and the cap is **reported, never hidden**: a truncated run cannot claim "no deadlock reachable" (the C1 check detail says so), and a C2 finding gained under truncation carries "may be an artefact of the cap" in its message. Bump `maxStates` before believing a negative result on a large product. Note that a machine with an unbounded counter produces an infinite composite space and will always truncate.
 

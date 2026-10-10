@@ -482,7 +482,9 @@ test('review: an unreadable family is an error report with a failing verdict', (
 
 test('parse: a multi-line note is not mistaken for an unsupported construct', () => {
   // The construct keywords are ordinary English words. A note block that mentions one
-  // must not turn a legitimately parsed state diagram into a failed review.
+  // must not turn a legitimately parsed state diagram into a failed review — and it must
+  // not be read as the construct its body happens to name. R7: the block itself is reported
+  // once as `note`, at its start line.
   const text = [
     'stateDiagram-v2',
     '  [*] --> IDLE',
@@ -494,7 +496,11 @@ test('parse: a multi-line note is not mistaken for an unsupported construct', ()
     '  end note',
   ].join('\n')
   const parsed = parseUml(text)
-  if (parsed.discardedConstructs.length !== 0) throw new Error('a note body must not be read as a construct: ' + JSON.stringify(parsed.discardedConstructs))
+  const foreign = parsed.discardedConstructs.filter((entry) => entry.construct !== 'note')
+  if (foreign.length !== 0) throw new Error('a note body must not be read as a construct: ' + JSON.stringify(foreign))
+  if (parsed.discardedConstructs.length !== 1 || parsed.discardedConstructs[0].line !== 5) {
+    throw new Error('the note block itself must be reported once, at its start line: ' + JSON.stringify(parsed.discardedConstructs))
+  }
   const report = reviewUml({ diagram: text })
   if (report.verdict === 'fail') throw new Error('a note mentioning a construct keyword must not fail the review: ' + report.verdictReason)
 })
@@ -588,14 +594,26 @@ test('explain-labels: every documented claim is true of the parser', () => {
     }
   }
 
-  // Ignored lines: a plain comment warns, a multi-line note block does not.
+  // Ignored lines: a plain comment warns, a multi-line note block does not — but R7 makes it
+  // reported rather than invisible, so the two channels stay distinguishable.
   const commented = reviewUml({ model: narrative, diagram: withLabel('%% this comment carries nothing') })
   if (!commented.warnings.some((warning) => warning.includes('UML_PARSE_IGNORED_LINE'))) {
     throw new Error('a non-directive comment must be reported: ' + JSON.stringify(commented.warnings))
   }
   const noted = reviewUml({ model: narrative, diagram: withLabel(['note left of INIT', '  several lines', 'end note'].join('\n')) })
   if (noted.warnings.some((warning) => warning.includes('UML_PARSE_IGNORED_LINE'))) {
-    throw new Error('a multi-line note block must be skipped silently: ' + JSON.stringify(noted.warnings))
+    throw new Error('a multi-line note block must not warn line by line: ' + JSON.stringify(noted.warnings))
+  }
+  if (!(noted.discardedConstructs ?? []).some((entry) => entry.construct === 'note')) {
+    throw new Error('a multi-line note block must be reported in discardedConstructs: ' + JSON.stringify(noted.discardedConstructs))
+  }
+  // The claim and the behaviour are asserted together: R7 changed the behaviour, and a
+  // self-description that still said "skipped silently" would be exactly the drift this
+  // test exists to prevent.
+  const noteClaim = explanation.ignoredLines.find((entry) => entry.pattern.includes('note'))
+  if (noteClaim === undefined) throw new Error('the note block must be described in ignoredLines')
+  if (!noteClaim.behaviour.includes('discardedConstructs')) {
+    throw new Error('the documented behaviour of a note block disagrees with the parser: ' + noteClaim.behaviour)
   }
 
   // The directive prefix is the one the parser consumes, in both notations.

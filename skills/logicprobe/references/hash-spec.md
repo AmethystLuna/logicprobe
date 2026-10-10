@@ -69,6 +69,13 @@ Round-trip reports (`logicprobe_uml action=review`, `roundTrip`) carry `hashSpec
 alongside `modelHash` and `parsedHash`, so a fidelity comparison is always
 spec-qualified.
 
+**Read `diffs`, not `ok`.** `roundTrip.ok` says only that the model was rendered and the
+result read back; it is `true` while `modelHash` and `parsedHash` legitimately differ,
+because the model hash covers what a diagram cannot carry (the `narrative` block, in
+particular) and the parsed hash covers what the diagram actually says. Fidelity is
+`roundTrip.diffs.length === 0`. Equal hashes are neither necessary nor sufficient for
+fidelity, and the two must not be forced to agree.
+
 Every report also aggregates its hashes under `hashes`, so a baseline diff or an archive
 record reads one field instead of walking the report:
 
@@ -82,6 +89,24 @@ canonical — key-sorted — matrix JSON, so key order does not change the hash)
 dependency matrix was supplied. A data-model report carries `hashes.modelHash`; the
 data-model hash uses the same normalization but its schema is not covered by the
 published specification.
+
+A `diagram` hash is a **text** hash, not a semantic one: `sha256` over the exact
+characters, so comments and `note` blocks change it, and so does a trailing newline.
+Two renderings that mean the same thing hash differently when their text differs, and
+that is intended — it is what makes "the diagram I reviewed" checkable. For one model
+(`modelHash` `77a43a39822147707229638515cf8f0c6bef4b08635ea6197d2181fc6c26f0b4`) four
+probe variants hash as:
+
+| Diagram text | `hashes.diagram` |
+|--------------|------------------|
+| clean | `25ee1d0b803c9477d526d92c1dbb9059e408e282e515499dba06d14630286c8d` |
+| one `%%` comment line | `8c41f046c954e1dc086eee8bd24c3d1d033b489840895520002c1e8120dda052` |
+| one `'` comment line (PlantUML style) | `5552a91a73972edb71ea98f460fa6a393c6556bd1241461f0f29cd51531e9e56` |
+| one multi-line `note … end note` block | `359182313f451713a937f5148328d238e8ea1941fbcef663c4c34e0a7f1bbcda` |
+
+Compare diagram hashes only between identical byte strings: the same diagram handed
+over without its trailing newline hashes differently (`8c41f046…` becomes
+`c8f3a41b…`). That is the specification, not drift.
 
 ## Checking an archived hash
 

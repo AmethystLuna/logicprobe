@@ -870,19 +870,23 @@ function declaredIdentifier(text: string): string | undefined {
  * file, which is a false guarantee of exactly the kind this plugin exists to prevent.
  */
 export function parseFindings(parsed: UmlParseResult): UmlFinding[] {
-  if (parsed.discardedConstructs.length === 0) return []
+  // A note block is reported in `discardedConstructs` for transparency, but it does not make
+  // the text "not a state diagram": the rest of the file still is one, so only the constructs
+  // that actually replace a state declaration count towards the refusal.
+  const unsupported = parsed.discardedConstructs.filter((entry) => entry.construct !== 'note')
+  if (unsupported.length === 0) return []
   const counts = new Map<string, number>()
-  for (const entry of parsed.discardedConstructs) counts.set(entry.construct, (counts.get(entry.construct) ?? 0) + 1)
+  for (const entry of unsupported) counts.set(entry.construct, (counts.get(entry.construct) ?? 0) + 1)
   const summary = [...counts.entries()]
     .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
     .map(([construct, count]) => construct + ' ×' + String(count))
     .join(', ')
-  const shown = parsed.discardedConstructs.slice(0, 12).map((entry) => 'line ' + String(entry.line) + ': ' + entry.text).join(' | ')
+  const shown = unsupported.slice(0, 12).map((entry) => 'line ' + String(entry.line) + ': ' + entry.text).join(' | ')
   return [{
     code: 'UML_NOT_A_STATE_DIAGRAM',
     severity: 'error',
-    message: 'the text is not a state or activity diagram: ' + String(parsed.discardedConstructs.length) + ' declaration(s) of unsupported construct(s) (' + summary + ') and ' + String(parsed.discardedEdges) + ' arrow(s) between them were read as states and transitions, so the parsed model is not this diagram.',
-    detail: shown + (parsed.discardedConstructs.length > 12 ? ' | … ' + String(parsed.discardedConstructs.length - 12) + ' more' : ''),
+    message: 'the text is not a state or activity diagram: ' + String(unsupported.length) + ' declaration(s) of unsupported construct(s) (' + summary + ') and ' + String(parsed.discardedEdges) + ' arrow(s) between them were read as states and transitions, so the parsed model is not this diagram.',
+    detail: shown + (unsupported.length > 12 ? ' | … ' + String(unsupported.length - 12) + ' more' : ''),
   }]
 }
 
@@ -916,7 +920,16 @@ function parseStateDiagram(text: string, notation: UmlNotation): UmlParseResult 
     // A multi-line note body is prose, not a statement: skip it silently rather than
     // reporting one ignored line per line of text.
     if (inNote) return
-    if (noteStart && !/:\s*.+$/.test(line)) { inNote = true; return }
+    if (noteStart && !/:\s*.+$/.test(line)) {
+      // R7: a multi-line note block is prose the notation carries and LogicModelV1 does not.
+      // Its body is still skipped line by line, but the block itself is NOT silent: it is
+      // reported once, like any other unsupported construct, so "the diagram hash changed and
+      // the report said nothing" cannot happen. It stays out of `warnings` (no per-line noise)
+      // and `parseFindings` keeps it out of the "not a state diagram" verdict.
+      raw.discarded.push({ construct: 'note', line: index + 1, text: line })
+      inNote = true
+      return
+    }
     const note = /^note\s+(?:over|right of|left of)\s+([A-Za-z_][A-Za-z0-9_]*)\s*:\s*(.+)$/i.exec(line)
     if (note !== null) {
       declare(note[1])
@@ -1084,7 +1097,7 @@ export function explainLabels(notation: UmlNotation = 'mermaid'): LabelExplanati
     renderedForm: 'state "ID（meaning）" as ID',
     ignoredLines: [
       { pattern: 'a `' + prefix + '` comment line that is not a `logicprobe:` directive', behaviour: 'UML_PARSE_IGNORED_LINE warning: it carries no state-machine statement' },
-      { pattern: 'a `note …` block written over several lines', behaviour: 'skipped silently (a block is not a state meaning)' },
+      { pattern: 'a `note …` block written over several lines', behaviour: 'its body is skipped line by line (prose, not a statement) and the block itself is reported once in discardedConstructs' },
       { pattern: 'notation chrome: @startuml/@enduml, stateDiagram-v2, direction, classDef/style/linkStyle/click, scale, skinparam, title, hide, autonumber', behaviour: 'skipped silently' },
       { pattern: 'anything else the parser cannot read', behaviour: 'UML_PARSE_IGNORED_LINE warning, and the model is built from what it did read' },
     ],

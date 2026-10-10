@@ -2,7 +2,7 @@ import { defineTool } from '@deepseek-ai/dsh-tools'
 import { createHash } from 'node:crypto'
 import type { JsonValue } from './json-value.js'
 import { REPORT_SCHEMAS, DEFAULT_HASH_SPEC, modelHash, refusalVerdict, verdictOf, verdictOfFindings, type VerdictSummary } from './engine.js'
-import { renderUml, parseUml, parseFindings, reviewUml, UmlError, type UmlDiagram, type UmlFinding, type UmlNotation, type UmlParseResult } from './uml.js'
+import { renderUml, parseUml, parseFindings, reviewUml, explainLabels, UmlError, type UmlDiagram, type UmlFinding, type UmlNotation, type UmlParseResult } from './uml.js'
 
 export const LOGICPROBE_UML_TOOL_NAME = 'logicprobe_uml'
 
@@ -21,13 +21,13 @@ export const LOGICPROBE_UML_TOOL_NAME = 'logicprobe_uml'
 export const logicProbeUmlTool = defineTool({
   name: LOGICPROBE_UML_TOOL_NAME,
   description:
-    'Model a code flow as UML, and audit the modelling. action="render" turns a LogicModelV1 into diagram source: mermaid (state, activity, sequence) or plantuml (state, sequence). action="parse" reads Mermaid or PlantUML state or activity text back into a LogicModelV1, so a hand-drawn diagram can be verified. A sequence diagram is refused: a trace cannot reconstruct a machine. So is any other diagram family (class, ER, gantt, mindmap). That refusal carries errorCode "UML_NOT_A_STATE_DIAGRAM". A PlantUML component, package or deployment diagram declares no kind, so the parser detects those constructs itself. It returns a by-product model and reports the error UML_NOT_A_STATE_DIAGRAM, with `discardedConstructs` and `discardedEdges`. Never treat that model as a model of the file. action="review" audits the modelling: structural defects (UML002-UML009), documentation gaps (UML010-UML015), and a fidelity check that re-parses the rendered diagram (UML017). Give it a model, a diagram, or both. Rendering never invents structure. A construct the notation cannot express becomes a warning. For dependency questions on a component or class diagram, use `logicprobe_structure_verify` instead. Read `verdict`, not `ok`: error findings mean a failed review.',
+    'Model a code flow as UML, and audit the modelling. action="render" turns a LogicModelV1 into diagram source: mermaid (state, activity, sequence) or plantuml (state, sequence). action="parse" reads Mermaid or PlantUML state or activity text back into a LogicModelV1, so a hand-drawn diagram can be verified. A sequence diagram is refused: a trace cannot reconstruct a machine. So is any other diagram family (class, ER, gantt, mindmap). That refusal carries errorCode "UML_NOT_A_STATE_DIAGRAM". A PlantUML component, package or deployment diagram declares no kind, so the parser detects those constructs itself. It returns a by-product model and reports the error UML_NOT_A_STATE_DIAGRAM, with `discardedConstructs` and `discardedEdges`. Never treat that model as a model of the file. action="review" audits the modelling: structural defects (UML002-UML009), documentation gaps (UML010-UML015), and a fidelity check that re-parses the rendered diagram (UML017). Give it a model, a diagram, or both. action="explain-labels" prints the label and comment conventions the parser accepts, without needing a diagram. Rendering never invents structure. A construct the notation cannot express becomes a warning. For dependency questions on a component or class diagram, use `logicprobe_structure_verify` instead. Read `verdict`, not `ok`: error findings mean a failed review.',
   parameters: {
     action: {
       type: 'string',
       required: true,
-      enum: ['render', 'parse', 'review'],
-      description: 'render = model → UML source; parse = UML source → model; review = audit the modelling (and its fidelity to the model).',
+      enum: ['render', 'parse', 'review', 'explain-labels'],
+      description: 'render = model → UML source; parse = UML source → model; review = audit the modelling (and its fidelity to the model); explain-labels = print the label and comment conventions this parser accepts.',
     },
     model: {
       type: 'json',
@@ -105,6 +105,19 @@ export const logicProbeUmlTool = defineTool({
           discardedEdges: result.discardedEdges,
           hashes: { hashSpec: DEFAULT_HASH_SPEC, modelHash: modelHash(result.model), diagram: createHash('sha256').update(args.diagram).digest('hex') },
           warnings: result.warnings,
+        } as unknown as JsonValue
+      }
+      // R9: the label contract was documented in the library and in `explainLabels()`, but no
+      // tool exposed it, so it was reachable only by reading the source or the docs.
+      if (args.action === 'explain-labels') {
+        const notation = (args.notation === undefined || args.notation === 'auto' ? 'mermaid' : args.notation) as UmlNotation
+        return {
+          ok: true,
+          ran: true,
+          ...verdictOf(0, 0),
+          schema: REPORT_SCHEMAS.umlExplainLabels,
+          action: 'explain-labels',
+          ...explainLabels(notation),
         } as unknown as JsonValue
       }
       const report = reviewUml({

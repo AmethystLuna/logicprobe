@@ -206,7 +206,11 @@ export interface PathStep {
 
 export interface Finding {
   code: string
-  severity: 'error' | 'warning'
+  /**
+   * `info` is a note, not a defect: it is reported so a machine-readable reader can see it,
+   * and it never contributes to `verdict`, `summary.errors` or `summary.warnings`.
+   */
+  severity: 'error' | 'warning' | 'info'
   message: string
   /** Longer explanation: the shortest-path note, the per-machine reasons, the quoted source lines. */
   detail?: string
@@ -283,6 +287,20 @@ function verificationNextSteps(checks: CheckResult[], coverage: NarrativeCoverag
     steps.push('Complete the narrative (states ' + coverage.states + ', events ' + coverage.events + ', scenarios ' + coverage.scenarios + ') — a partial narrative is valid, but a reader still has to re-derive the missing symbols.')
   }
   steps.push('Re-run with beforeModel/stateMapping after the change to prove the behaviour did not regress (D1-D4).')
+  return steps
+}
+
+/**
+ * Repair guidance for a rejected model. A refusal reports the offending path and the rule
+ * it broke, but not what to write instead; for fields whose absence is a documented trap,
+ * that is the difference between "fix it" and "guess again". Derived only from the
+ * validation messages, so the list stays deterministic.
+ */
+function refusalGuidance(errors: string[]): string[] {
+  const steps: string[] = []
+  if (errors.some((message) => message.includes('.description'))) {
+    steps.push('Add the required "description" string to every invariant (for example "description": "what this invariant guarantees"); a `_`-prefixed key is not a substitute, and the value takes part in `modelHash`.')
+  }
   return steps
 }
 
@@ -366,6 +384,7 @@ export const REPORT_SCHEMAS = {
   umlRender: 'logicprobe/uml/render/v1',
   umlParse: 'logicprobe/uml/parse/v1',
   umlReview: 'logicprobe/uml/review/v1',
+  umlExplainLabels: 'logicprobe/uml/explain-labels/v1',
   structure: 'logicprobe/structure/v1',
   granularity: 'logicprobe/granularity/v1',
   baseline: 'logicprobe/baseline/v1',
@@ -1060,7 +1079,9 @@ function checkResult(id: string, name: string, findings: Finding[], detail: stri
   return {
     id,
     name,
-    status: findings.length === 0 ? 'pass' : 'fail',
+    // An info finding is a note, not a defect: it must not flip a check to `fail`, or the
+    // check would be dragged into the "resolve the failing checks" list for a remark.
+    status: errors + warnings === 0 ? 'pass' : 'fail',
     detail: detail + (errors > 0 ? ' (' + errors + ' errors' + (warnings > 0 ? ', ' + warnings + ' warnings' : '') + ')' : warnings > 0 ? ' (' + warnings + ' warnings)' : ''),
     findings,
   }
@@ -2893,7 +2914,7 @@ export function runVerification(input: unknown, options: VerificationOptions = {
       ...metadata,
       summary: { states: 0, transitions: 0, errors: validation.errors.length, warnings: 0, checksRun: 0 },
       checks: [modelCheck],
-      nextSteps: verificationNextSteps([modelCheck], undefined),
+      nextSteps: [...refusalGuidance(validation.errors), ...verificationNextSteps([modelCheck], undefined)],
     }
   }
   const model = validation.model
@@ -2973,6 +2994,16 @@ export function runVerification(input: unknown, options: VerificationOptions = {
   const warnings = checks.reduce((sum, check) => sum + check.findings.filter((finding) => finding.severity === 'warning').length, 0)
   const coverageNotes = computeCoverageNotes(model)
   const narrativeCoverage = narrativeCoverageOf(model)
+  // R3: a partial narrative is valid, but the gap must be machine-readable instead of only a
+  // sentence in `nextSteps`. It rides on S5 — the check that already reports undocumented
+  // (state, event) combinations — so the documented check count stays 22.
+  if (narrativeCoverage !== undefined && !narrativeComplete(narrativeCoverage)) {
+    checks.find((check) => check.id === 'S5')?.findings.push({
+      code: 'NARRATIVE_PARTIAL',
+      severity: 'info',
+      message: 'Narrative coverage is partial (states ' + narrativeCoverage.states + ', events ' + narrativeCoverage.events + ', scenarios ' + narrativeCoverage.scenarios + '): the checks still run over the whole model, but the undocumented symbols have to be re-derived by the reader.',
+    })
+  }
   return {
     ok: true,
     ran: true,
@@ -3223,11 +3254,21 @@ export function runCompositionVerification(machinesInput: unknown[], options: Co
         .map((machine) => 'machine ' + String(machine.index) + ' at ' + machine.state + ': ' + (machine.blocked.length === 0
           ? 'empty event alphabet'
           : machine.blocked.map((entry) => entry.event + ' (' + entry.reason + ')').join(', ')))
+      // A non-terminal state with no outgoing transition anywhere in its own model is a
+      // modelling gap, not a design defect: without this note the census reads as
+      // "the architecture deadlocks" when the model was simply left unfinished.
+      const gaps = node.runtimes
+        .map((runtime, index) => ({ index, state: runtime.state }))
+        .filter((entry) => !isTerminal(models[entry.index], entry.state)
+          && !models[entry.index].transitions.some((transition) => transition.from === entry.state))
+      const gapNote = gaps.length === 0
+        ? ''
+        : ' Modelling note: ' + gaps.map((gap) => 'machine ' + String(gap.index) + ' state ' + gap.state).join(', ') + ' has no outgoing transition in its own model, so this deadlock may be a modelling gap rather than a design defect.'
       c1Findings.push({
         code: 'C1_COMPOSITION_DEADLOCK',
         severity: 'error',
         message: 'Composition deadlock: no machine can advance from (' + node.runtimes.map((runtime) => runtime.state).join(', ') + ') while at least one is not terminal.',
-        detail: 'Shortest counterexample (breadth-first): ' + String(node.path.length) + ' step(s) to reach it. ' + reasons.join(' | '),
+        detail: 'Shortest counterexample (breadth-first): ' + String(node.path.length) + ' step(s) to reach it. ' + reasons.join(' | ') + gapNote,
         evidence: { steps: node.path, states: node.runtimes.map((runtime) => runtime.state), depth: node.path.length, perMachine, reasons },
       })
       continue
@@ -3269,7 +3310,7 @@ export function runCompositionVerification(machinesInput: unknown[], options: Co
       const caveat = truncated ? ' The search was truncated at ' + String(maxStates) + ' composite states, so this may be an artefact of the cap rather than a property of the model.' : ''
       c2Findings.push({
         code: 'C2_RENDEZVOUS_NEVER_FIRES',
-        severity: 'warning',
+        severity: 'error',
         message: 'Rendezvous event ' + event + ' can never fire: ' + reason + '.' + caveat,
         detail: machines.map((machine) => 'machine ' + String(machine.index) + (machine.declares ? ' declares' : ' does not declare')
           + (machine.everEnabled ? ', enabled at ' + (machine.enabledAt.length === 0 ? 'no visited state' : machine.enabledAt.join('/')) : ', never enabled')).join(' | '),
@@ -3277,15 +3318,18 @@ export function runCompositionVerification(machinesInput: unknown[], options: Co
       })
     }
   }
-  const errors = c1Findings.length
-  const warnings = c2Findings.length
+  // C2 is an error, not a warning: a rendezvous that can never fire means the composition
+  // cannot advance through that handshake — the same "stuck forever" outcome C1 reports,
+  // so a gate that only reads `verdict` must be able to stop on it.
+  const errors = c1Findings.length + c2Findings.length
+  const warnings = 0
   const c1Detail = c1Findings.length > 0
     ? 'Composition deadlocks: ' + String(c1Findings.length)
     : truncated
       ? 'No composition deadlock found, but the search was truncated at ' + String(maxStates) + ' composite states: absence is not proven'
       : 'No composition deadlock reachable'
   const c2Detail = c2Findings.length > 0
-    ? 'Rendezvous warnings: ' + String(c2Findings.length)
+    ? 'Rendezvous errors: ' + String(c2Findings.length)
     : truncated
       ? 'All rendezvous events fired, but the search was truncated at ' + String(maxStates) + ' composite states'
       : 'All rendezvous events can fire'
@@ -3294,8 +3338,21 @@ export function runCompositionVerification(machinesInput: unknown[], options: Co
     checkResult('C2', 'Rendezvous Sync', c2Findings, c2Detail),
   ]
   const nextSteps: string[] = []
-  if (errors > 0) nextSteps.push('Resolve the error findings first: the composition deadlocks at a reachable state, so at least one machine is missing an exit or a handshake partner.')
-  if (warnings > 0) nextSteps.push('Review the warning findings: a rendezvous event that can never fire means the handshake is declared but unreachable.')
+  if (errors > 0) {
+    const why = c1Findings.length > 0
+      ? 'the composition deadlocks at a reachable state, so at least one machine is missing an exit or a handshake partner'
+      : 'a rendezvous event can never fire, so the composition cannot advance through that handshake'
+    nextSteps.push('Resolve the error findings first: ' + why + '.')
+  }
+  // Composition couples machines only through rendezvous: each machine's `variables` are
+  // private to it, so two machines cannot share one predicate. Name them when the input
+  // looks like it is trying to (two or more machines each declare variables).
+  const owners = models
+    .map((entry, index) => ({ index, names: (entry.variables ?? []).map((variable) => variable.name) }))
+    .filter((entry) => entry.names.length > 0)
+  if (owners.length >= 2) {
+    nextSteps.push('Each machine\'s variables are private to it (' + owners.map((entry) => 'machine ' + String(entry.index) + ': ' + entry.names.join(', ')).join('; ') + '): composition couples machines only through rendezvous, so a value two machines must agree on has to be modelled as a handshake, or inside a single machine.')
+  }
   nextSteps.push('Re-run the composition after the change; every machine must be able to advance, or explain why it is terminal.')
   return {
     ok: errors === 0,

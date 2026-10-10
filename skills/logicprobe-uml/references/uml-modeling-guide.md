@@ -254,12 +254,13 @@ directives the renderer writes (`%%logicprobe:` in Mermaid, `'logicprobe:` in Pl
 `uml v1 …`, `init ID`, `terminal ID`, `alias X id`, `variable NAME kind`. They are
 ordinary comments to every renderer, which is why the diagram stays valid.
 
-Everything else is either notation chrome (skipped silently) or an ignored line:
+Everything else is notation chrome (skipped silently), an ignored line, or a reported
+construct:
 
 | Line | Behaviour |
 |---|---|
 | a `%%` / `'` comment that is not a directive | `UML_PARSE_IGNORED_LINE` warning — the line carried no statement |
-| a multi-line `note … end note` block | skipped silently (prose is not a state meaning) |
+| a multi-line `note … end note` block | its body is skipped (prose is not a state meaning) and the block is reported once in `discardedConstructs` |
 | `@startuml`/`@enduml`, `stateDiagram-v2`, `direction`, `classDef`/`style`/`linkStyle`/`click`, `scale`, `skinparam`, `title`, `hide`, `autonumber` | skipped silently |
 | anything else the parser cannot read | `UML_PARSE_IGNORED_LINE` warning, and the model is built from what it did read |
 
