@@ -14,7 +14,7 @@ releases listed in `dsh.compatibility.dshReleases` (author-remediation track
 | npm | 11.13.0 |
 | pnpm | 11.21.0 |
 | Test date | 2026-09-25 (headless rounds) · 2026-09-29 (live-field and degradation rounds) · 2026-10-05 (headless round for 0.2.1-alpha.1) · 2026-10-06 (headless round for 0.9.0 on 0.1.7-rc.2) · 2026-10-09 (headless round for 1.0.0 on 0.2.1-alpha.2) |
-| Package under test | `dsh-logicprobe` 1.0.0 (bundle patch `cordis.patch.yml`, entry id `logicprobe`) |
+| Package under test | `dsh-logicprobe` 1.1.0 (bundle patch `cordis.patch.yml`, entry id `logicprobe`) |
 
 ## Method (one disposable profile per version)
 

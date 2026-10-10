@@ -1,6 +1,6 @@
 {
   "name": "logicprobe",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Verifies claims about designs and code. Facts go against the source. Behaviour goes through an executable model. Structure diagrams are read as dependency graphs, at one level or several. Two reports can be compared to see whether a change made things worse.",
   "author": {
     "name": "Amethyst Luna",

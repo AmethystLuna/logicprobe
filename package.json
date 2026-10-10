@@ -1,6 +1,6 @@
 {
   "name": "dsh-logicprobe",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Verifies claims about designs and code. Facts go against the source. Behaviour goes through an executable model: state machines, protocols, composition, data models, migrations. Structure diagrams are read as dependency graphs, at one level or several. Two reports can be compared for regression. Exports UPPAAL, TLA+, PRISM and SPIN input. Ships a native DeepSeek Harness bundle that injects the verification gate into the first model step.",
   "type": "module",
   "main": "lib/index.js",
