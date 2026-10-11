@@ -107,6 +107,39 @@ for (const directory of skills) {
   }
 }
 
+// A registered tool must be named where the model looks for it: the core skill's tool table
+// and the injected gate's tool list. A tool named in neither exists but is unreachable — it
+// can only be called by accident. The reverse matters too: a name left behind after a tool
+// was renamed is a dangling pointer that sends the model after something that is gone.
+const srcRoot = fileURLToPath(new URL('../../src/', import.meta.url))
+const registeredTools = readdirSync(srcRoot)
+  .filter((entry) => entry.endsWith('tool.ts'))
+  .flatMap((entry) =>
+    [...readFileSync(join(srcRoot, entry), 'utf8').matchAll(/export const [A-Z_]+TOOL_NAME = '([a-z_]+)'/g)].map((match) => match[1]),
+  )
+  .sort()
+
+check('the tool inventory is discoverable, not empty', () => {
+  if (registeredTools.length === 0) throw new Error('no tool names found in src/*tool.ts; this guard would pass vacuously')
+})
+
+check('every registered tool is named in the core skill and in the injected gate', () => {
+  const skillText = readFileSync(join(skillsRoot, 'logicprobe', 'SKILL.md'), 'utf8')
+  // The gate lives in a TypeScript template literal, so its backticks are escaped.
+  const gateText = readFileSync(join(srcRoot, 'index.ts'), 'utf8').replaceAll('\\`', '`')
+  const missing = registeredTools.filter(
+    (name) => !skillText.includes('`' + name + '`') || !gateText.includes('`' + name + '`'),
+  )
+  if (missing.length > 0) throw new Error('registered but not named where the model looks: ' + missing.join(', '))
+})
+
+check('the core skill names no tool that is not registered', () => {
+  const skillText = readFileSync(join(skillsRoot, 'logicprobe', 'SKILL.md'), 'utf8')
+  const named = [...new Set([...skillText.matchAll(/`(logicprobe_[a-z_]+)`/g)].map((match) => match[1]))].sort()
+  const unknown = named.filter((name) => !registeredTools.includes(name))
+  if (unknown.length > 0) throw new Error('named but not registered: ' + unknown.join(', '))
+})
+
 // Print what the model actually receives, so a drift is readable in the test log.
 console.log('\n--- catalog lines as the model sees them ---')
 for (const directory of skills) {

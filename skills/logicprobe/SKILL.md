@@ -171,6 +171,8 @@ UML modelling variant (the task is to draw a flow, not to check a claim):
 | `logicprobe_concurrency_scan` | Mines concurrency claims (thread-safe, lock-free, race condition, mutex, ISR-safe) and routes them to dedicated verification. It does not prove concurrency safety. |
 | `logicprobe_export` | Emits external-checker input from a verified model: UPPAAL, TLA+, PRISM, SPIN. |
 | `logicprobe_uml` | render / parse / review / explain-labels for UML modelling — the diagram domain belongs to the `logicprobe-uml` skill. |
+| `logicprobe_structure_verify` | Reviews a structure diagram as a dependency graph. It reports isolated nodes, dangling endpoints, cycles, disallowed edges, layer violations and missing required edges, and it checks refinement across declared levels. The diagram domain belongs to the `logicprobe-structure` skill. |
+| `logicprobe_report_diff` | Compares two reports of the same family. A finding's identity is its check, its code and its machine-readable locator, so reworded prose reads as changed rather than new. This is slice acceptance computed instead of eyeballed. |
 
 The repository engine mirrors the same checks and carries the `compose` and `export` subcommands for hosts without the native tools.
 
@@ -190,6 +192,8 @@ Every tool report carries the same outcome contract. **`ok` says a report was pr
 | `nextSteps[]` | What to do next, derived from the findings; never empty, and identical for two runs over the same input. |
 | `metadataKeys[]` | Paths of the `_`-prefixed annotation keys the schema ignored, e.g. `["_source", "_verified", "states[0]._note"]` (present only when the input carried any). |
 | `narrativeCoverage` | `{states: "5/5", events: "3/9", scenarios: "0/12"}` when the model carries a narrative — a partial narrative is valid, and this is how much is still undocumented. The gap is also a `NARRATIVE_PARTIAL` (info) finding, so a gate can read it without parsing `nextSteps` text. |
+
+A tool prints a body, not JSON. Passing checks stay in the `CHECKS` inventory line, and a fact that several checks report is listed once. Only error findings inline their evidence. Pass `reportView: "full"` when you need the structured report itself, for example to hand it to `logicprobe_report_diff`.
 
 Turn the verdict into an answer, never into a summary of `ok`:
 
