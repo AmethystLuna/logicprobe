@@ -141,12 +141,14 @@ Behavioural questions still follow the suggest-don't-escalate rule: offer an opt
 
 Outside dsh (Claude Code, Cursor, Codex, a terminal, CI) the install is the **repository** (marketplace or git), which carries `tools/python/logicprobe-engine.py`. Python 3.8+ standard library only. The dsh bundle (npm or profile install) does not include it. With a LogicModelV1 JSON at hand, run it directly:
 
-- `verify` runs S1-S8 / A1-A14 / D1-D4
+- `verify` runs S1-S8 / A1-A14 / D1-D4 (`--before-model`, `--baseline`, `--hash-spec`, `--hash-check`)
 - `compose` runs the C1 / C2 composition
 - `export` emits UPPAAL, TLA+, PRISM and SPIN input
 - `uml-render`, `uml-parse` and `uml-review` cover the UML front end (`uml-review --explain-labels` prints the label and comment conventions the parser accepts)
+- `structure` and `granularity` audit dependency graphs and multi-level refinement (UML020-UML031)
+- `--help` is the authoritative subcommand list; this page does not copy it
 
-Its output is byte-identical to the dsh tools, cross-checked by `tests/python/run.mjs`. When the model exists only as extracted tables, fill in `tools/python/verification-harness.py`. Data-model checks use `tools/python/data-model-harness.py`. When Python is unavailable, for example on an air-gapped machine, the matching guide describes a manual verification mode.
+Every subcommand the engine implements produces a report byte-identical to the dsh tool, cross-checked by `tests/python/run.mjs`. When the model exists only as extracted tables, fill in `tools/python/verification-harness.py`. **Data-model verification has no mirror subcommand**: hosts without dsh use `tools/python/data-model-harness.py` or the manual mode in the matching guide, and the concurrency claim scan is the same story (it only routes). When Python is unavailable, for example on an air-gapped machine, the matching guide describes a manual verification mode.
 
 Sample models live under [`examples/`](examples/README.md): an order state machine before/after, an e-commerce data model, and a User field migration.
 

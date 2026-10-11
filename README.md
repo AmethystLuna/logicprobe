@@ -139,12 +139,14 @@ logicprobe 核验声称与实物是否一致。事实类对着源码查。行为
 
 在 dsh 之外（Claude Code、Cursor、Codex、终端、CI），装的是**仓库**（marketplace / git），随仓库带 `tools/python/logicprobe-engine.py`：只需 Python 3.8+ 标准库。dsh 安装包（npm / bundle）不含它。已有 LogicModelV1 JSON 时直接运行：
 
-- `verify` 跑 S1-S8 / A1-A14 / D1-D4
+- `verify` 跑 S1-S8 / A1-A14 / D1-D4（`--before-model`、`--baseline`、`--hash-spec`、`--hash-check`）
 - `compose` 跑 C1 / C2 组合
 - `export` 生成 UPPAAL、TLA+、PRISM、SPIN 输入
 - `uml-render`、`uml-parse`、`uml-review` 覆盖 UML 前端（`uml-review --explain-labels` 打印解析器接受的标签与注释口径）
+- `structure`、`granularity` 审查依赖图与多粒度细化（UML020-UML031）
+- 子命令的权威清单是 `--help`，本文不复制一份
 
-它与 dsh 工具逐字节一致，对照见 `tests/python/run.mjs`。模型只有抽取出的状态表时，填充模板 `tools/python/verification-harness.py`。数据模型验证使用 `tools/python/data-model-harness.py`。Python 不可用（例如离线开发机）时，对应 guide 提供手动验证模式。
+凡引擎实现的子命令，其报告与 dsh 工具逐字节一致，对照见 `tests/python/run.mjs`。模型只有抽取出的状态表时，填充模板 `tools/python/verification-harness.py`。**数据模型验证没有镜像子命令**：非 dsh 宿主用 `tools/python/data-model-harness.py`，或对应 guide 的手动验证模式；并发声称扫描同理（它只做分流）。Python 不可用（例如离线开发机）时，对应 guide 提供手动验证模式。
 
 示例模型见 [`examples/`](examples/README.md)：订单状态机 before/after、电商数据模型、User 字段迁移。
 

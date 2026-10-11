@@ -174,7 +174,7 @@ UML modelling variant (the task is to draw a flow, not to check a claim):
 | `logicprobe_structure_verify` | Reviews a structure diagram as a dependency graph. It reports isolated nodes, dangling endpoints, cycles, disallowed edges, layer violations and missing required edges, and it checks refinement across declared levels. The diagram domain belongs to the `logicprobe-structure` skill. |
 | `logicprobe_report_diff` | Compares two reports of the same family. A finding's identity is its check, its code and its machine-readable locator, so reworded prose reads as changed rather than new. This is slice acceptance computed instead of eyeballed. |
 
-The repository engine mirrors the same checks and carries the `compose` and `export` subcommands for hosts without the native tools.
+The repository engine mirrors the same checks for hosts without the native tools, and its `--help` lists the subcommands. Data-model verification has no mirror: those hosts take the data harness or the manual mode.
 
 ### Reading a Report: `ok` Is Not a Verdict
 

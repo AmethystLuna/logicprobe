@@ -62,6 +62,31 @@ plugin. This plugin was split out of embedded-workbench v0.6.0.
   `src/index.ts`. The Claude-side hook resolves the engine path from its own
   location, so the injected text never asks a model to guess a relative path.
 
+## Two-Sided Alignment
+
+Every capability is answered on both sides: dsh and non-dsh, Node and Python. A
+feature is not done on one side only.
+
+- **A dsh capability needs a non-dsh answer in the same change.** Either a mirror
+  subcommand, or a statement in that skill that hosts without the tools fall back
+  to a harness template or to manual mode. Silence is the failure: a non-dsh
+  reader then assumes coverage that does not exist.
+- **Where a mirror exists, the reports are byte-identical.** `tests/python/run.mjs`
+  is the authority on which surfaces are mirrored and what parity means there.
+  Keep it green; it skips only when no interpreter is on PATH.
+- **The mirror is code, not prose.** A change to the Node engine's semantics is a
+  change to `tools/python/logicprobe-engine.py`. Never document a check on one
+  side and implement it only on the other.
+- **Read the surfaces from the code.** `logicprobe-engine.py --help` lists the
+  subcommands, and the registrations under `src/` list the dsh tools. Neither
+  list is repeated here, because a list in a document goes stale.
+- **Two capabilities are dsh-only on purpose.** Data-model verification and the
+  concurrency claim scan have no mirror subcommand: non-dsh hosts take the data
+  harness or manual mode, and the concurrency skill routes claims to external
+  tools. Keep those statements true wherever the skills describe them.
+- **Nothing Python ships.** The package stays Node-only. The mirror and the
+  harnesses live under `tools/` in the repository.
+
 ## PR Requirements
 
 - All PRs must pass `markdownlint` with the project's `.markdownlint.json` config.
