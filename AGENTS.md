@@ -52,9 +52,8 @@ plugin. This plugin was split out of embedded-workbench v0.6.0.
   gains `compatible` for a release only after a round on it: install, mount, the
   offline checks, uninstall. Dependabot is restricted to devDependencies for that
   reason. A peer range is a claim, and automation must not widen it.
-- **The dsh bundle depends on Node only.** No Python ships in the package. The
-  mirror engine and the harnesses live in `tools/python/` for hosts that are not
-  dsh, and `tests/python/run.mjs` keeps the two engines byte-identical.
+- **The dsh bundle depends on Node only**, so nothing Python ships in the
+  package. The non-dsh side is the subject of Two-Sided Alignment below.
 - **A client bundle does not load Harness Client packages.** Vendor the control,
   give its classes a plugin prefix, and use the host's design tokens only. A
   plain-JS bundle gets no type check, and a throw blanks the whole slot entry.
@@ -84,8 +83,10 @@ feature is not done on one side only.
   concurrency claim scan have no mirror subcommand: non-dsh hosts take the data
   harness or manual mode, and the concurrency skill routes claims to external
   tools. Keep those statements true wherever the skills describe them.
-- **Nothing Python ships.** The package stays Node-only. The mirror and the
-  harnesses live under `tools/` in the repository.
+- **Nothing Python ships, and Python is not a fallback.** The package stays
+  Node-only. The mirror and the harnesses under `tools/` are the native non-dsh
+  path, so their dependencies stay at the standard library — an interpreter is
+  the whole requirement, matching the repository's other tooling.
 
 ## PR Requirements
 
@@ -112,6 +113,8 @@ feature is not done on one side only.
 ## Before Submitting
 
 - Run `markdownlint` on all changed files.
+- Run `npm run test:engine` before pushing. It is the aggregate gate, so a new
+  test file is not part of the suite until that script runs it.
 - Verify `plugin.json` passes `claude plugin validate`.
 - Test the plugin locally by installing to `~/.claude/plugins/dev/`.
 - Bump the version with the release tool: `npm run bump -- <new-version>`
