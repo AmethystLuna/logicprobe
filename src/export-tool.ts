@@ -2,6 +2,7 @@ import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { JsonValue } from './json-value.js'
 import { REPORT_SCHEMAS, DEFAULT_HASH_SPEC, modelHash, refusalVerdict, validateModel, verdictOf } from './engine.js'
 import { exportModel, type ExportFormat } from './exporters.js'
+import { renderReportText } from './report-view.js'
 
 /** The model hash of an export's input, when the input validates (the success path always does). */
 function exportHashes(model: unknown): { hashSpec: typeof DEFAULT_HASH_SPEC; modelHash?: string } {
@@ -34,14 +35,19 @@ export const logicProbeExportTool = defineTool({
       enum: ['uppaal', 'tla', 'prism', 'spin'],
       description: 'Target tool format.',
     },
+    reportView: {
+      type: 'string',
+      enum: ['digest', 'full'],
+      description: 'digest (default) prints the generated file verbatim; full prints the structured result as JSON.',
+    },
   },
   output: {
     schema: {
       type: 'json',
       description: 'Export result with generated file content.',
     },
-    render(_args, value) {
-      return [{ type: 'text' as const, text: JSON.stringify(value, null, 2) }]
+    render(args, value) {
+      return [{ type: 'text' as const, text: renderReportText(value, { full: args.reportView === 'full' }) }]
     },
   },
   timeoutMs: 10_000,

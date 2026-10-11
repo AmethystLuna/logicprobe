@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto'
 import type { JsonValue } from './json-value.js'
 import { REPORT_SCHEMAS, DEFAULT_HASH_SPEC, modelHash, refusalVerdict, verdictOf, verdictOfFindings, type VerdictSummary } from './engine.js'
 import { renderUml, parseUml, parseFindings, reviewUml, explainLabels, UmlError, type UmlDiagram, type UmlFinding, type UmlNotation, type UmlParseResult } from './uml.js'
+import { renderReportText } from './report-view.js'
 
 export const LOGICPROBE_UML_TOOL_NAME = 'logicprobe_uml'
 
@@ -55,23 +56,21 @@ export const logicProbeUmlTool = defineTool({
       type: 'integer',
       description: 'Cap on the sequence trace length when rendering kind=sequence. Default 60.',
     },
+    reportView: {
+      type: 'string',
+      enum: ['digest', 'full'],
+      description: 'digest (default) prints the diagram or report body; full prints the structured result as JSON.',
+    },
   },
   output: {
     schema: {
       type: 'json',
       description: 'Render result (diagram source), parse result (LogicModelV1 + labels), or the modelling review report with findings, round-trip diff and next steps.',
     },
-    render(_args, value) {
-      const record = value as unknown as Record<string, unknown>
-      // A rendered diagram is source text: print it verbatim so it can be copied
-      // into a file, then the structured result (warnings, notation, kind).
-      if (typeof record.diagram === 'string') {
-        return [
-          { type: 'text' as const, text: record.diagram },
-          { type: 'text' as const, text: JSON.stringify(value, null, 2) },
-        ]
-      }
-      return [{ type: 'text' as const, text: JSON.stringify(value, null, 2) }]
+    render(args, value) {
+      // A rendered diagram is source text: the report body prints it verbatim, once.
+      // Echoing the whole result as JSON printed the same diagram a second time, escaped.
+      return [{ type: 'text' as const, text: renderReportText(value, { full: args.reportView === 'full' }) }]
     },
   },
   timeoutMs: 10_000,

@@ -63,6 +63,15 @@ Every report separates "the tool ran" from "the review passed":
 
 Reading `ok` turns a model with a deadlock into a pass; the verdict is the judgement. The non-DSH Python CLI follows the verdict with its exit code: `pass`/`pass_with_findings` → `0`, `fail` or a refusal → `2`.
 
+**A tool prints the report body, not JSON.** The structured report is unchanged (`schema`/`verdict`/`hashes`/check ids/`code`/`evidence`/`path` all still there); only the text a model reads changed:
+
+- a passing check appears in the `CHECKS` inventory line and does not expand a body — a passing check carries nothing to act on;
+- a fact reported by more than one check (for example `S5` and `A1` reporting the same `(state, event)` pairs) is listed under the check that reported it first, and the later check says it adds nothing instead of reprinting it;
+- findings that render identically inside one check collapse to one line with `(xN)`;
+- only `error` findings inline their `evidence`; warnings do not — evidence is machine data, not reading material.
+
+Pass `reportView: "full"` when you need the structured report itself (for example to hand it to `logicprobe_report_diff`, which matches on `check + code + evidence`; a body cannot stand in for the object).
+
 ### The model carries its own archive record (`_`-prefixed keys)
 
 Any key starting with `_` — at any level: `_source`, `_verified`, `_extraction_caveats`, `states[0]._note` — is **annotation metadata**: the schema skips it, `modelHash` excludes it, and the report echoes it as `metadataKeys`. Provenance and verification snapshots can therefore live inside the model file instead of a sidecar that drifts away from it, without changing the model's hash identity. Every other key stays closed: a mistyped `sttes` is still an error. `verify model.json --hash-check <hex>` answers whether a recorded hash belongs to any published specification.

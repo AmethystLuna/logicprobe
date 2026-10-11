@@ -1,6 +1,7 @@
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { JsonValue } from './json-value.js'
 import { runConcurrencyScan } from './concurrency.js'
+import { renderReportText } from './report-view.js'
 
 export const LOGICPROBE_CONCURRENCY_SCAN_TOOL_NAME = 'logicprobe_concurrency_scan'
 
@@ -20,14 +21,19 @@ export const logicProbeConcurrencyScanTool = defineTool({
       required: true,
       description: 'Document or plan text to scan for concurrency-related claims.',
     },
+    reportView: {
+      type: 'string',
+      enum: ['digest', 'full'],
+      description: 'digest (default) prints the readable body; full prints the structured report, which logicprobe_report_diff needs.',
+    },
   },
   output: {
     schema: {
       type: 'json',
       description: 'Concurrency scan report with findings and summary.',
     },
-    render(_args, value) {
-      return [{ type: 'text' as const, text: JSON.stringify(value, null, 2) }]
+    render(args, value) {
+      return [{ type: 'text' as const, text: renderReportText(value, { full: args.reportView === 'full' }) }]
     },
   },
   timeoutMs: 10_000,

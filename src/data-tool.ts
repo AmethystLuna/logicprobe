@@ -1,6 +1,7 @@
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { JsonValue } from './json-value.js'
 import { runDataVerification, DATA_ENGINE_SCHEMA_VERSION } from './data-engine.js'
+import { renderReportText } from './report-view.js'
 
 export const LOGICPROBE_DATAMODEL_VERIFY_TOOL_NAME = 'logicprobe_datamodel_verify'
 
@@ -40,14 +41,19 @@ export const logicProbeDataModelVerifyTool = defineTool({
       type: 'json',
       description: 'Optional backup/restore pairs for DA7 rollback symmetry.',
     },
+    reportView: {
+      type: 'string',
+      enum: ['digest', 'full'],
+      description: 'digest (default) prints the readable body; full prints the structured report, which logicprobe_report_diff needs.',
+    },
   },
   output: {
     schema: {
       type: 'json',
       description: 'logicprobe-datamodel verification report with summary and per-check findings.',
     },
-    render(_args, value) {
-      return [{ type: 'text' as const, text: JSON.stringify(value, null, 2) }]
+    render(args, value) {
+      return [{ type: 'text' as const, text: renderReportText(value, { full: args.reportView === 'full' }) }]
     },
   },
   timeoutMs: 10_000,

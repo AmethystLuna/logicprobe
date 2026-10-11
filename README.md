@@ -61,6 +61,15 @@ logicprobe 核验声称与实物是否一致。事实类对着源码查。行为
 
 只看 `ok` 会把「有死锁」的模型读成通过——判据是 `verdict`。非 DSH 的 Python CLI 退出码跟随 verdict：`pass`/`pass_with_findings` → `0`，`fail` 或拒绝 → `2`。
 
+**工具打印的是报告正文，不是 JSON。** 结构化报告本身没有变（`schema`/`verdict`/`hashes`/检查项 id/`code`/`evidence`/`path` 都在），变的只是给模型看的那份文本：
+
+- 通过的检查只出现在 `CHECKS` 清单行里，不再展开正文（通过的检查没有可行动内容）；
+- 同一个事实被多个检查各报一遍时（例如 `S5` 与 `A1` 报同一批 `(state, event)` 对），只在先出现的检查里列出，后出现的检查写明「与上面重复」，不再重印；
+- 同一检查内逐字相同的发现折叠成一行并标注 `(xN)`；
+- 只有 `error` 级发现内联 `evidence`，`warning` 级不内联——那是机器字段，不是阅读材料。
+
+需要结构化报告本体时传 `reportView: "full"`（例如要把它交给 `logicprobe_report_diff`，它按 `check + code + evidence` 匹配身份，正文替代不了对象）。
+
 ### 模型自带的归档记录（`_` 前缀键）
 
 任何以 `_` 开头的键（任意层级，如 `_source`、`_verified`、`_extraction_caveats`、`states[0]._note`）都是**注记元数据**：schema 跳过、`modelHash` 排除、报告以 `metadataKeys` 回显。这样来源与验证快照可以跟模型放在同一个文件里，不必再维护一个会漂移的 sidecar，而模型的哈希身份不变。其余键仍然闭合——拼错的 `sttes` 依旧报错。用 `verify model.json --hash-check <hex>` 可回答某个历史哈希是否属于任何已发布规范。

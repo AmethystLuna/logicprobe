@@ -1,6 +1,7 @@
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { JsonValue } from './json-value.js'
 import { diffReports } from './baseline.js'
+import { renderReportText } from './report-view.js'
 
 export const LOGICPROBE_REPORT_DIFF_TOOL_NAME = 'logicprobe_report_diff'
 
@@ -25,14 +26,19 @@ export const logicProbeReportDiffTool = defineTool({
       required: true,
       description: 'The current report to compare against the baseline.',
     },
+    reportView: {
+      type: 'string',
+      enum: ['digest', 'full'],
+      description: 'digest (default) prints the readable body; full prints the structured diff report.',
+    },
   },
   output: {
     schema: {
       type: 'json',
       description: 'Baseline diff report: added/removed/changed findings, delta verdict, current verdict, summary and next steps.',
     },
-    render(_args, value) {
-      return [{ type: 'text' as const, text: JSON.stringify(value, null, 2) }]
+    render(args, value) {
+      return [{ type: 'text' as const, text: renderReportText(value, { full: args.reportView === 'full' }) }]
     },
   },
   timeoutMs: 10_000,

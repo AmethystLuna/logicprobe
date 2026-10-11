@@ -3,6 +3,7 @@ import type { JsonValue } from './json-value.js'
 import { REPORT_SCHEMAS } from './engine.js'
 import { reviewStructure } from './structure.js'
 import { reviewGranularity, type GranularityDiagram } from './granularity.js'
+import { renderReportText } from './report-view.js'
 
 export const LOGICPROBE_STRUCTURE_TOOL_NAME = 'logicprobe_structure_verify'
 
@@ -36,14 +37,19 @@ export const logicProbeStructureTool = defineTool({
       type: 'json',
       description: 'Optional dependency matrix: {rules: [{id, source, allow?, deny?, require?}], layers: [{name, members}], default: "allow"|"deny"}. Every edge is judged against it and the matched rule ids are reported.',
     },
+    reportView: {
+      type: 'string',
+      enum: ['digest', 'full'],
+      description: 'digest (default) prints the readable body; full prints the structured report, which logicprobe_report_diff needs.',
+    },
   },
   output: {
     schema: {
       type: 'json',
       description: 'Structure review report: graph (nodes/edges), findings UML020-UML026, per-edge matrix verdicts, summary and next steps.',
     },
-    render(_args, value) {
-      return [{ type: 'text' as const, text: JSON.stringify(value, null, 2) }]
+    render(args, value) {
+      return [{ type: 'text' as const, text: renderReportText(value, { full: args.reportView === 'full' }) }]
     },
   },
   timeoutMs: 10_000,

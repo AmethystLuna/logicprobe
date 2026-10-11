@@ -96,7 +96,7 @@ Plugin logicprobe is active. It checks claims about designs and code: facts agai
 - \`logicprobe_structure_verify\` — dependency review of a structure diagram, at one level or several.
 - \`logicprobe_report_diff\` — baseline against current: what a change added, removed or changed.
 
-**Read a report**: gate on \`verdict\` (\`pass\`, \`pass_with_findings\`, \`fail\`), never on \`ok\`. Reports carry \`verdictReason\`, \`hashes\` and \`nextSteps\`. Keys starting with \`_\` are notes: ignored, and left out of the model hash.
+**Read a report**: gate on \`verdict\` (\`pass\`, \`pass_with_findings\`, \`fail\`), never on \`ok\`. Reports carry \`verdictReason\`, \`hashes\` and \`nextSteps\`. Keys starting with \`_\` are notes: ignored, and left out of the model hash. A tool prints the report body: passing checks stay in the inventory line, repeated facts are grouped, and warning evidence is omitted — pass \`reportView: "full"\` only when you need the structured report itself, which \`logicprobe_report_diff\` consumes.
 
 **Red Flags** — if you think any of these, stop:
 
