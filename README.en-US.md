@@ -70,7 +70,7 @@ Reading `ok` turns a model with a deadlock into a pass; the verdict is the judge
 - findings that render identically inside one check collapse to one line with `(xN)`;
 - only `error` findings inline their `evidence`; warnings do not — evidence is machine data, not reading material.
 
-Pass `reportView: "full"` when you need the structured report itself (for example to hand it to `logicprobe_report_diff`, which matches on `check + code + evidence`; a body cannot stand in for the object).
+Pass `reportView: "full"` when you need the structured report itself (for example to hand it to `logicprobe_report_diff`, which matches on `check + code + evidence`; a body cannot stand in for the object). Hosts without dsh run the CLI, which prints the report JSON: the body is the dsh tools' presentation layer.
 
 ### The model carries its own archive record (`_`-prefixed keys)
 

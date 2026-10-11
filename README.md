@@ -68,7 +68,7 @@ logicprobe 核验声称与实物是否一致。事实类对着源码查。行为
 - 同一检查内逐字相同的发现折叠成一行并标注 `(xN)`；
 - 只有 `error` 级发现内联 `evidence`，`warning` 级不内联——那是机器字段，不是阅读材料。
 
-需要结构化报告本体时传 `reportView: "full"`（例如要把它交给 `logicprobe_report_diff`，它按 `check + code + evidence` 匹配身份，正文替代不了对象）。
+需要结构化报告本体时传 `reportView: "full"`（例如要把它交给 `logicprobe_report_diff`，它按 `check + code + evidence` 匹配身份，正文替代不了对象）。非 dsh 宿主走 CLI，它直接打印报告 JSON：那份正文是 dsh 工具的呈现层。
 
 ### 模型自带的归档记录（`_` 前缀键）
 

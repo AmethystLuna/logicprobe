@@ -172,9 +172,9 @@ UML modelling variant (the task is to draw a flow, not to check a claim):
 | `logicprobe_export` | Emits external-checker input from a verified model: UPPAAL, TLA+, PRISM, SPIN. |
 | `logicprobe_uml` | render / parse / review / explain-labels for UML modelling — the diagram domain belongs to the `logicprobe-uml` skill. |
 | `logicprobe_structure_verify` | Reviews a structure diagram as a dependency graph. It reports isolated nodes, dangling endpoints, cycles, disallowed edges, layer violations and missing required edges, and it checks refinement across declared levels. The diagram domain belongs to the `logicprobe-structure` skill. |
-| `logicprobe_report_diff` | Compares two reports of the same family. A finding's identity is its check, its code and its machine-readable locator, so reworded prose reads as changed rather than new. This is slice acceptance computed instead of eyeballed. |
+| `logicprobe_report_diff` | Compares two reports of the same family. A finding's identity is its check, its code and its machine-readable locator, so reworded prose reads as changed rather than new. This is slice acceptance computed instead of eyeballed. Without the tool, `verify --baseline REPORT` prints the same diff. |
 
-The repository engine mirrors the same checks for hosts without the native tools, and its `--help` lists the subcommands. Data-model verification has no mirror: those hosts take the data harness or the manual mode.
+The repository engine mirrors the same checks for hosts without the native tools, and its `--help` lists the subcommands. Two capabilities have no mirror. Data-model verification takes the data harness or the manual mode there. The concurrency claim scan is the same story: `logicprobe-concurrency` routes the claims instead. That engine prints the report JSON, not the body — the body is the dsh tools' rendering.
 
 ### Reading a Report: `ok` Is Not a Verdict
 

@@ -140,6 +140,59 @@ check('the core skill names no tool that is not registered', () => {
   if (unknown.length > 0) throw new Error('named but not registered: ' + unknown.join(', '))
 })
 
+// The non-dsh surface is a CLI, and two capabilities are dsh-only on purpose. A document that
+// presents one of them as a subcommand of the mirror sends a non-dsh reader into a dead end —
+// which is what happened once: the Claude-side injected text listed `datamodel` and
+// `concurrency` among the engine's commands, and neither exists.
+const repoRoot = fileURLToPath(new URL('../../', import.meta.url))
+const cliSource = readFileSync(join(repoRoot, 'tools', 'python', 'logicprobe-engine.py'), 'utf8')
+const cliSubcommands = [...cliSource.matchAll(/add_parser\('([a-z][a-z-]*)'/g)].map((match) => match[1])
+
+/** The capability words that must never be dressed as a mirror subcommand. */
+const DSH_ONLY_WORDS = ['datamodel', 'data-model', 'concurrency', 'report-diff', 'scan']
+
+check('the mirror CLI declares its subcommands, so this guard reads a real surface', () => {
+  if (cliSubcommands.length === 0) throw new Error('no sub.add_parser(...) found in tools/python/logicprobe-engine.py')
+})
+
+const shippedText = [
+  join(repoRoot, 'README.md'),
+  join(repoRoot, 'README.en-US.md'),
+  join(repoRoot, 'hooks', 'session-start-content.md'),
+  join(repoRoot, 'src', 'index.ts'),
+  ...readdirSync(skillsRoot, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .flatMap((entry) => {
+      const dir = join(skillsRoot, entry.name)
+      const files = [join(dir, 'SKILL.md')]
+      try {
+        for (const extra of readdirSync(join(dir, 'references'))) files.push(join(dir, 'references', extra))
+      } catch {
+        // A skill without a references directory is fine.
+      }
+      return files
+    }),
+]
+
+check('no document presents a dsh-only capability as a mirror subcommand', () => {
+  const problems = []
+  // "repository engine" counts as a mention too: a document can name a subcommand without
+  // ever printing the path.
+  const mention = /logicprobe-engine\.py|repository engine/g
+  for (const file of shippedText) {
+    const text = readFileSync(file, 'utf8')
+    for (const found of text.matchAll(mention)) {
+      const window = text.slice(found.index, found.index + 400)
+      for (const word of DSH_ONLY_WORDS) {
+        if (window.includes('`' + word + '`')) problems.push(file.slice(repoRoot.length) + ': `' + word + '`')
+      }
+    }
+  }
+  if (problems.length > 0) {
+    throw new Error('dsh-only capability listed beside the mirror CLI; point at --help instead: ' + problems.join('; '))
+  }
+})
+
 // Print what the model actually receives, so a drift is readable in the test log.
 console.log('\n--- catalog lines as the model sees them ---')
 for (const directory of skills) {

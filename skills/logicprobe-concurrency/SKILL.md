@@ -41,3 +41,4 @@ The full routing table, including hard-real-time, hybrid-control and execution-c
 2. **No absolute language in the answer.** "This is thread-safe" is exactly the claim being mined, not a result this skill can produce.
 3. **One counterexample is enough to refute.** If a race is suspected, the deliverable is the interleaving that breaks it plus the harness that demonstrates it (TSan/Helgrind output), not an argument.
 4. **Sequential targets are out of scope.** If nothing runs concurrently, say so and stop.
+5. **The scanner is dsh-only.** `logicprobe_concurrency_scan` has no mirror subcommand. Without it, mine the text by hand against the keyword table above and route each claim the same way.
