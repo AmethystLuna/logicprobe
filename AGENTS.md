@@ -20,9 +20,10 @@ text of a store entry. They come from the review that produced the current text.
   detail. The README tells the human story. Manifests describe capability.
   `DSH-COMPATIBILITY.md` holds measured evidence. State a fact in one place and
   point at it from everywhere else.
-- **No dangling pointers.** Every path, flag, tool and skill a file names must
-  exist and be reachable from that file. Paths resolve from where the reader
-  runs: a session's working directory is the user's project, not this plugin.
+- **No dangling pointers.** Every path, flag, skill and tool a file names must
+  exist and be reachable from that file. A named command that no artifact
+  implements is worse than no mention: the reader goes looking for it. Paths
+  resolve from where the reader runs, not from the plugin root.
 - **Spend the budget.** Injected text is paid once per session, mode context once
   per turn, tool descriptions once per request. Keep the top level lean and put
   detail behind a pointer.
@@ -65,6 +66,27 @@ plugin. This plugin was split out of embedded-workbench v0.6.0.
 - **The injected gate** is appended once per session through the history guard in
   `src/index.ts`. The Claude-side hook resolves the engine path from its own
   location, so the injected text never asks a model to guess a relative path.
+
+## Host Alignment
+
+This plugin runs on Claude Code, Codex, Cursor, Kimi, OpenCode, ZCode and dsh. A
+feature is not done for one host only.
+
+- **Every host surface moves together.** A new skill needs its routing line in the
+  bootstrap skill, its mention in the injected text, its row in the README tables,
+  and whatever the host manifests declare. A skill only dsh can reach is a bug, not
+  a shortcut.
+- **The injected text is one contract.** The dsh gate in `src/index.ts` is the
+  native adaptation of `hooks/session-start-content.md`. Change the behaviour rules
+  in both.
+- **No catalogue counts in shipped text.** "Four skills" is wrong the moment a fifth
+  lands. Name the capability instead. Manifest descriptions, storefront copy and
+  README summaries are all in this category. `tests/skills/run.mjs` holds the line.
+- **No host-specific paths in skill text.** Hosts disagree about where a plugin
+  lives. Resolve a path at runtime, from the script's own location.
+- **dsh is one host, not the only one.** A change that works only because dsh
+  supplies a service needs a Claude-side and a plain-file answer too, or it must say
+  plainly that the host has to supply that service.
 
 ## Two-Sided Alignment
 

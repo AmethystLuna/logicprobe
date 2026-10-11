@@ -193,6 +193,48 @@ check('no document presents a dsh-only capability as a mirror subcommand', () =>
   }
 })
 
+// Shipped text carries no catalogue counts: "four skills" is wrong the moment a fifth lands.
+// Measured evidence (DSH-COMPATIBILITY.md) and the contributor guides are not shipped text,
+// so they stay out of this scan. The report contract holds the real counts, where a test
+// asserts them.
+const COUNT_PATTERNS = [
+  /\b(?:two|three|four|five|six|seven|eight|nine|ten)\s+(?:skills?|agents?|tools?|checks?|attacks?|probes?|subcommands?|domains?)\b/i,
+  /\b\d+\s+(?:skills?|agents?|tools?|checks?|attacks?|probes?|subcommands?|domains?)\b/i,
+  /\b(?:two|three|four|five|six|seven|eight|nine|ten|\d+)\s+in total\b/i,
+  /一共[一二三四五六七八九十百\d]+个/,
+  /共[一二三四五六七八九十百\d]+个/,
+  /[一二三四五六七八九十百]+个(?:技能|智能体|工具|检查|子命令|领域)/,
+]
+
+/** Host manifests and store text: the surfaces a user reads before installing. */
+const HOST_DIRS = ['.claude-plugin', '.codex-plugin', '.cursor-plugin', '.kimi-plugin', '.opencode', '.zcode', '.dsh']
+const hostText = HOST_DIRS.flatMap((directory) => {
+  try {
+    return readdirSync(join(repoRoot, directory))
+      .filter((name) => /\.(json|md|ya?ml|toml|txt)$/.test(name))
+      .map((name) => join(repoRoot, directory, name))
+  } catch {
+    return []
+  }
+})
+
+check('shipped text carries no catalogue counts', () => {
+  const problems = []
+  for (const file of [...shippedText, ...hostText]) {
+    const lines = readFileSync(file, 'utf8').split(/\r?\n/)
+    lines.forEach((line, index) => {
+      for (const pattern of COUNT_PATTERNS) {
+        if (pattern.test(line)) {
+          problems.push(file.slice(repoRoot.length + 1) + ':' + String(index + 1) + ' -> ' + line.trim().slice(0, 90))
+        }
+      }
+    })
+  }
+  if (problems.length > 0) {
+    throw new Error('catalogue count in shipped text; name the capability instead: ' + problems.join(' | '))
+  }
+})
+
 // Print what the model actually receives, so a drift is readable in the test log.
 console.log('\n--- catalog lines as the model sees them ---')
 for (const directory of skills) {

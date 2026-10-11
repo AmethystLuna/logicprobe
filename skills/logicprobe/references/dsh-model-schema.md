@@ -1,6 +1,6 @@
 # DSH Model Schema v1 — logicprobe_verify
 
-The dsh-native `logicprobe_verify` tool accepts a structured JSON model. The engine runs 22 checks (S1-S8 structural, A1-A14) and returns a JSON report. When `beforeModel` is supplied, it also runs D1-D4 before/after regression checks. Guards and updates are structured data — no code strings, no arbitrary execution.
+The dsh-native `logicprobe_verify` tool accepts a structured JSON model. The engine runs the structural and adversarial checks (S1-S8, A1-A14) and returns a JSON report. When `beforeModel` is supplied, it also runs D1-D4 before/after regression checks. Guards and updates are structured data — no code strings, no arbitrary execution.
 
 ## Top-level model
 

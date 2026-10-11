@@ -202,7 +202,7 @@ When a probe finds a counter-example, classify it:
 
 ### Model Fidelity Warning
 
-The model is an APPROXIMATION. It models state transitions, not execution semantics. A model that passes all 22 checks (S1-S8 structural, A1-A14) means the plan's LOGIC is consistent — NOT that the implementation will work. Always follow logic verification with code-level review.
+The model is an APPROXIMATION. It models state transitions, not execution semantics. A model that passes every check (S1-S8 structural, A1-A14) means the plan's LOGIC is consistent — NOT that the implementation will work. Always follow logic verification with code-level review.
 
 ## Refactoring Verification
 

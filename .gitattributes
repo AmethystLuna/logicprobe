@@ -4,3 +4,7 @@
 *.md text=auto
 *.json text=auto
 hooks/session-start text eol=lf
+# The injected payload is read by the bash hook through command substitution, which on
+# Git Bash drops the CR that precedes a trailing LF. Keeping the file LF on every platform
+# keeps the payload byte-identical there, and keeps the round-trip check honest.
+hooks/session-start-content.md text eol=lf

@@ -127,7 +127,7 @@ The dependency matrix is the single source of truth:
 
 ## Usage
 
-The plugin injects a capability notification into the first model step. There is **one skill per domain** — four in total. `logicprobe` is the entry point: load it whenever you have any thought of checking whether something about the code is true, and its routing table hands a neighbouring domain on.
+The plugin injects a capability notification into the first model step. There is **one skill per domain**. `logicprobe` is the entry point: load it whenever you have any thought of checking whether something about the code is true, and its routing table hands a neighbouring domain on.
 
 | Skill | Domain | Typical trigger |
 |---|---|---|
