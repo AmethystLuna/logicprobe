@@ -37,7 +37,7 @@ With that entry in place the pinned install resolves immediately (verified for 1
 Restart the target profile. The bundle mounts a native cordis plugin, and that plugin does two things.
 
 1. It registers the bundled skills through dsh's `ctx.skills` filesystem provider. The skills then appear in the session skill catalog, with no manual copy step.
-2. It folds the gate text into the first model step. The gate carries the claim-verification doctrine: the 1% Rule, the Red Flags table, and the proactive-suggestion rule. This is the dsh counterpart of the Claude Code `SessionStart` hook.
+2. It folds the gate text into the first model step. The gate carries the claim-verification doctrine: the proactive-suggestion rule, with the Red Flags table in the skill body. This is the dsh counterpart of the Claude Code `SessionStart` hook.
 
 The bundle also registers six native tools through `ctx.tools`: `logicprobe_verify`, `logicprobe_datamodel_verify`, `logicprobe_concurrency_scan`, `logicprobe_compose_verify`, `logicprobe_export` and `logicprobe_uml`. It adds one dynamic context, `logicprobe:mode`, through `ctx.systemPrompt`. That context resolves `interaction` per session: `follow-approval` becomes `auto` when the last `approval/policy` event is `never`.
 

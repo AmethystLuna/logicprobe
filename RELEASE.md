@@ -67,7 +67,7 @@ deliberate instead of habitual.
 - [ ] Restart the web profile
 - [ ] Confirm all three:
   - `dsh --profile web --dump-config` contains the `logicprobe` row
-  - the claim-verification gate text (1% Rule / Red Flags / proactive suggestion) appears in the model context of the **first step** of a new session
+  - the claim-verification gate text (proactive suggestion) appears in the model context of the **first step** of a new session
   - `cordis_inspect_list` shows the `logicprobe` provider; `cordis_inspect_query` `status` returns `enabled: true`, `interaction: follow-approval`, `toolRegistered: true`, and `engineSchemaVersion: 1`
   - the model-visible `logicprobe_verify` tool accepts a minimal Model schema v1 and returns the S1-S8 + A1-A14 report
 - [ ] Optional: override `gateContent` (and `enabled`) in the profile's `cordis.patch.yml` by row id

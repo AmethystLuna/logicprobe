@@ -1,7 +1,7 @@
 /**
  * logicprobe — DeepSeek Harness native plugin for the Logic Probe toolbox.
- * Injects the session-start gate text (what this plugin checks, the 1% Rule,
- * the Red Flags, the routing to the skills, the tool list, how to read a report)
+ * Injects the session-start gate text (what this plugin checks, the routing to
+ * the skills, the tool list, how to read a report)
  * into the first model step of every agent session, mirroring the SessionStart
  * hook the Claude Code plugin installs.
  * The skill ships in this package's `skills/` directory and is registered at
@@ -18,8 +18,9 @@
  * to the first step after their promotion, and the history guard re-injects it
  * there. The default gate text is the dsh-native adaptation of
  * `hooks/session-start-content.md`. Both are a guide to calling the tools: what
- * this plugin checks, the 1% Rule and the Red Flags that raise the chance of a
- * call, the routing to the five skills, the tool list, and how to read a report.
+ * this plugin checks, the routing to the sibling skills, the tool list, and how to
+ * read a report. The Red Flags table is enforcement scaffolding and lives in the
+ * skill body instead, where a session that needs it can load it.
  * They stay in sync. Method, doctrine and per-domain detail live in the skills
  * and their references, not here. Deployments override via Config.
  *
@@ -79,8 +80,6 @@ const DEFAULT_GATE_CONTENT = `
 <EXTREMELY_IMPORTANT>
 Plugin logicprobe is active. It checks claims about designs and code: facts against the source, behaviour as an executable model.
 
-**1% Rule**: if any claim about this code deserves a check, load the matching skill first. Loading is cheap. A false claim is not.
-
 **Unsure whether a check applies?** Load \`logicprobe\` first. It is the entry point: it owns the doctrine, the model schema, the depth rules and the routing to its siblings.
 
 **Load the skill that matches the claim**: \`logicprobe\` (entry point; claim and behaviour checks), \`logicprobe-uml\` (diagrams), \`logicprobe-structure\` (architecture, dependencies), \`logicprobe-concurrency\` (concurrency claims), \`logicprobe-datamodel\` (data models, migrations).
@@ -97,17 +96,6 @@ Plugin logicprobe is active. It checks claims about designs and code: facts agai
 - \`logicprobe_report_diff\` — baseline against current: what a change added, removed or changed.
 
 **Read a report**: gate on \`verdict\` (\`pass\`, \`pass_with_findings\`, \`fail\`), never on \`ok\`. Reports carry \`verdictReason\`, \`hashes\` and \`nextSteps\`. Keys starting with \`_\` are notes: ignored, and left out of the model hash. A tool prints the report body: passing checks stay in the inventory line, repeated facts are grouped, and warning evidence is omitted — pass \`reportView: "full"\` only when you need the structured report itself, which \`logicprobe_report_diff\` consumes.
-
-**Red Flags** — if you think any of these, stop:
-
-| You think | Reality |
-|-----------|---------|
-| "Too simple to check" | The check is cheap. The silent skip is not. |
-| "I read the code, so I know" | Knowing is not evidence. Cite \`file:line\`, or run the model, or call the claim unverified. |
-| "The spec or the diagram says so" | Both are claims about the code. Reconcile them with a source-side scan. |
-| "I'll check while implementing" | Check before the decision, not after. |
-| "Reasoning is enough" | Reasoning is not a run. One counter-example kills a universal claim. |
-| "The report passed, so the code is fine" | The report covers the model you gave it. Reconcile it, and say what you did not check. |
 
 </EXTREMELY_IMPORTANT>
 `
@@ -261,7 +249,7 @@ function inspectProvider(config: Config, isToolRegistered: () => boolean, isData
   return {
     manifest: {
       id: 'logicprobe',
-      description: 'Session-start gate injection and native verification tooling for the Logic Probe toolbox. The gate is a guide to calling the tools: what the plugin checks, the 1% Rule and Red Flags, the routing to the five skills, the tool list, and how to read a report. Doctrine and per-domain detail live in the skills.',
+      description: 'Session-start gate injection and native verification tooling for the Logic Probe toolbox. The gate is a guide to calling the tools: what the plugin checks, the routing to the sibling skills, the tool list, and how to read a report. Doctrine and per-domain detail live in the skills.',
       methods: [
         {
           name: 'status',

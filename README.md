@@ -195,7 +195,7 @@ git clone https://github.com/AmethystLuna/logicprobe.git ~/.claude/plugins/dev/l
 这个 bundle 做三件事：
 
 1. **注册技能。** 技能遵循 Agent Skills 开放标准，由 dsh 的 `skill-filesystem` provider 原样发现，不需要额外代码。
-2. **注入门禁文本。** 每个会话的第一个模型步骤会收到 claim 验证门禁（1% Rule / Red Flags / 主动建议）。这是 Claude `SessionStart` hook 在 dsh 上的对应物。
+2. **注入门禁文本。** 每个会话的第一个模型步骤会收到 claim 验证门禁（主动建议）。这是 Claude `SessionStart` hook 在 dsh 上的对应物。
 3. **注册原生工具与上下文。** 工具挂在 `ctx.tools` 上，另有一条策略感知上下文 `logicprobe:mode`（`ctx.systemPrompt`），以及模型可见目录条目（`cordis_inspect`）。
 
 ```bash

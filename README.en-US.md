@@ -197,7 +197,7 @@ Native dsh support ships as a cordis plugin bundle at the repository root, decla
 The bundle does three things:
 
 1. **Registers the skills.** They follow the Agent Skills open standard and are discovered as-is by dsh's `skill-filesystem` provider. No extra code.
-2. **Injects the gate text.** The first model step of every session receives the claim-verification gate (1% Rule / Red Flags / proactive suggestion). This is the dsh counterpart of the Claude `SessionStart` hook.
+2. **Injects the gate text.** The first model step of every session receives the claim-verification gate (proactive suggestion). This is the dsh counterpart of the Claude `SessionStart` hook.
 3. **Registers the native tools and a context.** The tools live on `ctx.tools`. A policy-aware `logicprobe:mode` context lives on `ctx.systemPrompt`. A model-visible catalog entry is available through `cordis_inspect`.
 
 ```bash

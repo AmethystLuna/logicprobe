@@ -1,7 +1,7 @@
 /**
  * logicprobe — DeepSeek Harness native plugin for the Logic Probe toolbox.
- * Injects the session-start gate text (what this plugin checks, the 1% Rule,
- * the Red Flags, the routing to the skills, the tool list, how to read a report)
+ * Injects the session-start gate text (what this plugin checks, the routing to
+ * the skills, the tool list, how to read a report)
  * into the first model step of every agent session, mirroring the SessionStart
  * hook the Claude Code plugin installs.
  * The skill ships in this package's `skills/` directory and is registered at
@@ -18,8 +18,9 @@
  * to the first step after their promotion, and the history guard re-injects it
  * there. The default gate text is the dsh-native adaptation of
  * `hooks/session-start-content.md`. Both are a guide to calling the tools: what
- * this plugin checks, the 1% Rule and the Red Flags that raise the chance of a
- * call, the routing to the five skills, the tool list, and how to read a report.
+ * this plugin checks, the routing to the sibling skills, the tool list, and how to
+ * read a report. The Red Flags table is enforcement scaffolding and lives in the
+ * skill body instead, where a session that needs it can load it.
  * They stay in sync. Method, doctrine and per-domain detail live in the skills
  * and their references, not here. Deployments override via Config.
  *

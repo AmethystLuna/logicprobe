@@ -406,6 +406,19 @@ This skill owns behavioural claims. Three neighbouring domains have their own sk
 
 ---
 
+## Red Flags
+
+If you catch yourself thinking any of these, stop:
+
+| You think | Reality |
+|-----------|---------|
+| "Too simple to check" | The check is cheap. The silent skip is not. |
+| "I read the code, so I know" | Knowing is not evidence. Cite `file:line`, or run the model, or call the claim unverified. |
+| "The spec or the diagram says so" | Both are claims about the code. Reconcile them with a source-side scan. |
+| "I'll check while implementing" | Check before the decision, not after. |
+| "Reasoning is enough" | Reasoning is not a run. One counter-example kills a universal claim. |
+| "The report passed, so the code is fine" | The report covers the model you gave it. Reconcile it, and say what you did not check. |
+
 ## Rules
 
 1. Never trust a document's claim without codebase verification.

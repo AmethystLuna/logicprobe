@@ -29,8 +29,13 @@ text of a store entry. They come from the review that produced the current text.
 - **Say what it does not prove.** Every scope claim needs its non-goal beside it,
   plus the route to whatever does cover that ground. No silent implication of
   coverage.
-- **The Red Flags stay.** In injected text they are not documentation. They change
-  how often the model reaches for a tool, so they survive every trim.
+- **Injection carries the gate, not the enforcement scaffolding.** The payload is
+  the verification gate: what the plugin checks, the routing to the skills, the
+  tool list, how to read a report, and the nudge for the unsure case. The 1% Rule
+  and the Red Flags table live in the `logicprobe` skill body, where a session that
+  needs discipline can load them. Capable models follow enforcement lines
+  literally, so those lines do not belong in every session's context. Do not put
+  them back.
 - **Descriptions stay factual.** Store and manifest descriptions state what the
   plugin does. Slogans live in the README and the injected text, never in an entry
   description.
