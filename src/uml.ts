@@ -42,6 +42,20 @@ export const UML_NOTATIONS: readonly UmlNotation[] = ['mermaid', 'plantuml']
 
 export const UML_DIAGRAMS: readonly UmlDiagram[] = ['state', 'activity', 'sequence']
 
+/**
+ * What the caller is going to do with the artifact, declared up front.
+ *
+ * The view follows the question, not the machine, so the tool cannot pick it. What it
+ * can do is refuse a pairing that cannot serve the question — before the work, not as
+ * a finding after it.
+ */
+export type UmlIntent = 'present' | 'verify' | 'fidelity'
+
+export const UML_INTENTS: readonly UmlIntent[] = ['present', 'verify', 'fidelity']
+
+/** The tool actions, for the entry check. `labels` is `action=explain-labels`. */
+export type UmlIntentAction = 'render' | 'parse' | 'review' | 'labels'
+
 /** Marker every generated diagram carries; renderers ignore it, the parser uses it. */
 const DIRECTIVE_NAMESPACE = 'logicprobe:'
 
@@ -401,26 +415,92 @@ function renderSequence(context: RenderContext, notation: UmlNotation, maxSteps:
   return { text: lines.join('\n') + '\n', truncated }
 }
 
+/** What each action hands back, so a declared intent can be matched against it. */
+const ACTION_PRODUCES: Record<UmlIntentAction, string> = {
+  render: 'a diagram',
+  parse: 'a LogicModelV1 read out of a diagram',
+  review: 'an audit of the modelling',
+  labels: 'the label and comment conventions the parser accepts',
+}
+
+/**
+ * The intents each action can serve.
+ *
+ * `fidelity` is a review job: render produces a diagram, and a diagram nothing has
+ * compared back to its model proves nothing about it.
+ */
+const ACTION_INTENTS: Record<UmlIntentAction, readonly UmlIntent[]> = {
+  render: ['present', 'verify'],
+  parse: ['verify'],
+  review: ['present', 'verify', 'fidelity'],
+  labels: [],
+}
+
+/**
+ * The `(notation, view)` cells this module can draw.
+ *
+ * PlantUML activity is the cell that does not exist: its activity syntax is a
+ * structured flowchart language, so a graph with merges or cycles needs a while/if
+ * reconstruction this module does not perform. Refusing is the honest outcome —
+ * quietly emitting a state diagram under an "activity" request would mislabel the
+ * model.
+ */
+export function assertUmlView(notation: UmlNotation, diagram: UmlDiagram): void {
+  if (!UML_NOTATIONS.includes(notation)) throw new UmlError('unknown notation "' + String(notation) + '"; expected ' + UML_NOTATIONS.join(' | '))
+  if (!UML_DIAGRAMS.includes(diagram)) throw new UmlError('unknown diagram "' + String(diagram) + '"; expected ' + UML_DIAGRAMS.join(' | '))
+  if (notation === 'plantuml' && diagram === 'activity') {
+    throw new UmlError('plantuml has no faithful activity view here (its activity syntax is a structured flowchart language; a graph with merges or cycles needs a while/if reconstruction logicprobe does not perform) — use notation "mermaid" for the activity view, or diagram "state"', 'UML_VIEW_UNREPRESENTABLE')
+  }
+}
+
+/**
+ * Refuse, before any work, a request whose declared purpose the view cannot serve.
+ *
+ * Without an intent this changes nothing: the review still reports `UML019` when the
+ * fidelity check does not apply to the view it was given. With one, an impossible
+ * pairing is an error carrying a code, instead of a report about the wrong artifact —
+ * which is the failure this check exists to prevent.
+ *
+ * @param intent - the declared purpose, or `undefined` to leave the behaviour unchanged.
+ * @param action - which action is about to run.
+ * @param view - the requested `(notation, diagram)`, for the actions that have one.
+ */
+export function checkUmlIntent(intent: UmlIntent | undefined, action: UmlIntentAction, view?: { notation: UmlNotation; diagram: UmlDiagram }): void {
+  if (intent === undefined) return
+  if (!UML_INTENTS.includes(intent)) throw new UmlError('unknown intent "' + String(intent) + '"; expected ' + UML_INTENTS.join(' | '))
+  const served = ACTION_INTENTS[action]
+  if (!served.includes(intent)) {
+    throw new UmlError(
+      'intent "' + intent + '" cannot be served by action=' + action + ', which returns ' + ACTION_PRODUCES[action] + '; it serves ' +
+      (served.length === 0 ? 'no intent — leave `intent` off' : served.join(' | ')),
+      'UML_INTENT_MISMATCH')
+  }
+  if (view === undefined) return
+  assertUmlView(view.notation, view.diagram)
+  if (intent === 'present' || view.diagram !== 'sequence') return
+  throw new UmlError(
+    'intent "' + intent + '" needs a machine, and a sequence view is one BFS trace: ' +
+    (intent === 'fidelity'
+      ? 'the render/parse fidelity check does not apply to a trace, so nothing would be proven. Review kind "state" or "activity" to have the diagram checked against the model, and render the trace separately with intent "present".'
+      : '`parse` refuses a trace because it cannot reconstruct a machine, so the diagram cannot feed verification. Model the machine as a state or activity diagram, and render the trace separately with intent "present".'),
+    'UML_INTENT_UNSERVABLE')
+}
+
 /**
  * Render a LogicModelV1 as UML.
  *
- * PlantUML has no faithful activity view here: its activity syntax is a
- * structured flowchart language, so a graph with merges or cycles needs a
- * while/if reconstruction this module does not perform. Refusing is the honest
- * outcome — quietly emitting a state diagram under an "activity" request would
- * mislabel the model. Mermaid covers all three views.
+ * Mermaid covers all three views; PlantUML covers state and sequence (see
+ * `assertUmlView` for why activity is refused).
  *
  * @param input - candidate LogicModelV1.
  * @param notation - `mermaid` (default) or `plantuml`.
  * @param diagram - `state` (default), `activity`, or `sequence`.
  * @param maxSteps - cap on the sequence trace length.
+ * @param intent - what the diagram is for; a view that cannot serve it is refused first.
  */
-export function renderUml(input: unknown, notation: UmlNotation = 'mermaid', diagram: UmlDiagram = 'state', maxSteps = 60): UmlRenderResult {
-  if (!UML_NOTATIONS.includes(notation)) throw new UmlError('unknown notation "' + String(notation) + '"; expected ' + UML_NOTATIONS.join(' | '))
-  if (!UML_DIAGRAMS.includes(diagram)) throw new UmlError('unknown diagram "' + String(diagram) + '"; expected ' + UML_DIAGRAMS.join(' | '))
-  if (notation === 'plantuml' && diagram === 'activity') {
-    throw new UmlError('plantuml has no faithful activity view here (its activity syntax is a structured flowchart language; a graph with merges or cycles needs a while/if reconstruction logicprobe does not perform) — use notation "mermaid" for the activity view, or diagram "state"')
-  }
+export function renderUml(input: unknown, notation: UmlNotation = 'mermaid', diagram: UmlDiagram = 'state', maxSteps = 60, intent?: UmlIntent): UmlRenderResult {
+  assertUmlView(notation, diagram)
+  checkUmlIntent(intent, 'render', { notation, diagram })
   const context = prepareRender(input)
   const warnings = [...context.warnings]
   let primary: string
@@ -1524,6 +1604,8 @@ export interface UmlReviewOptions {
   roundTrip?: boolean
   /** Cap on the sequence trace used for the fidelity check. */
   maxSteps?: number
+  /** What the review is for; a view that cannot serve it is refused before any work. */
+  intent?: UmlIntent
 }
 
 /**
@@ -1549,6 +1631,7 @@ export function reviewUml(options: UmlReviewOptions): UmlReviewReport {
 
   let notation: UmlNotation = options.notation === undefined || options.notation === 'auto' ? 'mermaid' : options.notation
   const kind: UmlDiagram = options.diagramKind ?? 'state'
+  checkUmlIntent(options.intent, 'review', { notation, diagram: kind })
   let model: LogicModelV1 | undefined
   let labels: Record<string, string> | undefined
   let parsed: UmlParseResult | undefined

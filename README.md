@@ -78,7 +78,7 @@ logicprobe 核验声称与实物是否一致。事实类对着源码查。行为
 
 `logicprobe_uml` 把一份 LogicModelV1 画成 UML，也可以把手绘的 UML 读回模型，还可以审查建模本身，或打印解析器接受的标签与注释口径。它有 4 个动作：
 
-- **render**：模型 → 图。Mermaid 支持状态图、活动流程图、时序图；PlantUML 支持状态图与时序图。notation 表达不了的构造会变成 warning，不会被悄悄丢掉。PlantUML 活动图直接拒绝，因为它的语法无法忠实承载带合流或环的图。
+- **render**：模型 → 图。Mermaid 支持状态图、活动流程图、时序图；PlantUML 支持状态图与时序图。notation 表达不了的构造会变成 warning，不会被悄悄丢掉。PlantUML 活动图直接拒绝，因为它的语法无法忠实承载带合流或环的图。视图由问题决定、不由模型决定，所以工具不替你选：用 `intent`（`present`/`verify`/`fidelity`）声明产物用途，服务不了的组合在开工之前就拒（`UML_INTENT_UNSERVABLE`、`UML_VIEW_UNREPRESENTABLE`、`UML_INTENT_MISMATCH`）；不给 `intent` 则行为与从前完全一致。
 - **parse**：图 → 模型。支持 Mermaid 与 PlantUML 的状态图、活动图，因此手绘的图也能送进 `logicprobe_verify` 验证。两类输入会被拒绝，因为它们无法变成状态机：时序图（迹无法重建机），以及**其它 Mermaid 图族**（`classDiagram`、`erDiagram`、`gantt`、`mindmap`…），返回 `errorCode: "UML_NOT_A_STATE_DIAGRAM"` 并点名该图族。
 - **review**：审查建模。它报告两类问题。结构缺陷包括不可达状态、死端、歧义分支、无出口自环、重复迁移。文档缺口包括缺 narrative、变量无界、状态无可读标注、图与 narrative 标签漂移。它还会做保真度检查：把图重新解析回模型，任何结构性差异都报出来。
 - **explain-labels**：打印解析器接受的标签写法与忽略行口径（`directiveLines`、`acceptedLabelForms`、`renderedForm`、`ignoredLines`、`rules`），不需要给图。手绘图与渲染图对不齐时先看它；命令行对应 `uml-review --explain-labels`。

@@ -106,6 +106,75 @@ test('render: plantuml activity is refused instead of mislabelled', () => {
   if (!message.includes('activity')) throw new Error('expected a refusal naming the missing view, got: ' + message)
 })
 
+// -------------------------------------------------- view x intent entry check --
+// The view follows the question, not the machine, so no classifier picks it. What the
+// front end can do is refuse a pairing that cannot serve the declared question, before
+// the work — not as a finding about the wrong artifact afterwards. These tests pin both
+// halves: the refusals, and that omitting `intent` changes nothing.
+
+function refusalOf(fn) {
+  try {
+    fn()
+  } catch (error) {
+    return { code: error instanceof UmlError ? error.code : undefined, message: error instanceof Error ? error.message : String(error) }
+  }
+  throw new Error('expected a refusal, got a result')
+}
+
+test('entry: the cell that does not exist carries its own code', () => {
+  const refusal = refusalOf(() => renderUml(model, 'plantuml', 'activity'))
+  if (refusal.code !== 'UML_VIEW_UNREPRESENTABLE') throw new Error('code: ' + String(refusal.code))
+})
+
+test('entry: intent "present" keeps the trace, which is what a human reads', () => {
+  const out = renderUml(model, 'mermaid', 'sequence', 60, 'present')
+  if (!out.primary.includes('sequenceDiagram')) throw new Error('a trace for a reader must still render\n' + out.primary)
+})
+
+test('entry: a machine intent refuses a trace before drawing it', () => {
+  // render can serve `verify`, so here the view is what is refused.
+  const onRender = refusalOf(() => renderUml(model, 'mermaid', 'sequence', 60, 'verify'))
+  if (onRender.code !== 'UML_INTENT_UNSERVABLE') throw new Error('render code: ' + String(onRender.code))
+  if (!onRender.message.includes('one BFS trace')) throw new Error('render message: ' + onRender.message)
+  // review can serve both machine intents, so each is refused on its own terms.
+  const onReviewVerify = refusalOf(() => reviewUml({ model, diagramKind: 'sequence', intent: 'verify' }))
+  if (onReviewVerify.code !== 'UML_INTENT_UNSERVABLE') throw new Error('review/verify code: ' + String(onReviewVerify.code))
+  const onReviewFidelity = refusalOf(() => reviewUml({ model, diagramKind: 'sequence', intent: 'fidelity' }))
+  if (onReviewFidelity.code !== 'UML_INTENT_UNSERVABLE') throw new Error('review/fidelity code: ' + String(onReviewFidelity.code))
+  if (!onReviewFidelity.message.includes('fidelity check does not apply')) throw new Error('review/fidelity message: ' + onReviewFidelity.message)
+})
+
+test('entry: render cannot serve the fidelity intent, which is the review job', () => {
+  const refusal = refusalOf(() => renderUml(model, 'mermaid', 'state', 60, 'fidelity'))
+  if (refusal.code !== 'UML_INTENT_MISMATCH') throw new Error('code: ' + String(refusal.code))
+  // The same machine and view are exactly what review needs to run that proof.
+  const report = reviewUml({ model, intent: 'fidelity' })
+  if (report.verdict === 'fail') throw new Error('a state view must serve intent fidelity: ' + report.verdictReason)
+})
+
+test('entry: a review asking for the proof cannot hide behind a view that does not render', () => {
+  const refusal = refusalOf(() => reviewUml({ model, notation: 'plantuml', diagramKind: 'activity', intent: 'fidelity' }))
+  if (refusal.code !== 'UML_VIEW_UNREPRESENTABLE') throw new Error('code: ' + String(refusal.code))
+})
+
+test('entry: a trace with intent "present" is reviewed, not refused', () => {
+  const report = reviewUml({ model, diagramKind: 'sequence', intent: 'present' })
+  if (!codes(report).includes('UML019_ROUND_TRIP_SKIPPED')) throw new Error('a presented trace still reports UML019: ' + codes(report).join(', '))
+})
+
+test('entry: without an intent the documented behaviour is unchanged', () => {
+  const trace = reviewUml({ model, diagramKind: 'sequence' })
+  if (!codes(trace).includes('UML019_ROUND_TRIP_SKIPPED')) throw new Error('UML019 must still be reported: ' + codes(trace).join(', '))
+  if (trace.verdict === 'fail') throw new Error('a trace review is not a failure on its own')
+  const unrendered = reviewUml({ model, notation: 'plantuml', diagramKind: 'activity' })
+  if (unrendered.verdict === 'fail') throw new Error('an unrenderable view is a warning when no intent claims it')
+})
+
+test('entry: an unknown intent is refused by the library, not ignored', () => {
+  const refusal = refusalOf(() => renderUml(model, 'mermaid', 'state', 60, 'prove'))
+  if (!refusal.message.includes('unknown intent')) throw new Error('message: ' + refusal.message)
+})
+
 test('render: narrative meanings appear in the diagram labels', () => {
   const state = renderUml(narrated, 'mermaid', 'state')
   if (!state.primary.includes('state "INIT（power-on, not ready）" as INIT')) throw new Error('state label missing\n' + state.primary)
@@ -623,6 +692,51 @@ test('explain-labels: every documented claim is true of the parser', () => {
   if (plantuml.model.init !== 'INIT') throw new Error('the documented directive form must be consumed')
   assertNoUndefinedValues(explanation)
 })
+
+// ------------------------------------------------------ the dsh tool surface --
+// The library check above is not the surface a session calls: `logicprobe_uml` is, and
+// a parameter that never reaches the library from there is a parameter that does not
+// exist. This module loads @deepseek-ai/dsh-tools (a devDependency), so the import is
+// dynamic: a checkout without dev dependencies still runs the library half of the suite.
+
+let umlTool
+try {
+  umlTool = (await import('../../lib/uml-tool.js')).logicProbeUmlTool
+} catch (error) {
+  umlTool = undefined
+  console.log('SKIP tool entry check: the dsh tool module did not load (' + (error instanceof Error ? error.message : String(error)) + ')')
+}
+
+if (umlTool !== undefined) {
+  const entryCases = [
+    ['render sequence + verify', { action: 'render', model, kind: 'sequence', intent: 'verify' }, 'UML_INTENT_UNSERVABLE'],
+    ['render + fidelity', { action: 'render', model, intent: 'fidelity' }, 'UML_INTENT_MISMATCH'],
+    ['render plantuml/activity', { action: 'render', model, notation: 'plantuml', kind: 'activity' }, 'UML_VIEW_UNREPRESENTABLE'],
+    ['parse + present', { action: 'parse', diagram: 'stateDiagram-v2\n  [*] --> A\n  A --> [*]\n', intent: 'present' }, 'UML_INTENT_MISMATCH'],
+    ['explain-labels + verify', { action: 'explain-labels', intent: 'verify' }, 'UML_INTENT_MISMATCH'],
+    ['review sequence + fidelity', { action: 'review', model, kind: 'sequence', intent: 'fidelity' }, 'UML_INTENT_UNSERVABLE'],
+  ]
+  try {
+    for (const [label, args, code] of entryCases) {
+      const out = await umlTool.execute(args)
+      if (out.ok !== false || out.errorCode !== code) {
+        throw new Error(label + ': expected a refusal ' + code + ', got ok=' + String(out.ok) + ' errorCode=' + String(out.errorCode))
+      }
+    }
+    // And the opt-in half: the same calls without an intent still run.
+    for (const [label, args] of [
+      ['render sequence without intent', { action: 'render', model, kind: 'sequence' }],
+      ['review sequence without intent', { action: 'review', model, kind: 'sequence' }],
+    ]) {
+      const out = await umlTool.execute(args)
+      if (out.ok === false) throw new Error(label + ' must still run, got ' + String(out.errorCode))
+    }
+    console.log('PASS tool entry: intent reaches the entry check through the dsh surface')
+  } catch (error) {
+    failures += 1
+    console.log('FAIL tool entry:', error instanceof Error ? error.message : String(error))
+  }
+}
 
 if (failures > 0) { console.log('uml tests failed:', failures); process.exit(1) }
 console.log('all uml tests passed')

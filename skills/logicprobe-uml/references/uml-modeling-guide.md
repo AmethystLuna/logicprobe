@@ -34,6 +34,27 @@ about to run is the wrong view, however readable it looks.
 | `logicprobe_uml action=review` with a model alone | Any view. With `kind: "sequence"` the trace is rendered and the fidelity check is reported inapplicable (`UML019`) |
 | A human reading a protocol exchange | Sequence, which is the honest view there |
 
+**4. Say that out loud, and the tool refuses a pairing that cannot serve it.** `intent`
+declares what the artifact is for. The check runs before any work, so an impossible
+pairing is a refusal with a code rather than a report about the wrong artifact.
+
+| Intent | What it means | Actions that serve it | View it needs |
+|---|---|---|---|
+| `present` | a human is going to read the diagram | render, review | any view the notation can draw |
+| `verify` | it must be parseable into a LogicModelV1 for the engine | render, parse, review | state or activity: a trace cannot be parsed back |
+| `fidelity` | the point is the render-and-reparse proof | review | state or activity: only those round-trip |
+
+| `errorCode` | What happened |
+|---|---|
+| `UML_INTENT_UNSERVABLE` | The view exists but cannot serve the intent — a sequence view for `verify` or `fidelity`. |
+| `UML_VIEW_UNREPRESENTABLE` | The `(notation, view)` cell does not exist — PlantUML activity. |
+| `UML_INTENT_MISMATCH` | The intent names something this action does not do — `fidelity` on render (render proves nothing), `present` or `fidelity` on parse (parse returns a model). |
+
+Omitting `intent` changes nothing: a sequence view still renders, and a review of one
+still reports `UML019`. The intent is an opt-in statement of purpose, and nothing infers
+it. The CLI mirror takes the same values: `--intent present|verify|fidelity` on
+`uml-render`, `uml-parse` and `uml-review`.
+
 When the question is still unclear, model the state machine. It is the safe default, and
 the other views render from the same model afterwards.
 

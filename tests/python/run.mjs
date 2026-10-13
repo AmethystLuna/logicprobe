@@ -11,7 +11,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { runVerification, runCompositionVerification } from '../../lib/engine.js'
 import { exportModel } from '../../lib/exporters.js'
-import { renderUml, parseUml, reviewUml } from '../../lib/uml.js'
+import { renderUml, parseUml, reviewUml, checkUmlIntent, UmlError } from '../../lib/uml.js'
 
 const python = process.env.LOGICPROBE_PYTHON || 'python'
 const enginePath = fileURLToPath(new URL('../../tools/python/logicprobe-engine.py', import.meta.url))
@@ -394,6 +394,67 @@ for (const entry of umlCorpus.slice(0, 2)) {
       ['uml-review', '--model', entry.file, '--notation', 'plantuml', '--diagram-kind', 'activity'])
   })
 }
+
+// ---- view x intent entry check parity ---------------------------------------
+// A refusal is a report, so both engines have to print the same code and the same
+// message: the entry check is where a caller learns their view cannot serve their
+// question, and a difference here would send a non-dsh reader after the wrong fix.
+const intentEntryCase = umlCorpus[0]
+
+function compareUmlRefusal(tsProduce, pythonArgs) {
+  const actual = pythonRun(pythonArgs)
+  let thrown
+  try { tsProduce() } catch (error) { thrown = error }
+  if (thrown === undefined) throw new Error('TS did not refuse')
+  if (!actual.out || actual.out.ok !== false) throw new Error('python did not refuse')
+  const message = thrown instanceof Error ? thrown.message : String(thrown)
+  if (actual.out.error !== message) throw new Error('refusal message differs: TS "' + message + '" vs python ' + JSON.stringify(actual.out.error))
+  const code = thrown instanceof UmlError ? thrown.code : 'UML_INPUT'
+  if (actual.out.errorCode !== code) throw new Error('refusal code differs: TS ' + code + ' vs python ' + actual.out.errorCode)
+}
+
+const INTENT_ENTRY_CASES = [
+  ['a cell that does not exist', 'UML_VIEW_UNREPRESENTABLE',
+    () => renderUml(intentEntryCase.model, 'plantuml', 'activity'),
+    ['uml-render', intentEntryCase.file, '--notation', 'plantuml', '--diagram', 'activity']],
+  ['intent verify over a trace', 'UML_INTENT_UNSERVABLE',
+    () => renderUml(intentEntryCase.model, 'mermaid', 'sequence', 60, 'verify'),
+    ['uml-render', intentEntryCase.file, '--diagram', 'sequence', '--intent', 'verify']],
+  ['intent fidelity on render', 'UML_INTENT_MISMATCH',
+    () => renderUml(intentEntryCase.model, 'mermaid', 'state', 60, 'fidelity'),
+    ['uml-render', intentEntryCase.file, '--intent', 'fidelity']],
+  ['intent verify over a trace review', 'UML_INTENT_UNSERVABLE',
+    () => reviewUml({ model: intentEntryCase.model, diagramKind: 'sequence', intent: 'verify' }),
+    ['uml-review', '--model', intentEntryCase.file, '--diagram-kind', 'sequence', '--intent', 'verify']],
+  ['intent fidelity over a trace review', 'UML_INTENT_UNSERVABLE',
+    () => reviewUml({ model: intentEntryCase.model, diagramKind: 'sequence', intent: 'fidelity' }),
+    ['uml-review', '--model', intentEntryCase.file, '--diagram-kind', 'sequence', '--intent', 'fidelity']],
+  ['intent fidelity over an unrenderable view', 'UML_VIEW_UNREPRESENTABLE',
+    () => reviewUml({ model: intentEntryCase.model, notation: 'plantuml', diagramKind: 'activity', intent: 'fidelity' }),
+    ['uml-review', '--model', intentEntryCase.file, '--notation', 'plantuml', '--diagram-kind', 'activity', '--intent', 'fidelity']],
+  ['intent present on parse', 'UML_INTENT_MISMATCH',
+    () => checkUmlIntent('present', 'parse'),
+    ['uml-parse', writeDiagram('stateDiagram-v2\n  [*] --> A\n  A --> [*]\n'), '--intent', 'present']],
+  ['intent verify on explain-labels', 'UML_INTENT_MISMATCH',
+    () => checkUmlIntent('verify', 'labels'),
+    ['uml-review', '--explain-labels', '--intent', 'verify']],
+]
+
+for (const [label, code, tsProduce, pythonArgs] of INTENT_ENTRY_CASES) {
+  check('uml intent entry: ' + label + ' -> ' + code, () => {
+    compareUmlRefusal(tsProduce, pythonArgs)
+    const actual = pythonRun(pythonArgs)
+    if (actual.out.errorCode !== code) throw new Error('expected ' + code + ', got ' + actual.out.errorCode)
+    if (actual.code !== 2) throw new Error('a refusal exits 2, got ' + actual.code)
+  })
+}
+
+check('uml intent entry: a servable intent changes nothing about the render', () => {
+  compareUml(() => renderUml(intentEntryCase.model, 'mermaid', 'state', 60, 'verify'),
+    ['uml-render', intentEntryCase.file, '--intent', 'verify'])
+  compareUml(() => renderUml(intentEntryCase.model, 'mermaid', 'sequence', 60, 'present'),
+    ['uml-render', intentEntryCase.file, '--diagram', 'sequence', '--intent', 'present'])
+})
 
 // Hand-written diagrams exercise the parser paths a generated file never reaches:
 // inferred init, declared terminals, synthetic events, no-op/shim actions, `=` for

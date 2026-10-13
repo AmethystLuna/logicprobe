@@ -2,7 +2,7 @@ import { defineTool } from '@deepseek-ai/dsh-tools'
 import { createHash } from 'node:crypto'
 import type { JsonValue } from './json-value.js'
 import { REPORT_SCHEMAS, DEFAULT_HASH_SPEC, modelHash, refusalVerdict, verdictOf, verdictOfFindings, type VerdictSummary } from './engine.js'
-import { renderUml, parseUml, parseFindings, reviewUml, explainLabels, UmlError, type UmlDiagram, type UmlFinding, type UmlNotation, type UmlParseResult } from './uml.js'
+import { renderUml, parseUml, parseFindings, reviewUml, explainLabels, checkUmlIntent, UmlError, type UmlDiagram, type UmlFinding, type UmlIntent, type UmlNotation, type UmlParseResult } from './uml.js'
 import { renderReportText } from './report-view.js'
 
 export const LOGICPROBE_UML_TOOL_NAME = 'logicprobe_uml'
@@ -22,7 +22,7 @@ export const LOGICPROBE_UML_TOOL_NAME = 'logicprobe_uml'
 export const logicProbeUmlTool = defineTool({
   name: LOGICPROBE_UML_TOOL_NAME,
   description:
-    'Model a code flow as UML, and audit the modelling. action="render" turns a LogicModelV1 into diagram source: mermaid (state, activity, sequence) or plantuml (state, sequence). action="parse" reads Mermaid or PlantUML state or activity text back into a LogicModelV1, so a hand-drawn diagram can be verified. A sequence diagram is refused: a trace cannot reconstruct a machine. So is any other diagram family (class, ER, gantt, mindmap). That refusal carries errorCode "UML_NOT_A_STATE_DIAGRAM". A PlantUML component, package or deployment diagram declares no kind, so the parser detects those constructs itself. It returns a by-product model and reports the error UML_NOT_A_STATE_DIAGRAM, with `discardedConstructs` and `discardedEdges`. Never treat that model as a model of the file. action="review" audits the modelling: structural defects (UML002-UML009), documentation gaps (UML010-UML015), and a fidelity check that re-parses the rendered diagram (UML017). Give it a model, a diagram, or both. action="explain-labels" prints the label and comment conventions the parser accepts, without needing a diagram. Rendering never invents structure. A construct the notation cannot express becomes a warning. For dependency questions on a component or class diagram, use `logicprobe_structure_verify` instead. Read `verdict`, not `ok`: error findings mean a failed review.',
+    'Model a code flow as UML, and audit the modelling. action="render" turns a LogicModelV1 into diagram source: mermaid (state, activity, sequence) or plantuml (state, sequence). action="parse" reads Mermaid or PlantUML state or activity text back into a LogicModelV1, so a hand-drawn diagram can be verified. A sequence diagram is refused: a trace cannot reconstruct a machine. So is any other diagram family (class, ER, gantt, mindmap). That refusal carries errorCode "UML_NOT_A_STATE_DIAGRAM". A PlantUML component, package or deployment diagram declares no kind, so the parser detects those constructs itself. It returns a by-product model and reports the error UML_NOT_A_STATE_DIAGRAM, with `discardedConstructs` and `discardedEdges`. Never treat that model as a model of the file. action="review" audits the modelling: structural defects (UML002-UML009), documentation gaps (UML010-UML015), and a fidelity check that re-parses the rendered diagram (UML017). Give it a model, a diagram, or both. action="explain-labels" prints the label and comment conventions the parser accepts, without needing a diagram. Rendering never invents structure. A construct the notation cannot express becomes a warning. For dependency questions on a component or class diagram, use `logicprobe_structure_verify` instead. Declare `intent` (present, verify, fidelity) to say what the artifact is for: a view that cannot serve it is refused before any work, with errorCode UML_INTENT_UNSERVABLE, UML_VIEW_UNREPRESENTABLE or UML_INTENT_MISMATCH. Omit it and nothing changes. Read `verdict`, not `ok`: error findings mean a failed review.',
   parameters: {
     action: {
       type: 'string',
@@ -47,6 +47,11 @@ export const logicProbeUmlTool = defineTool({
       type: 'string',
       enum: ['state', 'activity', 'sequence'],
       description: 'Diagram kind to render. Default state. sequence is one BFS trace, not the whole machine. PlantUML activity is refused (its structured-flowchart syntax cannot faithfully carry a graph with merges or cycles) — use mermaid for that view.',
+    },
+    intent: {
+      type: 'string',
+      enum: ['present', 'verify', 'fidelity'],
+      description: 'What the artifact is for, declared up front: present = a human will read the diagram (any view), verify = it must be parseable into a LogicModelV1 for the engine (state or activity), fidelity = the point is the render-and-reparse proof (review only, state or activity). A view that cannot serve the intent is refused before any work, with errorCode UML_INTENT_UNSERVABLE, UML_VIEW_UNREPRESENTABLE or UML_INTENT_MISMATCH. Omit it and nothing changes: a sequence view is still rendered, and review still reports UML019.',
     },
     roundTrip: {
       type: 'boolean',
@@ -79,11 +84,12 @@ export const logicProbeUmlTool = defineTool({
     try {
       if (args.action === 'render') {
         if (args.model === undefined) return errorResult('action=render needs `model` (a LogicModelV1 object)')
-        const result = renderUml(args.model, (args.notation === undefined || args.notation === 'auto' ? 'mermaid' : args.notation) as UmlNotation, (args.kind ?? 'state') as UmlDiagram, args.maxSteps)
+        const result = renderUml(args.model, (args.notation === undefined || args.notation === 'auto' ? 'mermaid' : args.notation) as UmlNotation, (args.kind ?? 'state') as UmlDiagram, args.maxSteps, args.intent as UmlIntent | undefined)
         return { ok: true, ran: true, ...verdictOf(0, result.warnings.length), schema: REPORT_SCHEMAS.umlRender, action: 'render', notation: result.notation, kind: result.diagram, diagram: result.primary, hashes: { diagram: createHash('sha256').update(result.primary).digest('hex') }, warnings: result.warnings } as unknown as JsonValue
       }
       if (args.action === 'parse') {
         if (args.diagram === undefined) return errorResult('action=parse needs `diagram` (Mermaid or PlantUML text)')
+        checkUmlIntent(args.intent as UmlIntent | undefined, 'parse')
         const result = parseUml(args.diagram, args.notation ?? 'auto')
         // A diagram from another family still parses into *something*. `parseFindings`
         // says so, and the verdict is what stops that something from being trusted:
@@ -109,6 +115,7 @@ export const logicProbeUmlTool = defineTool({
       // R9: the label contract was documented in the library and in `explainLabels()`, but no
       // tool exposed it, so it was reachable only by reading the source or the docs.
       if (args.action === 'explain-labels') {
+        checkUmlIntent(args.intent as UmlIntent | undefined, 'labels')
         const notation = (args.notation === undefined || args.notation === 'auto' ? 'mermaid' : args.notation) as UmlNotation
         return {
           ok: true,
@@ -126,6 +133,7 @@ export const logicProbeUmlTool = defineTool({
         diagramKind: (args.kind ?? 'state') as UmlDiagram,
         roundTrip: args.roundTrip,
         maxSteps: args.maxSteps,
+        intent: args.intent as UmlIntent | undefined,
       })
       return report as unknown as JsonValue
     } catch (error) {

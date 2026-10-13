@@ -15,11 +15,12 @@ Usage:
       [--rendezvous ev1,ev2] [--max-states N]
   python logicprobe-engine.py export model.json --format uppaal|tla|prism|spin
   python logicprobe-engine.py uml-render model.json [--notation mermaid|plantuml]
-      [--diagram state|activity|sequence] [--max-steps N]
+      [--diagram state|activity|sequence] [--max-steps N] [--intent present|verify|fidelity]
   python logicprobe-engine.py uml-parse diagram.txt [--notation auto|mermaid|plantuml]
+      [--intent present|verify|fidelity]
   python logicprobe-engine.py uml-review [--model model.json] [--diagram diagram.txt]
       [--notation auto|mermaid|plantuml] [--diagram-kind state|activity|sequence]
-      [--no-round-trip] [--max-steps N]
+      [--no-round-trip] [--max-steps N] [--intent present|verify|fidelity]
 
 Output: JSON verification/composition report on stdout (same shape as the DSH
 tool result), or the export result JSON (format / primary / extras / warnings),
@@ -3746,6 +3747,26 @@ def export_model(input_value, fmt):
 UML_NOTATIONS = ('mermaid', 'plantuml')
 UML_DIAGRAMS = ('state', 'activity', 'sequence')
 
+# What the caller is going to do with the artifact (mirror of UmlIntent).
+UML_INTENTS = ('present', 'verify', 'fidelity')
+
+# What each action hands back, so a declared intent can be matched against it.
+_ACTION_PRODUCES = {
+    'render': 'a diagram',
+    'parse': 'a LogicModelV1 read out of a diagram',
+    'review': 'an audit of the modelling',
+    'labels': 'the label and comment conventions the parser accepts',
+}
+
+# The intents each action can serve. `fidelity` is a review job: render produces a
+# diagram, and a diagram nothing has compared back to its model proves nothing about it.
+_ACTION_INTENTS = {
+    'render': ('present', 'verify'),
+    'parse': ('verify',),
+    'review': ('present', 'verify', 'fidelity'),
+    'labels': (),
+}
+
 # Marker every generated diagram carries; renderers ignore it, the parser uses it.
 _DIRECTIVE_NAMESPACE = 'logicprobe:'
 
@@ -4036,16 +4057,52 @@ def _render_sequence(context, notation, max_steps):
     return {'text': '\n'.join(lines) + '\n', 'truncated': truncated}
 
 
-def render_uml(input_value, notation='mermaid', diagram='state', max_steps=60):
-    """Mirror of renderUml: a validated LogicModelV1 as Mermaid/PlantUML text."""
+def assert_uml_view(notation, diagram):
+    """The `(notation, view)` cells this module can draw (mirror of assertUmlView)."""
     if notation not in UML_NOTATIONS:
-        raise ValueError('unknown notation "' + _js_string(notation) + '"; expected ' + ' | '.join(UML_NOTATIONS))
+        raise UmlRefusal('unknown notation "' + _js_string(notation) + '"; expected ' + ' | '.join(UML_NOTATIONS))
     if diagram not in UML_DIAGRAMS:
-        raise ValueError('unknown diagram "' + _js_string(diagram) + '"; expected ' + ' | '.join(UML_DIAGRAMS))
+        raise UmlRefusal('unknown diagram "' + _js_string(diagram) + '"; expected ' + ' | '.join(UML_DIAGRAMS))
     if notation == 'plantuml' and diagram == 'activity':
-        raise ValueError('plantuml has no faithful activity view here (its activity syntax is a structured flowchart language; '
+        raise UmlRefusal('plantuml has no faithful activity view here (its activity syntax is a structured flowchart language; '
                          'a graph with merges or cycles needs a while/if reconstruction logicprobe does not perform) — '
-                         'use notation "mermaid" for the activity view, or diagram "state"')
+                         'use notation "mermaid" for the activity view, or diagram "state"', 'UML_VIEW_UNREPRESENTABLE')
+
+
+def check_uml_intent(intent, action, view=None):
+    """Refuse, before any work, a request whose declared purpose the view cannot serve.
+
+    Mirror of checkUmlIntent: same codes, same messages, same order — a refusal is a
+    report, and the two engines have to print the same one.
+    """
+    if intent is None:
+        return
+    if intent not in UML_INTENTS:
+        raise UmlRefusal('unknown intent "' + _js_string(intent) + '"; expected ' + ' | '.join(UML_INTENTS))
+    served = _ACTION_INTENTS[action]
+    if intent not in served:
+        raise UmlRefusal('intent "' + intent + '" cannot be served by action=' + action + ', which returns ' +
+                         _ACTION_PRODUCES[action] + '; it serves ' +
+                         ('no intent — leave `intent` off' if not served else ' | '.join(served)),
+                         'UML_INTENT_MISMATCH')
+    if view is None:
+        return
+    assert_uml_view(view[0], view[1])
+    if intent == 'present' or view[1] != 'sequence':
+        return
+    raise UmlRefusal('intent "' + intent + '" needs a machine, and a sequence view is one BFS trace: ' +
+                     ('the render/parse fidelity check does not apply to a trace, so nothing would be proven. '
+                      'Review kind "state" or "activity" to have the diagram checked against the model, and render the trace separately with intent "present".'
+                      if intent == 'fidelity' else
+                      '`parse` refuses a trace because it cannot reconstruct a machine, so the diagram cannot feed verification. '
+                      'Model the machine as a state or activity diagram, and render the trace separately with intent "present".'),
+                     'UML_INTENT_UNSERVABLE')
+
+
+def render_uml(input_value, notation='mermaid', diagram='state', max_steps=60, intent=None):
+    """Mirror of renderUml: a validated LogicModelV1 as Mermaid/PlantUML text."""
+    assert_uml_view(notation, diagram)
+    check_uml_intent(intent, 'render', (notation, diagram))
     context = _prepare_render(input_value)
     warnings = list(context['warnings'])
     if diagram == 'state':
@@ -5214,6 +5271,7 @@ def review_uml(options):
     if options.get('notation') is not None and options['notation'] != 'auto':
         notation = options['notation']
     kind = options['diagramKind'] if options.get('diagramKind') is not None else 'state'
+    check_uml_intent(options.get('intent'), 'review', (notation, kind))
     model = None
     labels = None
     primary = None
@@ -6265,7 +6323,7 @@ def _cmd_export(args):
 def _cmd_uml_render(args):
     try:
         model = _load_json_file(args.model)
-        result = render_uml(model, args.notation, args.diagram, args.max_steps)
+        result = render_uml(model, args.notation, args.diagram, args.max_steps, args.intent)
     except (OSError, ValueError) as exc:
         print(json.dumps(_refusal_json(exc)))
         sys.exit(2)
@@ -6276,6 +6334,7 @@ def _cmd_uml_render(args):
 
 def _cmd_uml_parse(args):
     try:
+        check_uml_intent(args.intent, 'parse')
         # newline='' keeps the bytes as they are on disk: the diagram hash must not depend on the checkout's line endings.
         with open(args.diagram, 'r', encoding='utf-8', newline='') as handle:
             text = handle.read()
@@ -6386,6 +6445,11 @@ def explain_labels(notation='mermaid'):
 
 def _cmd_uml_review(args):
     if args.explain_labels:
+        try:
+            check_uml_intent(args.intent, 'labels')
+        except (OSError, ValueError) as exc:
+            print(json.dumps(_refusal_json(exc)))
+            sys.exit(2)
         print(json.dumps(explain_labels(args.notation if args.notation != 'auto' else 'mermaid'), indent=2))
         sys.exit(0)
     try:
@@ -6404,6 +6468,8 @@ def _cmd_uml_review(args):
             options['roundTrip'] = False
         if args.max_steps is not None:
             options['maxSteps'] = args.max_steps
+        if args.intent is not None:
+            options['intent'] = args.intent
         report = review_uml(options)
     except (OSError, ValueError) as exc:
         print(json.dumps(_refusal_json(exc)))
@@ -6444,10 +6510,14 @@ def _build_parser():
     p_uml_render.add_argument('--notation', choices=['mermaid', 'plantuml'], default='mermaid')
     p_uml_render.add_argument('--diagram', choices=['state', 'activity', 'sequence'], default='state')
     p_uml_render.add_argument('--max-steps', type=int, default=60)
+    p_uml_render.add_argument('--intent', choices=list(UML_INTENTS),
+                              help='what the diagram is for: a view that cannot serve it is refused before any work')
     p_uml_render.set_defaults(func=_cmd_uml_render)
     p_uml_parse = sub.add_parser('uml-parse', help='parse a Mermaid/PlantUML diagram back into a LogicModelV1')
     p_uml_parse.add_argument('diagram')
     p_uml_parse.add_argument('--notation', choices=['auto', 'mermaid', 'plantuml'], default='auto')
+    p_uml_parse.add_argument('--intent', choices=list(UML_INTENTS),
+                             help='what the parsed model is for; parse serves `verify`')
     p_uml_parse.set_defaults(func=_cmd_uml_parse)
     p_uml_review = sub.add_parser('uml-review', help='review a machine, a diagram, or the match between the two')
     p_uml_review.add_argument('--model')
@@ -6456,6 +6526,8 @@ def _build_parser():
     p_uml_review.add_argument('--diagram-kind', choices=['state', 'activity', 'sequence'])
     p_uml_review.add_argument('--no-round-trip', action='store_true')
     p_uml_review.add_argument('--max-steps', type=int)
+    p_uml_review.add_argument('--intent', choices=list(UML_INTENTS),
+                              help='what the review is for: a view that cannot serve it is refused before any work')
     p_uml_review.add_argument('--baseline', metavar='REPORT', help='compare against an earlier report and print the diff')
     p_uml_review.add_argument('--explain-labels', action='store_true',
                               help='print the label/comment conventions the parser expects, then exit')

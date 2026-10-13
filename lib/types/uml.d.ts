@@ -36,6 +36,17 @@ export type UmlNotation = 'mermaid' | 'plantuml';
 export type UmlDiagram = 'state' | 'activity' | 'sequence';
 export declare const UML_NOTATIONS: readonly UmlNotation[];
 export declare const UML_DIAGRAMS: readonly UmlDiagram[];
+/**
+ * What the caller is going to do with the artifact, declared up front.
+ *
+ * The view follows the question, not the machine, so the tool cannot pick it. What it
+ * can do is refuse a pairing that cannot serve the question — before the work, not as
+ * a finding after it.
+ */
+export type UmlIntent = 'present' | 'verify' | 'fidelity';
+export declare const UML_INTENTS: readonly UmlIntent[];
+/** The tool actions, for the entry check. `labels` is `action=explain-labels`. */
+export type UmlIntentAction = 'render' | 'parse' | 'review' | 'labels';
 export interface UmlRenderResult {
     notation: UmlNotation;
     diagram: UmlDiagram;
@@ -158,20 +169,44 @@ export declare class UmlError extends Error {
 /** Canonical guard text. Rendering wraps every composite node in parentheses, and the parser flattens same-operator chains, so render∘parse is the identity. */
 export declare function guardText(node: GuardNode): string;
 /**
+ * The `(notation, view)` cells this module can draw.
+ *
+ * PlantUML activity is the cell that does not exist: its activity syntax is a
+ * structured flowchart language, so a graph with merges or cycles needs a while/if
+ * reconstruction this module does not perform. Refusing is the honest outcome —
+ * quietly emitting a state diagram under an "activity" request would mislabel the
+ * model.
+ */
+export declare function assertUmlView(notation: UmlNotation, diagram: UmlDiagram): void;
+/**
+ * Refuse, before any work, a request whose declared purpose the view cannot serve.
+ *
+ * Without an intent this changes nothing: the review still reports `UML019` when the
+ * fidelity check does not apply to the view it was given. With one, an impossible
+ * pairing is an error carrying a code, instead of a report about the wrong artifact —
+ * which is the failure this check exists to prevent.
+ *
+ * @param intent - the declared purpose, or `undefined` to leave the behaviour unchanged.
+ * @param action - which action is about to run.
+ * @param view - the requested `(notation, diagram)`, for the actions that have one.
+ */
+export declare function checkUmlIntent(intent: UmlIntent | undefined, action: UmlIntentAction, view?: {
+    notation: UmlNotation;
+    diagram: UmlDiagram;
+}): void;
+/**
  * Render a LogicModelV1 as UML.
  *
- * PlantUML has no faithful activity view here: its activity syntax is a
- * structured flowchart language, so a graph with merges or cycles needs a
- * while/if reconstruction this module does not perform. Refusing is the honest
- * outcome — quietly emitting a state diagram under an "activity" request would
- * mislabel the model. Mermaid covers all three views.
+ * Mermaid covers all three views; PlantUML covers state and sequence (see
+ * `assertUmlView` for why activity is refused).
  *
  * @param input - candidate LogicModelV1.
  * @param notation - `mermaid` (default) or `plantuml`.
  * @param diagram - `state` (default), `activity`, or `sequence`.
  * @param maxSteps - cap on the sequence trace length.
+ * @param intent - what the diagram is for; a view that cannot serve it is refused first.
  */
-export declare function renderUml(input: unknown, notation?: UmlNotation, diagram?: UmlDiagram, maxSteps?: number): UmlRenderResult;
+export declare function renderUml(input: unknown, notation?: UmlNotation, diagram?: UmlDiagram, maxSteps?: number, intent?: UmlIntent): UmlRenderResult;
 /** Parse a guard expression such as `(retry < 3 && armed == true)`. */
 export declare function parseGuardText(text: string): GuardNode;
 /** Parse a UML action clause such as `retry := retry + 1, armed := true`. */
@@ -238,6 +273,8 @@ export interface UmlReviewOptions {
     roundTrip?: boolean;
     /** Cap on the sequence trace used for the fidelity check. */
     maxSteps?: number;
+    /** What the review is for; a view that cannot serve it is refused before any work. */
+    intent?: UmlIntent;
 }
 /**
  * Review a UML model of a code flow.

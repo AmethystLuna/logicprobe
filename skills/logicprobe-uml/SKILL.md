@@ -32,7 +32,7 @@ code flow → model (citation per element) → logicprobe_uml action=render → 
 - **review** — it answers one of three questions. Give it a model: is the machine well-modelled? Give it a diagram: what does the diagram say? Give it both: does the diagram match the model?
 - **explain-labels** — the parser's own account of labels and comments: the accepted spellings, the form the renderer writes, and which lines it ignores. No diagram needed. It answers "why does my hand-drawn diagram report drift or ignored lines?" without reading the source.
 
-The view follows the question, not the machine, and no tool picks it for you. The ordered procedure, and the check each view can feed, are under [Choosing the view](references/uml-modeling-guide.md#choosing-the-view).
+The view follows the question, not the machine, and no tool picks it for you. Declare the question with `intent` (`present` / `verify` / `fidelity`) and a view that cannot serve it is refused before any work, with a code that names why. The ordered procedure, the intent-by-action table and those codes are under [Choosing the view](references/uml-modeling-guide.md#choosing-the-view).
 
 A host without the tools runs the same four actions through the repository engine. The engine is deliberately single-source — do not copy it into this skill.
 
