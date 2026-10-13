@@ -4,7 +4,17 @@ This guide covers two jobs: drawing a code flow as UML, and reviewing that drawi
 
 One rule runs through the whole guide. **A diagram is a model, and a model can be wrong.** A tidy flow chart is not evidence about the code. Worse, a diagram that disagrees with the model it came from will mislead every reader who trusts it.
 
-## When to use this
+## Choosing the view
+
+The view follows the question, not the machine. Decide in this order.
+
+**1. Is the question about where dependencies point?** Architecture, layering, module
+structure, "may this call that" — that question belongs to the `logicprobe-structure`
+skill, which reads the same component, package, class or deployment text as a dependency
+graph. The state front end refuses that text by name
+(`UML_NOT_A_STATE_DIAGRAM`) instead of reviewing it.
+
+**2. Otherwise fix the boundary first, then pick the view by the reader's question.**
 
 | Situation | View that answers it |
 |---|---|
@@ -14,7 +24,44 @@ One rule runs through the whole guide. **A diagram is a model, and a model can b
 | "Somebody gave me a diagram. Is it right?" | Any view. Feed it to the review and compare it against the code. |
 | "This diagram and this model disagree." | Feed both to the review. The round-trip check names every difference. |
 
-Do not use this guide for a behavioural claim about a specific machine. That is the job of `logicprobe_verify` (S1-S8 and A1-A14). The review here covers the modelling, not the behaviour. Every finding it produces names the engine check that settles the behavioural half.
+**3. Check the choice against the next step.** A view that cannot feed the check you are
+about to run is the wrong view, however readable it looks.
+
+| Next step | Views that can feed it |
+|---|---|
+| `logicprobe_verify` (S1-S8 and A1-A14) | State or activity: `parse` reads either into a LogicModelV1 |
+| `logicprobe_uml action=review` with a model, for the fidelity check | State or activity: only those round-trip |
+| `logicprobe_uml action=review` with a model alone | Any view. With `kind: "sequence"` the trace is rendered and the fidelity check is reported inapplicable (`UML019`) |
+| A human reading a protocol exchange | Sequence, which is the honest view there |
+
+When the question is still unclear, model the state machine. It is the safe default, and
+the other views render from the same model afterwards.
+
+### Nothing picks the view for you
+
+`render` takes `kind` from the caller and defaults to `state`; it never guesses. A guess
+between state and activity would be a presentation decision, and the machine cannot make
+it: the same guarded branch is a state machine to one reader and an error path to another.
+`parse` does detect the notation and the diagram family from the text, and it refuses the
+families it cannot model, by name.
+
+Mechanically decidable, and nothing else:
+
+- the notation and the family the text declares — a Mermaid header (`stateDiagram`,
+  `flowchart`, `sequenceDiagram`, or a known other-family header) or a PlantUML body
+  keyword;
+- whether the requested notation-and-kind combination exists at all (PlantUML has no
+  activity view here);
+- whether a view can carry the fidelity check (a sequence cannot).
+
+Everything else is a fact about the question, not about the artifact. A model can tell you
+its shape — its state count, its guarded branches, its cycles — and its shape does not
+choose the view.
+
+Do not use this guide for a behavioural claim about a specific machine. That is the job of
+`logicprobe_verify` (S1-S8 and A1-A14). The review here covers the modelling, not the
+behaviour. Every finding it produces names the engine check that settles the behavioural
+half.
 
 ## The three views
 
