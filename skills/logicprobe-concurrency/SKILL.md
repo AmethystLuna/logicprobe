@@ -42,3 +42,4 @@ The full routing table, including hard-real-time, hybrid-control and execution-c
 3. **One counterexample is enough to refute.** If a race is suspected, the deliverable is the interleaving that breaks it plus the harness that demonstrates it (TSan/Helgrind output), not an argument.
 4. **Sequential targets are out of scope.** If nothing runs concurrently, say so and stop.
 5. **The scanner is dsh-only.** `logicprobe_concurrency_scan` has no mirror subcommand. Without it, mine the text by hand against the keyword table above and route each claim the same way.
+6. **Name the claim and its routing in words.** 「QoS 1 只投递一次」plus the tool that decides it, never a bare check name. A reader who has not memorized this skill's tables learns nothing from an enumeration. The full rule is under "Writing the Answer" in the `logicprobe` skill.

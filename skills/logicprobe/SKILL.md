@@ -203,6 +203,25 @@ Turn the verdict into an answer, never into a summary of `ok`:
 
 Exit codes: `0` for `pass` / `pass_with_findings`, `2` for `fail`, a refusal, or an unreadable input. In DSH the native tools return the report as data — read `verdict`, and treat `errorCode`/`error` as the refusal path.
 
+### Writing the Answer: Name the Finding, Not Its Code
+
+`S2_NO_TRANSITIONS`, `UML019`, `DA2` are values of `findings[].code`, not names. A reader
+who has not memorized the schema learns nothing from one, and cannot tell whether their
+machine is sound or stuck.
+
+- **Say what it means**, in the user's language and in the terms of their own code:
+  「启动超时后 ERROR 没有任何出口迁移，机器会停在那里」, not 「S2 命中」. The finding's
+  `message` is written for the report; the sentence for the user is written from it.
+- **Keep the identifier where the identifier is the subject**: a report field quoted
+  verbatim, a baseline diff, a test name, or a question about the check itself.
+- **Name the property, not the checking.** "This path locks without unlocking" beats
+  "A4 failed". A check's name earns its place when the reader asked about the checking.
+- **Carry the verdict in words.** "Not verified" or "verified, within the scope of this
+  model" — never a bare pass, and never a warning presented without its label.
+
+A reader who cannot tell what failed will either trust a report they cannot read, or
+ignore one they should act on.
+
 ### Slice Acceptance: Baseline Diffs
 
 The acceptance criterion for a refactoring slice is usually "no **new** findings", not

@@ -55,5 +55,6 @@ Structural defects: unreachable states, dead ends, ambiguous or non-exhaustive b
 3. **Check the verdict before the picture.** `ok: true` with `verdict: "fail"` means the review failed; a diagram whose review failed is not something to show as if it were checked.
 4. **The review never replaces verification.** It covers the modelling. S1-S8 and A1-A14 cover the behaviour, and each finding names the check that settles it — hand those over to the `logicprobe` skill.
 5. **Keep the narrative with the model.** Write `narrative.states`, `narrative.events` and `narrative.scenarios`. Then the diagram stays readable against the code, and label drift shows up as a finding instead of as a stale picture.
+6. **Name a finding for the reader, not by its code.** `UML017_ROUND_TRIP_MISMATCH` is a report field; the sentence the reader gets says what disagreed (「图里少了 ERROR→COOLDOWN 这条迁移」), in their language. Keep the code for a report field quoted verbatim, a diff or a test name. The full rule is under "Writing the Answer" in the `logicprobe` skill.
 
 The full checklist (codes `UML001` to `UML019` plus `UML_NOT_A_STATE_DIAGRAM`), the directive format generated diagrams carry, a worked example, and the limits of each view are in [`references/uml-modeling-guide.md`](references/uml-modeling-guide.md).

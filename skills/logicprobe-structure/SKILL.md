@@ -91,5 +91,6 @@ This tool audits the **diagram**; an include or dependency scan audits the **cod
 2. **Quote the rule id for every judged edge.** "Not allowed" without the rule is an opinion; `matchedRules` makes it a finding.
 3. **Run the numbers, never the impression.** An isolated node and a back edge are exactly what a reader misses by eye; that is why the check exists.
 4. **Report the diagram-code difference, not just the diagram.** A structure review that never touches the source is a review of a drawing.
+5. **Report the rule id with its meaning, never the id alone.** Rule 2 keeps the id on every judged edge, so the finding is defensible; the sentence the reader gets says what the edge violated (「HAL 反向依赖了上层」), in their language. The full rule is under "Writing the Answer" in the `logicprobe` skill.
 
 The full matrix schema, a worked example and the reconciliation worksheet are in [`references/structure-review-guide.md`](references/structure-review-guide.md).

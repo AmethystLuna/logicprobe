@@ -92,6 +92,11 @@ The **DataModelV1 shape** is in [`references/data-model-schema.md`](references/d
 | DD3 | Delta summary | Warning |
 | DD4 | Breaking change regression | Error/Warning |
 
+Every `#` in these tables is a report field, not a name. Write what the check found for the
+reader (「回滚与备份不对称」), in their language; keep the id for a report field quoted
+verbatim, a baseline diff or a test name. The full rule is under "Writing the Answer" in the
+`logicprobe` skill.
+
 ## Extraction Rule
 
 Before writing any verification code, output a data-model table:
