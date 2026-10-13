@@ -83,7 +83,7 @@ logicprobe 核验声称与实物是否一致。事实类对着源码查。行为
 - **review**：审查建模。它报告两类问题。结构缺陷包括不可达状态、死端、歧义分支、无出口自环、重复迁移。文档缺口包括缺 narrative、变量无界、状态无可读标注、图与 narrative 标签漂移。它还会做保真度检查：把图重新解析回模型，任何结构性差异都报出来。
 - **explain-labels**：打印解析器接受的标签写法与忽略行口径（`directiveLines`、`acceptedLabelForms`、`renderedForm`、`ignoredLines`、`rules`），不需要给图。手绘图与渲染图对不齐时先看它；命令行对应 `uml-review --explain-labels`。
 
-**结构图是最危险的一类，因为它「能解析」。** PlantUML 的组件图 / 包图 / 类图 / 部署图不声明图类型，解析器会逐行碰上它的关键字。箭头看起来就是迁移，于是 `parse` 会返回一个副产品模型——但现在同时给出 error 级发现 `UML_NOT_A_STATE_DIAGRAM`、`discardedConstructs`（每条无法表达的声明及其行号与原文）、`discardedEdges`（被误读成迁移的箭头数），以及 `verdict: "fail"`。意思是：**这份文件没有被建模，这张图没有被审查。** 不要把那个副产品喂给 `logicprobe_verify` 当作架构审查结论。针对真正依赖图的结构检查（允许依赖矩阵、环、孤立节点）尚未实现，编号 `UML020`+ 已为其保留。
+**结构图是最危险的一类，因为它「能解析」。** PlantUML 的组件图 / 包图 / 类图 / 部署图不声明图类型，解析器会逐行碰上它的关键字。箭头看起来就是迁移，于是 `parse` 会返回一个副产品模型——但现在同时给出 error 级发现 `UML_NOT_A_STATE_DIAGRAM`、`discardedConstructs`（每条无法表达的声明及其行号与原文）、`discardedEdges`（被误读成迁移的箭头数），以及 `verdict: "fail"`。意思是：**这份文件没有被建模，这张图没有被审查。** 不要把那个副产品喂给 `logicprobe_verify` 当作架构审查结论。真正的依赖图检查（允许依赖矩阵、环、孤立节点）由 `logicprobe_structure_verify` 承担，见下方「架构与依赖审查」。
 
 保真度是这套功能的核心。生成的图带有 `logicprobe:` 注释指令（init、终态、别名、变量类型），Mermaid 与 PlantUML 会忽略它们，而解析器会读取它们。因此「图 ↔ 模型」的比较是精确的。
 
