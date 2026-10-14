@@ -37,6 +37,13 @@ from collections import deque
 ENGINE_SCHEMA_VERSION = 1
 DEFAULT_MAX_STATES = 10000
 DEFAULT_MAX_PERMUTATION_EVENTS = 5
+# Budget for the leads-to walk, as a multiple of max_states. That walk is depth-first
+# over run states, so max_states does not bound it the way it bounds the breadth-first
+# explorations: an inc/dec counter whose updates are not pinned by a guard has an
+# unbounded reachable set, every run state is distinct, and the walk never revisits one.
+# The budget is shared across every start state of a single check, so a wide search
+# space cannot multiply it by the number of starts.
+LEADS_TO_WALK_FACTOR = 20
 
 
 # ---------------------------------------------------------------------------
@@ -148,6 +155,16 @@ def verdict_of_findings(findings):
     errors = [f for f in findings if f.get('severity') == 'error']
     warnings = [f for f in findings if f.get('severity') == 'warning']
     return verdict_of(len(errors), len(warnings), errors[0].get('code') if errors else None)
+
+
+# Finding codes that mean "the search stopped before deciding", as opposed to "the
+# model is wrong". They must reach summary.truncated, or a caller reading only that
+# flag would take an unfinished search for a clean one.
+UNDECIDED_CODES = ('S7_UNDECIDED', 'A7_UNDECIDED', 'A9_LEADS_TO_UNDECIDED', 'D2_UNDECIDED')
+
+
+def has_undecided_finding(checks):
+    return any(f.get('code') in UNDECIDED_CODES for check in checks for f in check['findings'])
 
 
 def refusal_verdict(reason):
@@ -1267,6 +1284,117 @@ def _collect_guard_constants(model):
     return [leaf['value'] for leaf in _guard_leaves(model) if isinstance(leaf['value'], (int, float)) and not isinstance(leaf['value'], bool)]
 
 
+def _var_value_label(value):
+    # How a variable value prints in a message, matching JavaScript's String(value).
+    if isinstance(value, bool):
+        return 'true' if value else 'false'
+    return js_number(value)
+
+
+def _compare_var_values(value):
+    # Deterministic value order: booleans first, then numbers ascending.
+    if isinstance(value, bool):
+        return (0, 1 if value else 0)
+    return (1, value)
+
+
+def _same_var_value(a, b):
+    # JavaScript Set membership, which keeps true and 1 apart where python's == does not.
+    return isinstance(a, bool) == isinstance(b, bool) and a == b
+
+
+def _attainable_values(model):
+    # Values each variable can actually hold, as an over-approximation: init plus every
+    # set constant the model writes. None means "unknown", which is what an inc or dec
+    # update produces -- the reachable set is then unbounded and nothing can be
+    # concluded from it.
+    #
+    # The union is taken across the whole model rather than per state, so the answer can
+    # only be too large, never too small. A guard this function calls dead is therefore
+    # dead in every state, while a live guard may still be unreachable in a particular one.
+    attainable = {}
+    for variable in model.get('variables') or []:
+        attainable[variable['name']] = [variable['init']]
+    for transition in model.get('transitions') or []:
+        for update in transition.get('updates') or []:
+            name = update['variable']
+            if name not in attainable:
+                continue
+            if update['op'] in ('inc', 'dec'):
+                attainable[name] = None
+                continue
+            values = attainable[name]
+            if values is None:
+                continue
+            value = update.get('value', 0)
+            if not any(_same_var_value(existing, value) for existing in values):
+                values.append(value)
+    return attainable
+
+
+def _dead_guard_findings(model):
+    # Guarded transitions whose guard no reachable variable value can satisfy: the branch
+    # is dead code, and a model that relies on it is not the model the author wrote. This
+    # is the dual of S6_INCOMPLETE_GUARD -- a group that never reaches a branch, rather
+    # than one that falls through every branch.
+    #
+    # The test runs over _attainable_values, not over the declared domain: a guard on a
+    # variable the model only ever sets to one of its declared values is satisfiable on
+    # paper and dead in practice, which is exactly the defect worth reporting.
+    attainable = _attainable_values(model)
+    findings = []
+    for key, group in _group_transitions(model).items():
+        sep = key.find('|')
+        frm = key[:sep]
+        event = key[sep + 1:]
+        for transition in group:
+            guard = transition.get('guard')
+            if guard is None:
+                continue
+            names = sorted(set(name for name in guard_variables(guard) if name in attainable))
+            if not names:
+                continue
+            domains = []
+            known = True
+            for name in names:
+                values = attainable.get(name)
+                if not values:
+                    known = False
+                    break
+                domains.append(values)
+            if not known:
+                continue
+            size = 1
+            for values in domains:
+                size *= len(values)
+            if size > 10000:
+                continue
+            assignment = {}
+
+            def satisfiable(index):
+                if index == len(names):
+                    return _eval_guard(guard, assignment)
+                for value in sorted(domains[index], key=_compare_var_values):
+                    assignment[names[index]] = value
+                    if satisfiable(index + 1):
+                        return True
+                return False
+
+            if satisfiable(0):
+                continue
+            findings.append({
+                'code': 'S6_DEAD_GUARD',
+                'severity': 'warning',
+                'message': frm + ' + ' + event + ' has a guard that can never hold: ' + ', '.join(
+                    name + ' is only ever ' + '/'.join(_var_value_label(v) for v in sorted(attainable[name], key=_compare_var_values))
+                    for name in names) + '. The branch is dead.',
+                'evidence': {'guard': guard, 'attainable': [
+                    {'variable': name, 'values': [_var_value_label(v) for v in sorted(attainable[name], key=_compare_var_values)]}
+                    for name in names]},
+            })
+    return findings
+
+
 def _assignments_for(model, variables):
     specs = [v for v in model.get('variables') or [] if v['name'] in variables]
     combinations = [{}]
@@ -1351,6 +1479,7 @@ def _analyze_guards(model):
                 break
         if truncated:
             break
+    completeness.extend(_dead_guard_findings(model))
     return {'determinism': determinism, 'completeness': completeness, 'truncated': truncated}
 
 
@@ -1362,8 +1491,15 @@ def S4_determinism(model):
 
 def S6_guard_completeness(model):
     analysis = _analyze_guards(model)
-    return _check_result('S6', 'Guard Completeness', analysis['completeness'],
-                         'All guard branches defined' if not analysis['completeness'] else 'Guard findings: ' + str(len(analysis['completeness'])))
+    completeness = analysis['completeness']
+    dead = len([f for f in completeness if f.get('code') == 'S6_DEAD_GUARD'])
+    if not completeness:
+        detail = 'All guard branches defined'
+    elif dead == len(completeness):
+        detail = 'Dead guard branches: ' + str(dead)
+    else:
+        detail = 'Guard findings: ' + str(len(completeness))
+    return _check_result('S6', 'Guard Completeness', completeness, detail)
 
 
 def S5_event_completeness(model):
@@ -1524,12 +1660,18 @@ def _path_property_violation(model, max_states, invariant):
     if kind == 'leads-to':
         targets = set(_leads_to_targets(invariant))
         label = _leads_to_target_label(invariant)
+        budget = _leads_to_walk_budget(max_states)
+        walk = {'remaining': budget}
         for runtime in _reachable_runtime_states(model, max_states):
             if runtime['state'] != invariant['from']:
                 continue
-            bad = _find_leads_to_bad_path(model, runtime, targets, label)
-            if bad is not None:
-                return {'invariant': invariant, 'path': bad['path'], 'reason': bad['reason']}
+            outcome = _find_leads_to_bad_path(model, runtime, targets, label, walk)
+            if outcome['undecided']:
+                return {'invariant': invariant, 'path': [],
+                        'reason': 'the walk spent its budget of ' + str(budget) + ' steps without finding a run that avoids ' + label + ', or proving that none exists',
+                        'undecided': True}
+            if outcome['violation'] is not None:
+                return {'invariant': invariant, 'path': outcome['violation']['path'], 'reason': outcome['violation']['reason']}
         return None
     if kind == 'sequence':
         return _find_sequence_violation(model, max_states, invariant)
@@ -1572,15 +1714,29 @@ def S7_invariants(model, max_states):
     findings = []
     for violation in violations:
         invariant = violation['invariant']
-        findings.append({
-            'code': 'S7_INVARIANT_VIOLATION',
-            'severity': 'error',
-            'message': 'Invariant "' + invariant['id'] + '" (' + invariant['description'] + ') violated: ' + violation['reason'],
-            'path': violation['path'],
-            'evidence': {'invariant': invariant},
-        })
-    return _check_result('S7', 'Invariant Validity', findings,
-                         'All invariants hold' if not violations else 'Invariant violations: ' + str(len(violations)))
+        if violation.get('undecided'):
+            findings.append({
+                'code': 'S7_UNDECIDED',
+                'severity': 'warning',
+                'message': 'Invariant "' + invariant['id'] + '" (' + invariant['description'] + ') could not be decided: ' + violation['reason'] + '. Absence is not proven.',
+                'evidence': {'invariant': invariant},
+            })
+        else:
+            findings.append({
+                'code': 'S7_INVARIANT_VIOLATION',
+                'severity': 'error',
+                'message': 'Invariant "' + invariant['id'] + '" (' + invariant['description'] + ') violated: ' + violation['reason'],
+                'path': violation['path'],
+                'evidence': {'invariant': invariant},
+            })
+    undecided = any(f['code'] == 'S7_UNDECIDED' for f in findings)
+    if not violations:
+        detail = 'All invariants hold'
+    elif undecided and all(f['code'] == 'S7_UNDECIDED' for f in findings):
+        detail = 'Invariants undecided: the search budget ran out'
+    else:
+        detail = 'Invariant violations: ' + str(len(violations))
+    return _check_result('S7', 'Invariant Validity', findings, detail)
 
 
 # ---------------------------------------------------------------------------
@@ -1953,6 +2109,14 @@ def A7_shortest_violations(model, max_states):
     findings = []
     for violation in violations:
         invariant = violation['invariant']
+        if violation.get('undecided'):
+            findings.append({
+                'code': 'A7_UNDECIDED',
+                'severity': 'warning',
+                'message': 'Invariant "' + invariant['id'] + '" could not be decided: ' + violation['reason'] + '. Absence is not proven, so there is no shortest counterexample to report.',
+                'evidence': {'invariant': invariant['id']},
+            })
+            continue
         path_length = len(violation['path'])
         if _is_path_property_invariant(invariant):
             message = ('Invariant "' + invariant['id'] + '" violated: ' + violation['reason']
@@ -2100,13 +2264,21 @@ def D2_invariant_continuity(before, after, max_states, mapping):
         else:
             violation = _shortest_violation_for_invariant(after, max_states, mapped)
         if violation is not None:
-            findings.append({
-                'code': 'D2_INVARIANT_REGRESSION',
-                'severity': 'error',
-                'message': 'BEFORE invariant "' + invariant['id'] + '" no longer holds in AFTER: ' + violation['reason'],
-                'path': violation['path'],
-                'evidence': {'beforeInvariant': invariant, 'afterInvariant': mapped},
-            })
+            if violation.get('undecided'):
+                findings.append({
+                    'code': 'D2_UNDECIDED',
+                    'severity': 'warning',
+                    'message': 'BEFORE invariant "' + invariant['id'] + '" could not be re-decided against AFTER: ' + violation['reason'] + '. Absence is not proven.',
+                    'evidence': {'beforeInvariant': invariant, 'afterInvariant': mapped},
+                })
+            else:
+                findings.append({
+                    'code': 'D2_INVARIANT_REGRESSION',
+                    'severity': 'error',
+                    'message': 'BEFORE invariant "' + invariant['id'] + '" no longer holds in AFTER: ' + violation['reason'],
+                    'path': violation['path'],
+                    'evidence': {'beforeInvariant': invariant, 'afterInvariant': mapped},
+                })
     return _check_result('D2', 'Invariant Continuity', findings,
                          'All BEFORE invariants continue to hold' if not findings else 'Invariant continuity findings: ' + str(len(findings)))
 
@@ -2259,6 +2431,107 @@ def A8_idempotent_replay(model, exploration):
                          'Idempotent events are replay-safe' if not findings else 'Idempotent replay findings: ' + str(len(findings)))
 
 
+def _guard_implies_upper_bound(guard, variable, bound):
+    # Whether the guard proves variable stays at or below bound wherever it holds.
+    #
+    # Deliberately conservative in one direction only: a guard this function cannot read
+    # answers False, so an unreadable guard is reported as "not proven" rather than as
+    # "enforced". A conjunction bounds the value if any conjunct does; a disjunction has
+    # to bound it on every branch; a negation is never reasoned about.
+    if guard is None:
+        return False
+    if 'variable' in guard:
+        if guard['variable'] != variable:
+            return False
+        value = guard['value']
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            return False
+        if guard['op'] == '<':
+            return value - 1 <= bound
+        if guard['op'] in ('<=', '=='):
+            return value <= bound
+        return False
+    if 'all' in guard:
+        return any(_guard_implies_upper_bound(child, variable, bound) for child in guard['all'])
+    if 'any' in guard:
+        return all(_guard_implies_upper_bound(child, variable, bound) for child in guard['any'])
+    return False
+
+
+def _guard_implies_lower_bound(guard, variable, bound):
+    # Mirror of _guard_implies_upper_bound for the lower bound.
+    if guard is None:
+        return False
+    if 'variable' in guard:
+        if guard['variable'] != variable:
+            return False
+        value = guard['value']
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            return False
+        if guard['op'] == '>':
+            return value + 1 >= bound
+        if guard['op'] in ('>=', '=='):
+            return value >= bound
+        return False
+    if 'all' in guard:
+        return any(_guard_implies_lower_bound(child, variable, bound) for child in guard['all'])
+    if 'any' in guard:
+        return all(_guard_implies_lower_bound(child, variable, bound) for child in guard['any'])
+    return False
+
+
+def _declared_domain_findings(model):
+    # Whether the model's own declarations about a variable hold against what its
+    # transitions do. inc and dec are never clamped to min/max -- the declared range is a
+    # property to check, not a bound on the search -- so a counter whose guard does not
+    # pin it ranges past its own declaration, and the reachable set is unbounded however
+    # narrow the declaration looks.
+    #
+    # Reporting the declaration rather than silently clamping is deliberate. Clamping
+    # would delete the very states a range violation is witnessed by, turning a
+    # counterexample into a false pass.
+    findings = []
+    variables = dict((v['name'], v) for v in model.get('variables') or [])
+    for transition in model.get('transitions') or []:
+        for update in transition.get('updates') or []:
+            variable = variables.get(update['variable'])
+            if variable is None:
+                continue
+            raw = update.get('value')
+            delta = raw if isinstance(raw, (int, float)) and not isinstance(raw, bool) else 1
+            at = transition['from'] + ' + ' + transition['event']
+            if update['op'] == 'inc' and variable.get('max') is not None and not _guard_implies_upper_bound(transition.get('guard'), variable['name'], variable['max'] - delta):
+                findings.append({
+                    'code': 'S8_DOMAIN_NOT_ENFORCED',
+                    'severity': 'warning',
+                    'message': at + ' increments ' + variable['name'] + ', but ' + variable['name'] + ' declares max ' + js_number(variable['max']) + ' and no guard keeps it there: the declared range is not a bound on reachable values.',
+                    'evidence': {'variable': variable['name'], 'declaredMax': variable['max'], 'transition': at},
+                })
+            if update['op'] == 'dec' and variable.get('min') is not None and not _guard_implies_lower_bound(transition.get('guard'), variable['name'], variable['min'] + delta):
+                findings.append({
+                    'code': 'S8_DOMAIN_NOT_ENFORCED',
+                    'severity': 'warning',
+                    'message': at + ' decrements ' + variable['name'] + ', but ' + variable['name'] + ' declares min ' + js_number(variable['min']) + ' and no guard keeps it there: the declared range is not a bound on reachable values.',
+                    'evidence': {'variable': variable['name'], 'declaredMin': variable['min'], 'transition': at},
+                })
+            if update['op'] == 'set' and isinstance(raw, (int, float)) and not isinstance(raw, bool):
+                if variable.get('min') is not None and raw < variable['min']:
+                    findings.append({
+                        'code': 'S8_DOMAIN_SET_OUTSIDE',
+                        'severity': 'error',
+                        'message': at + ' sets ' + variable['name'] + ' to ' + js_number(raw) + ', below its declared min ' + js_number(variable['min']) + '.',
+                        'evidence': {'variable': variable['name'], 'value': raw, 'declaredMin': variable['min']},
+                    })
+                if variable.get('max') is not None and raw > variable['max']:
+                    findings.append({
+                        'code': 'S8_DOMAIN_SET_OUTSIDE',
+                        'severity': 'error',
+                        'message': at + ' sets ' + variable['name'] + ' to ' + js_number(raw) + ', above its declared max ' + js_number(variable['max']) + '.',
+                        'evidence': {'variable': variable['name'], 'value': raw, 'declaredMax': variable['max']},
+                    })
+    return findings
+
+
 def S8_monotonic_variables(model):
     findings = []
     for variable in model.get('variables') or []:
@@ -2280,8 +2553,9 @@ def S8_monotonic_variables(model):
                     findings.append({'code': 'S8_MONOTONIC_SET_REVIEW', 'severity': 'warning',
                                      'message': 'Monotonic variable ' + variable['name'] + ' uses set in ' + transition['event'] + '; verify it cannot move backwards.',
                                      'evidence': {'variable': variable['name'], 'transition': transition}})
-    return _check_result('S8', 'Monotonic Variables', findings,
-                         'Monotonic variables are respected' if not findings else 'Monotonic findings: ' + str(len(findings)))
+    findings.extend(_declared_domain_findings(model))
+    return _check_result('S8', 'Variable Declarations', findings,
+                         'Variable declarations are respected' if not findings else 'Variable declaration findings: ' + str(len(findings)))
 
 
 def _leads_to_targets(invariant):
@@ -2297,7 +2571,11 @@ def _leads_to_target_label(invariant):
     return ', '.join(_leads_to_targets(invariant))
 
 
-def _find_leads_to_bad_path(model, start, targets, label):
+def _leads_to_walk_budget(max_states):
+    return max(1000, max_states * LEADS_TO_WALK_FACTOR)
+
+
+def _find_leads_to_bad_path(model, start, targets, label, walk):
     # Find a run from start that reaches none of targets, or None when every run
     # reaches at least one of them. The property is universal (see the A9 row in
     # SKILL.md): one branch that loops forever, or that stops before any target,
@@ -2313,14 +2591,38 @@ def _find_leads_to_bad_path(model, start, targets, label):
     # set: a diamond (two branches rejoining) is acyclic and must pass, while a
     # genuine cycle must not. A run is identified by its state plus its variable
     # values.
+    #
+    # Two properties keep the walk from taking the host down, and both are load-bearing:
+    # the walk is budgeted, and it stores a parent link per node instead of a copy of the
+    # path. Without the budget an unbounded counter makes the run graph infinite, so the
+    # three colours above never repeat a key and the walk never returns; without the
+    # parent link every frame retains its own copy of the path, which grows the walk's
+    # memory quadratically in its depth. Either one alone turns "the model is wrong" into
+    # an out-of-memory abort, which is the failure this function must not have.
+    #
+    # An exhausted budget is reported as undecided, never as None: a walk that did not
+    # finish has not proven that every run reaches a target.
     if start['state'] in targets:
-        return None
+        return {'violation': None, 'undecided': False}
     GRAY = 1
     BLACK = 2
     color = {}
-    stack = [{'runtime': start, 'path': [], 'nexts': None, 'index': 0}]
+    stack = [{'runtime': start, 'parent': None, 'step': None, 'nexts': None, 'index': 0}]
     color[_runtime_key(start)] = GRAY
+
+    def path_of(frame):
+        steps = []
+        node = frame
+        while node is not None and node['step'] is not None:
+            steps.append(node['step'])
+            node = node['parent']
+        steps.reverse()
+        return steps
+
     while stack:
+        if walk['remaining'] <= 0:
+            return {'violation': None, 'undecided': True}
+        walk['remaining'] -= 1
         frame = stack[-1]
         if frame['nexts'] is None:
             nexts = []
@@ -2329,7 +2631,8 @@ def _find_leads_to_bad_path(model, start, targets, label):
                     nexts.append({'next': nxt, 'event': event})
             frame['nexts'] = nexts
             if not nexts:
-                return {'path': frame['path'], 'reason': 'Dead end before target ' + label}
+                return {'violation': {'path': path_of(frame), 'reason': 'Dead end before target ' + label},
+                        'undecided': False}
         if frame['index'] >= len(frame['nexts']):
             color[_runtime_key(frame['runtime'])] = BLACK
             stack.pop()
@@ -2342,37 +2645,54 @@ def _find_leads_to_bad_path(model, start, targets, label):
         key = _runtime_key(item['next'])
         seen = color.get(key)
         if seen == GRAY:
-            return {'path': frame['path'] + [step], 'reason': 'Cycle avoids target ' + label}
+            return {'violation': {'path': path_of(frame) + [step], 'reason': 'Cycle avoids target ' + label},
+                    'undecided': False}
         if seen == BLACK:
             continue
         color[key] = GRAY
-        stack.append({'runtime': item['next'], 'path': frame['path'] + [step], 'nexts': None, 'index': 0})
+        stack.append({'runtime': item['next'], 'parent': frame, 'step': step, 'nexts': None, 'index': 0})
     # Every branch either reached the target or rejoined a branch that did.
-    return None
+    return {'violation': None, 'undecided': False}
 
 
-def A9_leads_to(model, exploration):
+def A9_leads_to(model, exploration, max_states):
     findings = []
     for invariant in model.get('invariants') or []:
         if invariant['kind'] != 'leads-to':
             continue
         targets = set(_leads_to_targets(invariant))
         label = _leads_to_target_label(invariant)
+        budget = _leads_to_walk_budget(max_states)
+        walk = {'remaining': budget}
         for runtime in exploration['reachable']:
             if runtime['state'] != invariant['from']:
                 continue
-            bad = _find_leads_to_bad_path(model, runtime, targets, label)
-            if bad is not None:
+            outcome = _find_leads_to_bad_path(model, runtime, targets, label, walk)
+            if outcome['undecided']:
                 findings.append({
-                    'code': 'A9_LEADS_TO_VIOLATION',
-                    'severity': 'error',
-                    'message': 'Leads-to invariant "' + invariant['id'] + '" violated from ' + invariant['from'] + ': ' + bad['reason'],
-                    'path': bad['path'],
+                    'code': 'A9_LEADS_TO_UNDECIDED',
+                    'severity': 'warning',
+                    'message': 'Leads-to invariant "' + invariant['id'] + '" is undecided: the walk spent its budget of ' + str(budget) + ' steps from ' + invariant['from'] + ' without finding a run that avoids ' + label + ', or proving that none exists. Absence is not proven.',
                     'evidence': {'invariant': invariant},
                 })
                 break
-    return _check_result('A9', 'Leads-To', findings,
-                         'All leads-to invariants hold' if not findings else 'Leads-to findings: ' + str(len(findings)))
+            if outcome['violation'] is not None:
+                findings.append({
+                    'code': 'A9_LEADS_TO_VIOLATION',
+                    'severity': 'error',
+                    'message': 'Leads-to invariant "' + invariant['id'] + '" violated from ' + invariant['from'] + ': ' + outcome['violation']['reason'],
+                    'path': outcome['violation']['path'],
+                    'evidence': {'invariant': invariant},
+                })
+                break
+    undecided = any(f['code'] == 'A9_LEADS_TO_UNDECIDED' for f in findings)
+    if not findings:
+        detail = 'All leads-to invariants hold'
+    elif undecided:
+        detail = 'Leads-to undecided: the search budget ran out'
+    else:
+        detail = 'Leads-to findings: ' + str(len(findings))
+    return _check_result('A9', 'Leads-To', findings, detail)
 
 
 def _find_sequence_violation(model, max_states, invariant):
@@ -2928,7 +3248,7 @@ def run_verification(input_value, options=None):
         A6_resource_injection(model),
         A7_shortest_violations(model, max_states),
         A8_idempotent_replay(model, exploration),
-        A9_leads_to(model, exploration),
+        A9_leads_to(model, exploration, max_states),
         A10_sequence_order(model, max_states),
         A11_atomicity(model, max_states),
         A12_budget(model, max_states),
@@ -2960,7 +3280,7 @@ def run_verification(input_value, options=None):
                     'errors': len(before_errors),
                     'warnings': 0,
                     'checksRun': len(checks) + 1,
-                    'truncated': exploration['truncated'],
+                    'truncated': exploration['truncated'] or has_undecided_finding(checks),
                 },
                 'checks': list(checks) + [{
                     'id': 'BEFORE_MODEL',
@@ -3018,7 +3338,7 @@ def run_verification(input_value, options=None):
             'errors': errors,
             'warnings': warnings,
             'checksRun': len(checks),
-            'truncated': exploration['truncated'],
+            'truncated': exploration['truncated'] or has_undecided_finding(checks),
         },
         'checks': checks,
         'nextSteps': verification_next_steps(checks, narrative_coverage),

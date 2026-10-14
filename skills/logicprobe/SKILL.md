@@ -161,6 +161,24 @@ UML modelling variant (the task is to draw a flow, not to check a claim):
     → logicprobe_verify → the behavioural checks (S1-S8 / A1-A14)
 ```
 
+### Budgeting the Model Before You Run It
+
+Search cost is the declared domain times the number of states — and a declared range is
+not a bound on the search.
+
+- **`inc`/`dec` are never clamped to `min`/`max`.** The declaration is a property the
+  checks verify, not a limit the engine enforces. A counter whose guard does not pin it
+  ranges past its own declaration, so the reachable set is unbounded however small the
+  declared range looks; S8 reports that as `S8_DOMAIN_NOT_ENFORCED`.
+- **Bound a counter with a guard, not a narrower declaration.** `max: 4` with a guard
+  `retry < 4` closes the loop. `max: 4` alone does not.
+- **Say the budget before running**: values per variable x states. A product in the
+  10^5-and-up range will hit the cap and come back undecided.
+- **Model the check where the code performs it.** A cap check that lives inside the tick
+  handler is a guarded branch of the tick event, not a separate event: as a separate event
+  the environment can starve it, and the leads-to failure you then read is an artefact of
+  the model rather than a property of the code.
+
 ### Native dsh Tools
 
 | Tool | Covers |
@@ -202,6 +220,11 @@ Turn the verdict into an answer, never into a summary of `ok`:
 - `verdict: "fail"` — an error-severity finding exists, or the input was rejected (`MODEL_INVALID`). Say plainly that the claim is **not** verified, quote the counterexample path the finding carries, and only then propose a correction. Never describe a `fail` as "the tool ran successfully".
 
 Exit codes: `0` for `pass` / `pass_with_findings`, `2` for `fail`, a refusal, or an unreadable input. In DSH the native tools return the report as data — read `verdict`, and treat `errorCode`/`error` as the refusal path.
+
+`summary.truncated: true`, or a finding whose code ends in `_UNDECIDED`
+(`S7_UNDECIDED`, `A7_UNDECIDED`, `A9_LEADS_TO_UNDECIDED`, `D2_UNDECIDED`), means the search
+stopped before deciding. That is **not** a pass: name the invariant that went undecided,
+and say the property is undecided rather than reading the silence as success.
 
 ### Writing the Answer: Name the Finding, Not Its Code
 
@@ -437,6 +460,8 @@ If you catch yourself thinking any of these, stop:
 | "I'll check while implementing" | Check before the decision, not after. |
 | "Reasoning is enough" | Reasoning is not a run. One counter-example kills a universal claim. |
 | "The report passed, so the code is fine" | The report covers the model you gave it. Reconcile it, and say what you did not check. |
+| "The declared range limits the search" | The declaration is a property to verify. `inc`/`dec` are never clamped to it; only a guard bounds the value. |
+| "The check found nothing" | Read the verdict: `truncated` and `_UNDECIDED` mean the search stopped, not that the property holds. |
 
 ## Rules
 
@@ -449,4 +474,5 @@ If you catch yourself thinking any of these, stop:
 7. **Don't verify what the code already checks.** If the existing codebase has compile-time assertions, static analysis, or runtime checks for a property, cite those — don't re-verify in a model.
 8. **Hand a neighbouring domain to its own skill.** A diagram is a model, not evidence: modelling or auditing one belongs to `logicprobe-uml`. A concurrency claim is mined and routed, never proven here: that is `logicprobe-concurrency`. Schema, data invariants and migrations are `logicprobe-datamodel`. This skill keeps the doctrine and the behavioural checks.
 9. **Say what this does not prove.** For dimensions logicprobe does not verify — hard real time (deadlines, periods), preemptive concurrency, hybrid-control stability, probabilistic reliability, execution-cost budgets — route to the dedicated tool named in `references/gap-routing-guide.md`. `logicprobe_verify` reports carry the same routing as informational `coverageNotes` on matching models.
-10. **Write-site analysis is out of scope, and stays there.** "Only the ISR writes this flag", "one owner per register" — logicprobe verifies models and diagrams, not *who writes what in the source*. That claim needs a source-side AST/rule check or a static analyzer; this plugin's contribution is to flag the claim as unverified and route it (`logicprobe_concurrency_scan` does exactly that). Do not imply the diagram or the model settled it.
+10. **A declared range is a property, not a bound, and a capped search is not a pass.** `inc`/`dec` are never clamped to `min`/`max`; only a guard that pins the value bounds it. When a report is `truncated` or a check is `_UNDECIDED`, say the property is undecided and narrow the model — never report it as verified.
+11. **Write-site analysis is out of scope, and stays there.** "Only the ISR writes this flag", "one owner per register" — logicprobe verifies models and diagrams, not *who writes what in the source*. That claim needs a source-side AST/rule check or a static analyzer; this plugin's contribution is to flag the claim as unverified and route it (`logicprobe_concurrency_scan` does exactly that). Do not imply the diagram or the model settled it.

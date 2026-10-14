@@ -329,6 +329,31 @@ type NormalizedOptions = Required<Pick<VerificationOptions, 'maxStates' | 'maxPe
 
 const DEFAULT_MAX_STATES = 10_000
 const DEFAULT_MAX_PERMUTATION_EVENTS = 5
+/**
+ * Budget for the leads-to walk, as a multiple of `maxStates`. That walk is depth-first
+ * over run states, so `maxStates` does not bound it the way it bounds the breadth-first
+ * explorations: an `inc`/`dec` counter whose updates are not pinned by a guard has an
+ * unbounded reachable set, every run state is distinct, and the walk never revisits one.
+ * The budget is shared across every start state of a single check, so a wide search
+ * space cannot multiply it by the number of starts.
+ */
+const LEADS_TO_WALK_FACTOR = 20
+
+function leadsToWalkBudget(options: NormalizedOptions): number {
+  return Math.max(1_000, options.maxStates * LEADS_TO_WALK_FACTOR)
+}
+
+interface LeadsToWalk {
+  /** Nodes still allowed, shared across every start state of one check. */
+  remaining: number
+}
+
+interface LeadsToOutcome {
+  /** A run from the start state that reaches none of the targets. */
+  violation?: { path: PathStep[]; reason: string }
+  /** The budget ran out: the property is neither refuted nor proven. */
+  undecided: boolean
+}
 
 function stableStringify(value: unknown): string {
   if (value === null || typeof value !== 'object') return JSON.stringify(value)
@@ -466,6 +491,17 @@ export function verdictOfFindings(findings: Array<{ code: string; severity: stri
   const errors = findings.filter((finding) => finding.severity === 'error')
   const warnings = findings.filter((finding) => finding.severity === 'warning')
   return verdictOf(errors.length, warnings.length, errors[0]?.code)
+}
+
+/**
+ * Finding codes that mean "the search stopped before deciding", as opposed to "the
+ * model is wrong". They must reach `summary.truncated`, or a caller reading only that
+ * flag would take an unfinished search for a clean one.
+ */
+const UNDECIDED_CODES = new Set(['S7_UNDECIDED', 'A7_UNDECIDED', 'A9_LEADS_TO_UNDECIDED', 'D2_UNDECIDED'])
+
+function hasUndecidedFinding(checks: CheckResult[]): boolean {
+  return checks.some((check) => check.findings.some((finding) => UNDECIDED_CODES.has(finding.code)))
 }
 
 /**
@@ -1226,6 +1262,99 @@ function collectGuardConstants(model: LogicModelV1): number[] {
   return guardLeaves(model).filter((leaf) => typeof leaf.value === 'number').map((leaf) => leaf.value as number)
 }
 
+/** How a variable value prints in a message. Shared by every finding that quotes one. */
+function varValueLabel(value: VarValue): string {
+  return typeof value === 'boolean' ? (value ? 'true' : 'false') : String(value)
+}
+
+/** Deterministic value order: booleans first, then numbers ascending. */
+function compareVarValues(a: VarValue, b: VarValue): number {
+  const rank = (value: VarValue): [number, number] => typeof value === 'number' ? [1, value] : [0, value ? 1 : 0]
+  const [rankA, numberA] = rank(a)
+  const [rankB, numberB] = rank(b)
+  return rankA === rankB ? numberA - numberB : rankA - rankB
+}
+
+/**
+ * Values each variable can actually hold, as an over-approximation: `init` plus every
+ * `set` constant the model writes. `null` means "unknown", which is what an `inc` or
+ * `dec` update produces — the reachable set is then unbounded and nothing can be
+ * concluded from it.
+ *
+ * The union is taken across the whole model rather than per state, so the answer can
+ * only be too large, never too small. A guard this function calls dead is therefore
+ * dead in every state, while a live guard may still be unreachable in a particular one.
+ */
+function attainableValues(model: LogicModelV1): Map<string, Set<VarValue> | null> {
+  const attainable = new Map<string, Set<VarValue> | null>()
+  for (const variable of model.variables ?? []) attainable.set(variable.name, new Set<VarValue>([variable.init]))
+  for (const transition of model.transitions) {
+    for (const update of transition.updates ?? []) {
+      if (!attainable.has(update.variable)) continue
+      if (update.op === 'inc' || update.op === 'dec') {
+        attainable.set(update.variable, null)
+        continue
+      }
+      const values = attainable.get(update.variable)
+      if (values === null || values === undefined) continue
+      values.add(update.value ?? 0)
+    }
+  }
+  return attainable
+}
+
+/**
+ * Guarded transitions whose guard no reachable variable value can satisfy: the branch
+ * is dead code, and a model that relies on it is not the model the author wrote. This
+ * is the dual of S6_INCOMPLETE_GUARD — a group that never reaches a branch, rather
+ * than one that falls through every branch.
+ *
+ * The test runs over {@link attainableValues}, not over the declared domain: a guard
+ * on a variable the model only ever sets to one of its declared values is satisfiable
+ * on paper and dead in practice, which is exactly the defect worth reporting.
+ */
+function deadGuardFindings(model: LogicModelV1): Finding[] {
+  const attainable = attainableValues(model)
+  const findings: Finding[] = []
+  for (const [key, group] of groupTransitions(model)) {
+    const [from, event] = key.split('|')
+    for (const transition of group) {
+      if (transition.guard === undefined) continue
+      const names = [...new Set(guardVariables(transition.guard))].filter((name) => attainable.has(name)).sort()
+      if (names.length === 0) continue
+      const domains: Array<Set<VarValue>> = []
+      let known = true
+      for (const name of names) {
+        const values = attainable.get(name)
+        if (values === undefined || values === null || values.size === 0) { known = false; break }
+        domains.push(values)
+      }
+      if (!known) continue
+      let size = 1
+      for (const values of domains) size *= values.size
+      if (size > 10_000) continue
+      const assignment: Record<string, VarValue> = {}
+      const satisfiable = (index: number): boolean => {
+        if (index === names.length) return evalGuard(transition.guard!, assignment)
+        for (const value of [...domains[index]].sort(compareVarValues)) {
+          assignment[names[index]] = value
+          if (satisfiable(index + 1)) return true
+        }
+        return false
+      }
+      if (satisfiable(0)) continue
+      findings.push({
+        code: 'S6_DEAD_GUARD',
+        severity: 'warning',
+        message: from + ' + ' + event + ' has a guard that can never hold: ' + names.map((name) =>
+          name + ' is only ever ' + [...(attainable.get(name) as Set<VarValue>)].sort(compareVarValues).map(varValueLabel).join('/')).join(', ') + '. The branch is dead.',
+        evidence: { guard: transition.guard, attainable: names.map((name) => ({ variable: name, values: [...(attainable.get(name) as Set<VarValue>)].sort(compareVarValues).map(varValueLabel) })) },
+      })
+    }
+  }
+  return findings
+}
+
 interface GuardAnalysis {
   determinism: Finding[]
   completeness: Finding[]
@@ -1282,6 +1411,7 @@ function analyzeGuards(model: LogicModelV1): GuardAnalysis {
     }
     if (truncated) break
   }
+  completeness.push(...deadGuardFindings(model))
   return { determinism, completeness, truncated }
 }
 
@@ -1292,7 +1422,11 @@ function S4_determinism(model: LogicModelV1): CheckResult {
 
 function S6_guardCompleteness(model: LogicModelV1): CheckResult {
   const analysis = analyzeGuards(model)
-  return checkResult('S6', 'Guard Completeness', analysis.completeness, analysis.completeness.length === 0 ? 'All guard branches defined' : 'Guard findings: ' + analysis.completeness.length)
+  const dead = analysis.completeness.filter((finding) => finding.code === 'S6_DEAD_GUARD').length
+  const detail = analysis.completeness.length === 0
+    ? 'All guard branches defined'
+    : dead === analysis.completeness.length ? 'Dead guard branches: ' + dead : 'Guard findings: ' + analysis.completeness.length
+  return checkResult('S6', 'Guard Completeness', analysis.completeness, detail)
 }
 
 function S5_eventCompleteness(model: LogicModelV1): CheckResult {
@@ -1318,6 +1452,13 @@ interface InvariantViolation {
   invariant: InvariantSpec
   path: PathStep[]
   reason: string
+  /**
+   * The search hit its budget before deciding the property, so neither "holds" nor
+   * "violated" is proven. Every caller must report this as undecided rather than fold
+   * it into a pass: a cap that reads as a pass is the false green the report contract
+   * exists to prevent.
+   */
+  undecided?: boolean
 }
 
 /** Whether a `var-in-range` `when` scope selects this runtime state. */
@@ -1427,10 +1568,15 @@ function pathPropertyViolation(model: LogicModelV1, options: NormalizedOptions, 
   if (invariant.kind === 'leads-to') {
     const targets = new Set(leadsToTargets(invariant))
     const label = leadsToTargetLabel(invariant)
+    const budget = leadsToWalkBudget(options)
+    const walk: LeadsToWalk = { remaining: budget }
     for (const runtime of reachableRuntimeStates(model, options)) {
       if (runtime.state !== invariant.from) continue
-      const bad = findLeadsToBadPath(model, runtime, targets, label)
-      if (bad !== undefined) return { invariant, path: bad.path, reason: bad.reason }
+      const outcome = findLeadsToBadPath(model, runtime, targets, label, walk)
+      if (outcome.undecided) {
+        return { invariant, path: [], reason: 'the walk spent its budget of ' + budget + ' steps without finding a run that avoids ' + label + ', or proving that none exists', undecided: true }
+      }
+      if (outcome.violation !== undefined) return { invariant, path: outcome.violation.path, reason: outcome.violation.reason }
     }
     return undefined
   }
@@ -1503,14 +1649,22 @@ function runInvariants(model: LogicModelV1, options: NormalizedOptions, includeP
 
 function S7_invariants(model: LogicModelV1, options: NormalizedOptions): CheckResult {
   const violations = runInvariants(model, options)
-  const findings: Finding[] = violations.map((violation) => ({
+  const findings: Finding[] = violations.map((violation) => violation.undecided ? {
+    code: 'S7_UNDECIDED',
+    severity: 'warning' as const,
+    message: 'Invariant "' + violation.invariant.id + '" (' + violation.invariant.description + ') could not be decided: ' + violation.reason + '. Absence is not proven.',
+    evidence: { invariant: violation.invariant },
+  } : {
     code: 'S7_INVARIANT_VIOLATION',
-    severity: 'error',
+    severity: 'error' as const,
     message: 'Invariant "' + violation.invariant.id + '" (' + violation.invariant.description + ') violated: ' + violation.reason,
     path: violation.path,
     evidence: { invariant: violation.invariant },
-  }))
-  return checkResult('S7', 'Invariant Validity', findings, violations.length === 0 ? 'All invariants hold' : 'Invariant violations: ' + violations.length)
+  })
+  const undecided = findings.some((finding) => finding.code === 'S7_UNDECIDED')
+  return checkResult('S7', 'Invariant Validity', findings, violations.length === 0
+    ? 'All invariants hold'
+    : undecided && findings.every((finding) => finding.code === 'S7_UNDECIDED') ? 'Invariants undecided: the search budget ran out' : 'Invariant violations: ' + violations.length)
 }
 
 // ---------------------------------------------------------------------------
@@ -1869,6 +2023,14 @@ function A7_shortestViolations(model: LogicModelV1, options: NormalizedOptions):
   // found instead of claiming minimality.
   const violations = runInvariants(model, options, true)
   const findings: Finding[] = violations.map((violation) => {
+    if (violation.undecided) {
+      return {
+        code: 'A7_UNDECIDED',
+        severity: 'warning' as const,
+        message: 'Invariant "' + violation.invariant.id + '" could not be decided: ' + violation.reason + '. Absence is not proven, so there is no shortest counterexample to report.',
+        evidence: { invariant: violation.invariant.id },
+      }
+    }
     const pathLength = violation.path.length
     const message = isPathPropertyInvariant(violation.invariant)
       ? 'Invariant "' + violation.invariant.id + '" violated: ' + violation.reason
@@ -2051,9 +2213,14 @@ function D2_invariantContinuity(before: LogicModelV1, after: LogicModelV1, optio
       ? pathPropertyViolation(after, options, mapped)
       : shortestViolationForInvariant(after, options, mapped)
     if (violation !== undefined) {
-      findings.push({
+      findings.push(violation.undecided ? {
+        code: 'D2_UNDECIDED',
+        severity: 'warning' as const,
+        message: 'BEFORE invariant "' + invariant.id + '" could not be re-decided against AFTER: ' + violation.reason + '. Absence is not proven.',
+        evidence: { beforeInvariant: invariant, afterInvariant: mapped },
+      } : {
         code: 'D2_INVARIANT_REGRESSION',
-        severity: 'error',
+        severity: 'error' as const,
         message: 'BEFORE invariant "' + invariant.id + '" no longer holds in AFTER: ' + violation.reason,
         path: violation.path,
         evidence: { beforeInvariant: invariant, afterInvariant: mapped },
@@ -2218,6 +2385,99 @@ function A8_idempotentReplay(model: LogicModelV1, exploration: Exploration): Che
   }
   return checkResult('A8', 'Idempotent Replay', findings, findings.length === 0 ? 'Idempotent events are replay-safe' : 'Idempotent replay findings: ' + findings.length)
 }
+/**
+ * Whether the guard proves `variable` stays at or below `bound` wherever it holds.
+ *
+ * Deliberately conservative in one direction only: a guard this function cannot read
+ * answers `false`, so an unreadable guard is reported as "not proven" rather than as
+ * "enforced". A conjunction bounds the value if any conjunct does; a disjunction has to
+ * bound it on every branch; a negation is never reasoned about.
+ */
+function guardImpliesUpperBound(guard: GuardNode | undefined, variable: string, bound: number): boolean {
+  if (guard === undefined) return false
+  if ('variable' in guard) {
+    if (guard.variable !== variable || typeof guard.value !== 'number') return false
+    if (guard.op === '<') return guard.value - 1 <= bound
+    if (guard.op === '<=' || guard.op === '==') return guard.value <= bound
+    return false
+  }
+  if ('all' in guard) return guard.all.some((child) => guardImpliesUpperBound(child, variable, bound))
+  if ('any' in guard) return guard.any.every((child) => guardImpliesUpperBound(child, variable, bound))
+  return false
+}
+
+/** Mirror of {@link guardImpliesUpperBound} for the lower bound. */
+function guardImpliesLowerBound(guard: GuardNode | undefined, variable: string, bound: number): boolean {
+  if (guard === undefined) return false
+  if ('variable' in guard) {
+    if (guard.variable !== variable || typeof guard.value !== 'number') return false
+    if (guard.op === '>') return guard.value + 1 >= bound
+    if (guard.op === '>=' || guard.op === '==') return guard.value >= bound
+    return false
+  }
+  if ('all' in guard) return guard.all.some((child) => guardImpliesLowerBound(child, variable, bound))
+  if ('any' in guard) return guard.any.every((child) => guardImpliesLowerBound(child, variable, bound))
+  return false
+}
+
+/**
+ * Whether the model's own declarations about a variable hold against what its
+ * transitions do. `inc` and `dec` are never clamped to `min`/`max` — the declared
+ * range is a property to check, not a bound on the search — so a counter whose guard
+ * does not pin it ranges past its own declaration, and the reachable set is unbounded
+ * however narrow the declaration looks.
+ *
+ * Reporting the declaration rather than silently clamping is deliberate. Clamping would
+ * delete the very states a range violation is witnessed by, turning a counterexample
+ * into a false pass.
+ */
+function declaredDomainFindings(model: LogicModelV1): Finding[] {
+  const findings: Finding[] = []
+  for (const transition of model.transitions) {
+    for (const update of transition.updates ?? []) {
+      const variable = (model.variables ?? []).find((entry) => entry.name === update.variable)
+      if (variable === undefined) continue
+      const delta = typeof update.value === 'number' ? update.value : 1
+      const at = transition.from + ' + ' + transition.event
+      if (update.op === 'inc' && variable.max !== undefined && !guardImpliesUpperBound(transition.guard, variable.name, variable.max - delta)) {
+        findings.push({
+          code: 'S8_DOMAIN_NOT_ENFORCED',
+          severity: 'warning',
+          message: at + ' increments ' + variable.name + ', but ' + variable.name + ' declares max ' + variable.max + ' and no guard keeps it there: the declared range is not a bound on reachable values.',
+          evidence: { variable: variable.name, declaredMax: variable.max, transition: at },
+        })
+      }
+      if (update.op === 'dec' && variable.min !== undefined && !guardImpliesLowerBound(transition.guard, variable.name, variable.min + delta)) {
+        findings.push({
+          code: 'S8_DOMAIN_NOT_ENFORCED',
+          severity: 'warning',
+          message: at + ' decrements ' + variable.name + ', but ' + variable.name + ' declares min ' + variable.min + ' and no guard keeps it there: the declared range is not a bound on reachable values.',
+          evidence: { variable: variable.name, declaredMin: variable.min, transition: at },
+        })
+      }
+      if (update.op === 'set' && typeof update.value === 'number') {
+        if (variable.min !== undefined && update.value < variable.min) {
+          findings.push({
+            code: 'S8_DOMAIN_SET_OUTSIDE',
+            severity: 'error',
+            message: at + ' sets ' + variable.name + ' to ' + update.value + ', below its declared min ' + variable.min + '.',
+            evidence: { variable: variable.name, value: update.value, declaredMin: variable.min },
+          })
+        }
+        if (variable.max !== undefined && update.value > variable.max) {
+          findings.push({
+            code: 'S8_DOMAIN_SET_OUTSIDE',
+            severity: 'error',
+            message: at + ' sets ' + variable.name + ' to ' + update.value + ', above its declared max ' + variable.max + '.',
+            evidence: { variable: variable.name, value: update.value, declaredMax: variable.max },
+          })
+        }
+      }
+    }
+  }
+  return findings
+}
+
 function S8_monotonicVariables(model: LogicModelV1): CheckResult {
   const findings: Finding[] = []
   for (const variable of model.variables ?? []) {
@@ -2235,7 +2495,8 @@ function S8_monotonicVariables(model: LogicModelV1): CheckResult {
       }
     }
   }
-  return checkResult('S8', 'Monotonic Variables', findings, findings.length === 0 ? 'Monotonic variables are respected' : 'Monotonic findings: ' + findings.length)
+  findings.push(...declaredDomainFindings(model))
+  return checkResult('S8', 'Variable Declarations', findings, findings.length === 0 ? 'Variable declarations are respected' : 'Variable declaration findings: ' + findings.length)
 }
 
 /**
@@ -2271,22 +2532,45 @@ function leadsToTargetLabel(invariant: Extract<InvariantSpec, { kind: 'leads-to'
  * (two branches rejoining) is acyclic and must pass, while a genuine cycle must not.
  * A run is identified by its state plus its variable values, so the same state id
  * with different values is a different node.
+ *
+ * Two properties keep the walk from taking the host down, and both are load-bearing:
+ * the walk is **budgeted**, and it stores a **parent link** per node instead of a copy
+ * of the path. Without the budget an unbounded counter makes the run graph infinite, so
+ * the three colours above never repeat a key and the walk never returns; without the
+ * parent link every frame retains its own copy of the path, which grows the walk's
+ * memory quadratically in its depth. Either one alone turns "the model is wrong" into
+ * an out-of-memory abort, which is the failure this function must not have.
+ *
+ * An exhausted budget is reported as `undecided`, never as `undefined`: a walk that
+ * did not finish has not proven that every run reaches a target.
  */
-function findLeadsToBadPath(model: LogicModelV1, start: RuntimeState, targets: Set<string>, label: string): { path: PathStep[]; reason: string } | undefined {
-  if (targets.has(start.state)) return undefined
+function findLeadsToBadPath(model: LogicModelV1, start: RuntimeState, targets: Set<string>, label: string, walk: LeadsToWalk): LeadsToOutcome {
+  if (targets.has(start.state)) return { undecided: false }
   const GRAY = 1
   const BLACK = 2
   interface LeadFrame {
     runtime: RuntimeState
-    path: PathStep[]
+    parent: LeadFrame | undefined
+    step: PathStep | undefined
     /** Outgoing steps, filled on first expansion; `undefined` means "not expanded yet". */
     nexts: Array<{ next: RuntimeState; event: string }> | undefined
     index: number
   }
+  const pathOf = (frame: LeadFrame): PathStep[] => {
+    const steps: PathStep[] = []
+    let node: LeadFrame | undefined = frame
+    while (node !== undefined && node.step !== undefined) {
+      steps.push(node.step)
+      node = node.parent
+    }
+    return steps.reverse()
+  }
   const color = new Map<string, number>()
-  const stack: LeadFrame[] = [{ runtime: start, path: [], nexts: undefined, index: 0 }]
+  const stack: LeadFrame[] = [{ runtime: start, parent: undefined, step: undefined, nexts: undefined, index: 0 }]
   color.set(runtimeKey(start), GRAY)
   while (stack.length > 0) {
+    if (walk.remaining <= 0) return { undecided: true }
+    walk.remaining -= 1
     const frame = stack[stack.length - 1]
     if (frame.nexts === undefined) {
       const nexts: Array<{ next: RuntimeState; event: string }> = []
@@ -2294,7 +2578,7 @@ function findLeadsToBadPath(model: LogicModelV1, start: RuntimeState, targets: S
         for (const next of stepRuntime(model, frame.runtime, event)) nexts.push({ next, event })
       }
       frame.nexts = nexts
-      if (nexts.length === 0) return { path: frame.path, reason: 'Dead end before target ' + label }
+      if (nexts.length === 0) return { violation: { path: pathOf(frame), reason: 'Dead end before target ' + label }, undecided: false }
     }
     if (frame.index >= frame.nexts.length) {
       color.set(runtimeKey(frame.runtime), BLACK)
@@ -2307,37 +2591,51 @@ function findLeadsToBadPath(model: LogicModelV1, start: RuntimeState, targets: S
     if (targets.has(next.state)) continue
     const key = runtimeKey(next)
     const seen = color.get(key)
-    if (seen === GRAY) return { path: [...frame.path, step], reason: 'Cycle avoids target ' + label }
+    if (seen === GRAY) return { violation: { path: [...pathOf(frame), step], reason: 'Cycle avoids target ' + label }, undecided: false }
     if (seen === BLACK) continue
     color.set(key, GRAY)
-    stack.push({ runtime: next, path: [...frame.path, step], nexts: undefined, index: 0 })
+    stack.push({ runtime: next, parent: frame, step, nexts: undefined, index: 0 })
   }
   // Every branch either reached a target or rejoined a branch that did.
-  return undefined
+  return { undecided: false }
 }
 
-function A9_leadsTo(model: LogicModelV1, exploration: Exploration): CheckResult {
+function A9_leadsTo(model: LogicModelV1, exploration: Exploration, options: NormalizedOptions): CheckResult {
   const findings: Finding[] = []
   for (const invariant of model.invariants ?? []) {
     if (invariant.kind !== 'leads-to') continue
     const targets = new Set(leadsToTargets(invariant))
     const label = leadsToTargetLabel(invariant)
+    const budget = leadsToWalkBudget(options)
+    const walk: LeadsToWalk = { remaining: budget }
     for (const runtime of exploration.reachable) {
       if (runtime.state !== invariant.from) continue
-      const bad = findLeadsToBadPath(model, runtime, targets, label)
-      if (bad !== undefined) {
+      const outcome = findLeadsToBadPath(model, runtime, targets, label, walk)
+      if (outcome.undecided) {
+        findings.push({
+          code: 'A9_LEADS_TO_UNDECIDED',
+          severity: 'warning',
+          message: 'Leads-to invariant "' + invariant.id + '" is undecided: the walk spent its budget of ' + budget + ' steps from ' + invariant.from + ' without finding a run that avoids ' + label + ', or proving that none exists. Absence is not proven.',
+          evidence: { invariant },
+        })
+        break
+      }
+      if (outcome.violation !== undefined) {
         findings.push({
           code: 'A9_LEADS_TO_VIOLATION',
           severity: 'error',
-          message: 'Leads-to invariant "' + invariant.id + '" violated from ' + invariant.from + ': ' + bad.reason,
-          path: bad.path,
+          message: 'Leads-to invariant "' + invariant.id + '" violated from ' + invariant.from + ': ' + outcome.violation.reason,
+          path: outcome.violation.path,
           evidence: { invariant },
         })
         break
       }
     }
   }
-  return checkResult('A9', 'Leads-To', findings, findings.length === 0 ? 'All leads-to invariants hold' : 'Leads-to findings: ' + findings.length)
+  const undecided = findings.some((finding) => finding.code === 'A9_LEADS_TO_UNDECIDED')
+  return checkResult('A9', 'Leads-To', findings, findings.length === 0
+    ? 'All leads-to invariants hold'
+    : undecided ? 'Leads-to undecided: the search budget ran out' : 'Leads-to findings: ' + findings.length)
 }
 
 function findSequenceViolation(model: LogicModelV1, options: NormalizedOptions, invariant: Extract<InvariantSpec, { kind: 'sequence' }>): InvariantViolation | undefined {
@@ -2936,7 +3234,7 @@ export function runVerification(input: unknown, options: VerificationOptions = {
     A6_resourceInjection(model),
     A7_shortestViolations(model, normalized),
     A8_idempotentReplay(model, exploration),
-    A9_leadsTo(model, exploration),
+    A9_leadsTo(model, exploration, normalized),
     A10_sequenceOrder(model, normalized),
     A11_atomicity(model, normalized),
     A12_budget(model, normalized),
@@ -2965,7 +3263,7 @@ export function runVerification(input: unknown, options: VerificationOptions = {
           errors: beforeValidation.errors.length,
           warnings: 0,
           checksRun: checks.length + 1,
-          truncated: exploration.truncated,
+          truncated: exploration.truncated || hasUndecidedFinding(checks),
         },
         checks: [
           ...checks,
@@ -3025,7 +3323,7 @@ export function runVerification(input: unknown, options: VerificationOptions = {
       errors,
       warnings,
       checksRun: checks.length,
-      truncated: exploration.truncated,
+      truncated: exploration.truncated || hasUndecidedFinding(checks),
     },
     checks,
     nextSteps: verificationNextSteps(checks, narrativeCoverage),

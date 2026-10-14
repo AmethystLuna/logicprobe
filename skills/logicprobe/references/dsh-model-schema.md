@@ -225,6 +225,17 @@ A guard is exactly one of:
 
 `inc`/`dec` default to 1 when `value` is omitted. `set` defaults to 0.
 
+`inc` and `dec` are **never clamped** to the variable's declared `min`/`max`. The declared
+range is a property the checks verify (S7 `var-in-range`), not a bound on the search: a
+counter whose guard does not pin it ranges past its own declaration, so the reachable set
+is unbounded however narrow the declaration looks. S8 reports that as
+`S8_DOMAIN_NOT_ENFORCED` and names the transition, rather than clamping the value and
+deleting the states a range violation is witnessed by. A `set` constant outside the
+declared range contradicts the declaration and is `S8_DOMAIN_SET_OUTSIDE` (error).
+
+To bound a counter, add a guard that pins it — `"max": 4` with a guard
+`{ "variable": "retry", "op": "<", "value": 4 }` — not a narrower `max`.
+
 ## Invariants
 
 Every invariant carries `id` and **`description`** — both required strings — plus a
@@ -396,9 +407,14 @@ The report's `comparison` object includes both model hashes, state/transition co
 
 List events that must be idempotent in `idempotentEvents`. For every reachable state, applying the event twice must produce the same state as applying it once. This is useful for retries, webhook redelivery, and migration replay.
 
-## Advanced constraints (S8, A9-A14)
+## Advanced constraints (S6, S8, A9-A14)
 
-- **S8 Monotonic Variables**: declare `monotonic: "inc"|"dec"` on a variable; updates must not move in the opposite direction.
+- **S6 Guard Completeness** also reports `S6_DEAD_GUARD`: a guarded branch no reachable
+  variable value can satisfy is a branch that can never fire. The test runs over the
+  values the model can produce — each variable's `init` plus every `set` constant — not
+  over the declared domain, so a guard on a value the model never writes is satisfiable on
+  paper and dead in practice.
+- **S8 Variable Declarations**: declare `monotonic: "inc"|"dec"` on a variable; updates must not move in the opposite direction. The same check reads the declared range: `S8_DOMAIN_NOT_ENFORCED` reports an `inc`/`dec` no guard keeps inside `min`/`max`, and `S8_DOMAIN_SET_OUTSIDE` (error) reports a `set` constant outside it.
 - **A9 Leads-To**: `{ kind: "leads-to", from, to }` — every path from `from` must eventually reach `to`. `to` is one state id or a non-empty array of state ids for "reach any one of these"; a duplicated member is a validation error rather than a shorthand. Either way the property stays universal: one branch that loops forever, or that stops before every target, refutes it.
 - **A10 Sequence**: `{ kind: "sequence", events }` — events must appear in order.
 - **A11 Atomicity**: `{ kind: "atomicity", events, commit, rollback? }` — once an atomic event starts, the machine must reach commit/rollback before leaving the atomic scope or terminating.
@@ -408,7 +424,8 @@ List events that must be idempotent in `idempotentEvents`. For every reachable s
 
 ## Limits
 
-- State-space exploration caps at `maxStates` (default 10000); larger guards/domains may report truncation instead of a false pass.
+- Each breadth-first exploration caps at `maxStates` (default 10000). The leads-to walk caps at twenty times that, **shared across every start state of one check**: it is depth-first over run states, and an unbounded counter makes every one of them distinct, so it has no shorter bound available.
+- A cap that bites is **reported, never silently passed**. The report sets `summary.truncated`, and the check that stopped carries a finding whose code ends in `_UNDECIDED` — `S7_UNDECIDED`, `A7_UNDECIDED`, `A9_LEADS_TO_UNDECIDED`, `D2_UNDECIDED`. An undecided check has proven neither the violation nor its absence; read it as "not decided", never as a pass.
 - A3 samples the first `maxPermutationEvents` events (default 5).
 - The engine is a finite-state model checker. It cannot prove properties of the real implementation; follow with code-level review.
 - `cost` values are modeler-provided static labels — A12 verifies against them; real execution time/WCET needs binary-level timing analysis.

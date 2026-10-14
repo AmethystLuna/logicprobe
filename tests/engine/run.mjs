@@ -1777,6 +1777,109 @@ function compositionChecks(report) {
   }
 }
 
+// The 2026-10-14 host OOM. An unbounded counter plus a leads-to invariant: \`maxStates\`
+// cannot bound that walk, because it is depth-first over run states rather than
+// breadth-first over the state graph, and every run state of a counter is distinct. The
+// walk must stop inside its own budget and say that it stopped, instead of growing the
+// heap until the host process aborts.
+async function runIncidentRegressionTests() {
+  const unbounded = {
+    schemaVersion: 1,
+    init: 'A',
+    states: [{ id: 'A' }, { id: 'B', terminal: true }],
+    transitions: [{ from: 'A', event: 'tick', to: 'A', updates: [{ variable: 'x', op: 'inc', value: 1 }] }],
+    variables: [{ name: 'x', kind: 'integer', init: 0, min: 0, max: 3 }],
+    invariants: [{ id: 'a-must-reach-b', description: 'A must reach B', kind: 'leads-to', from: 'A', to: ['B'] }],
+  }
+  const started = Date.now()
+  const report = runVerification(unbounded, { maxStates: 10 })
+  const elapsed = Date.now() - started
+  if (elapsed > 5000) throw new Error('the leads-to walk must stay inside its budget; took ' + elapsed + 'ms')
+  const a9 = report.checks.find((check) => check.id === 'A9')
+  if (a9 === undefined) throw new Error('A9 must always be present')
+  if (!a9.findings.some((finding) => finding.code === 'A9_LEADS_TO_UNDECIDED')) {
+    throw new Error('an exhausted leads-to walk must report A9_LEADS_TO_UNDECIDED, got ' + JSON.stringify(a9.findings.map((finding) => finding.code)))
+  }
+  if (a9.findings.some((finding) => finding.code === 'A9_LEADS_TO_VIOLATION')) {
+    throw new Error('a walk that ran out of budget must not be reported as a violation')
+  }
+  if (a9.detail.includes('hold')) throw new Error('an undecided check must not claim the invariant holds: ' + a9.detail)
+  if (report.summary.truncated !== true) throw new Error('an undecided search must set summary.truncated')
+  const a7 = report.checks.find((check) => check.id === 'A7')
+  if (!a7.findings.some((finding) => finding.code === 'A7_UNDECIDED')) {
+    throw new Error('A7 must report A7_UNDECIDED instead of inventing a counterexample')
+  }
+  assertNoUndefinedValues(report)
+
+  // The budget is a cap, not a refusal to conclude: a finite run graph is still decided,
+  // and its counterexample is still reported.
+  const finite = {
+    schemaVersion: 1,
+    init: 'A',
+    states: [{ id: 'A' }, { id: 'B' }, { id: 'C' }],
+    transitions: [
+      { from: 'A', event: 'go', to: 'B' },
+      { from: 'A', event: 'loop', to: 'C' },
+      { from: 'C', event: 'loop', to: 'C' },
+    ],
+    invariants: [{ id: 'l1', description: 'A leads to B', kind: 'leads-to', from: 'A', to: ['B'] }],
+  }
+  const decided = runVerification(finite).checks.find((check) => check.id === 'A9')
+  if (!decided.findings.some((finding) => finding.code === 'A9_LEADS_TO_VIOLATION')) {
+    throw new Error('a finite counterexample must still be reported, got ' + JSON.stringify(decided.findings.map((finding) => finding.code)))
+  }
+
+  // A declared range that no guard enforces is reported, not silently clamped: clamping
+  // would delete the states a range violation is witnessed by.
+  const loose = {
+    schemaVersion: 1,
+    init: 'A',
+    states: [{ id: 'A' }],
+    transitions: [{ from: 'A', event: 'tick', to: 'A', updates: [{ variable: 'depth', op: 'inc' }] }],
+    variables: [{ name: 'depth', kind: 'integer', init: 0, min: 0, max: 4 }],
+  }
+  const looseS8 = runVerification(loose).checks.find((check) => check.id === 'S8')
+  if (!looseS8.findings.some((finding) => finding.code === 'S8_DOMAIN_NOT_ENFORCED')) {
+    throw new Error('an unguarded inc past a declared max must be reported')
+  }
+  const pinned = { ...loose, transitions: [{ from: 'A', event: 'tick', to: 'A', guard: { variable: 'depth', op: '<', value: 4 }, updates: [{ variable: 'depth', op: 'inc' }] }] }
+  if (runVerification(pinned).checks.find((check) => check.id === 'S8').findings.some((finding) => finding.code === 'S8_DOMAIN_NOT_ENFORCED')) {
+    throw new Error('a guard that proves the bound must silence S8_DOMAIN_NOT_ENFORCED')
+  }
+  const outOfRange = { ...loose, transitions: [{ from: 'A', event: 'reset', to: 'A', updates: [{ variable: 'depth', op: 'set', value: 9 }] }] }
+  if (!runVerification(outOfRange).checks.find((check) => check.id === 'S8').findings.some((finding) => finding.code === 'S8_DOMAIN_SET_OUTSIDE')) {
+    throw new Error('a set above the declared max must be reported')
+  }
+
+  // A guard on a value the model never produces is dead code, even though the declared
+  // domain contains it. The declared domain is what S4/S6 enumerate; reachability is
+  // what decides whether the branch can ever fire.
+  const deadGuard = {
+    schemaVersion: 1,
+    init: 'A',
+    states: [{ id: 'A' }, { id: 'B', terminal: true }],
+    transitions: [
+      { from: 'A', event: 'read', to: 'A', guard: { variable: 'code', op: '==', value: 1 }, updates: [{ variable: 'code', op: 'set', value: 1 }] },
+      { from: 'A', event: 'read', to: 'B', guard: { variable: 'code', op: '==', value: 2 } },
+    ],
+    variables: [{ name: 'code', kind: 'integer', init: 1, min: 1, max: 2 }],
+  }
+  if (!runVerification(deadGuard).checks.find((check) => check.id === 'S6').findings.some((finding) => finding.code === 'S6_DEAD_GUARD')) {
+    throw new Error('a guard on a value no update produces must be reported as a dead branch')
+  }
+  const liveGuard = {
+    ...deadGuard,
+    transitions: [
+      { from: 'A', event: 'read', to: 'A', guard: { variable: 'code', op: '==', value: 1 }, updates: [{ variable: 'code', op: 'set', value: 2 }] },
+      { from: 'A', event: 'read', to: 'B', guard: { variable: 'code', op: '==', value: 2 } },
+    ],
+  }
+  if (runVerification(liveGuard).checks.find((check) => check.id === 'S6').findings.some((finding) => finding.code === 'S6_DEAD_GUARD')) {
+    throw new Error('a satisfiable guard must not be reported as dead')
+  }
+  console.log('PASS incident-regression')
+}
+
 async function runCompositionExplainTests() {
   const stuck = { schemaVersion: 1, init: 'S', states: [{ id: 'S' }], transitions: [] }
   const waiter = { schemaVersion: 1, init: 'W0', states: [{ id: 'W0' }, { id: 'W1', terminal: true }], transitions: [{ from: 'W0', event: 'req', to: 'W1' }] }
@@ -1872,6 +1975,8 @@ async function runCompositionExplainTests() {
 
   console.log('PASS composition-explain')
 }
+
+await runIncidentRegressionTests()
 
 await runCompositionExplainTests()
 

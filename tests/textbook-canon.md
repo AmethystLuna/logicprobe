@@ -19,6 +19,9 @@ checks and the legacy-gap coverage of the older ones.
 | A6 | semaphore take with no timeout handler | tests/engine/run.mjs textbook-canon (semTake) |
 | A8 | webhook redelivery without dedupe | tests/engine/run.mjs textbook-canon (webhook), idempotent-replay |
 | A9 | leads-to loop that avoids the target | tests/engine/run.mjs advanced-constraints (leadsBad) |
+| A9 | unbounded counter: the leads-to walk spends its budget and reports undecided, not passed | tests/engine/run.mjs incident-regression |
+| S6 | guard on a value the model never writes (dead branch) | tests/engine/run.mjs incident-regression |
+| S8 | counter declared `max: 4` and incremented with no pinning guard | tests/engine/run.mjs incident-regression |
 | A10 | two-phase commit: commit before prepare | tests/engine/fixtures/twophase-order.json |
 | A11 | atomic group left without commit/rollback | tests/engine/run.mjs advanced-constraints (atomicBad) |
 | A12 | bounded retry within budget vs unbounded retry (classic missing counter) | tests/engine/fixtures/retry-bounded.json, retry-unbounded.json |
