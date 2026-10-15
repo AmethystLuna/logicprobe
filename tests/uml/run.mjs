@@ -740,3 +740,32 @@ if (umlTool !== undefined) {
 
 if (failures > 0) { console.log('uml tests failed:', failures); process.exit(1) }
 console.log('all uml tests passed')
+
+// ------------------------------------------------- a family without a keyword --
+
+// The defect this refusal closes: the everyday PlantUML use case syntax used to come
+// back as a two-state machine with no finding at all. The diagram has its own model,
+// and the plugin that reads it is named in the refusal.
+test('parse: a use case diagram is refused by name, not read as a state machine', () => {
+  const dialects = [
+    ['@startuml', ':User: --> (Login)', '@enduml'].join('\n'),
+    ['@startuml', '(Login) as (L)', 'User --> L', '@enduml'].join('\n'),
+    ['@startuml', ':User:', ':Admin:', ':User: --> :Admin:', '@enduml'].join('\n'),
+  ]
+  for (const text of dialects) {
+    let refusal
+    try { parseUml(text) } catch (error) { refusal = error }
+    if (!(refusal instanceof UmlError)) throw new Error('expected a UmlError refusal, got ' + String(refusal))
+    if (refusal.code !== 'UML_NOT_A_STATE_DIAGRAM') throw new Error('refusal code: ' + refusal.code)
+    if (!refusal.message.includes('use case diagram')) throw new Error('the refusal must name the family: ' + refusal.message)
+    if (!refusal.message.includes('dsh-model-everything')) throw new Error('the refusal must name the plugin that reads it: ' + refusal.message)
+  }
+  let mermaidRefusal
+  try { parseUml(['usecase-beta', '  actor Customer', '  Customer --> Checkout'].join('\n')) } catch (error) { mermaidRefusal = error }
+  if (!(mermaidRefusal instanceof UmlError)) throw new Error('expected a UmlError refusal for usecase-beta')
+  if (mermaidRefusal.code !== 'UML_NOT_A_STATE_DIAGRAM') throw new Error('refusal code: ' + mermaidRefusal.code)
+  if (!mermaidRefusal.message.includes('usecase-beta')) throw new Error('the refusal must name the family: ' + mermaidRefusal.message)
+  // The fix must not touch a state diagram that merely carries a parenthesis somewhere.
+  const state = parseUml(['@startuml', '[*] --> A', 'A --> B : go', 'B --> [*]', '@enduml'].join('\n'))
+  if (state.model.states.length !== 2) throw new Error('the refusal must not catch state diagrams')
+})

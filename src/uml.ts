@@ -697,7 +697,7 @@ interface DiagramLine {
  * comes out would be presented as if it described the file.
  */
 const MERMAID_OTHER_FAMILIES: readonly string[] = [
-  'classDiagram', 'erDiagram', 'gantt', 'pie', 'journey', 'mindmap', 'gitGraph',
+  'classDiagram', 'erDiagram', 'gantt', 'pie', 'journey', 'mindmap', 'gitGraph', 'usecase-beta',
   'C4Context', 'C4Container', 'C4Component', 'C4Dynamic', 'C4Deployment',
   'requirementDiagram', 'timeline', 'quadrantChart', 'sankey-beta', 'block-beta',
   'packet-beta', 'architecture-beta', 'radar-beta', 'treemap-beta', 'xychart-beta',
@@ -720,6 +720,13 @@ function detectNotation(text: string): UmlNotation {
   throw new UmlError('cannot tell whether this is Mermaid or PlantUML text: expected `stateDiagram-v2` / `flowchart` / `sequenceDiagram`, or `@startuml`')
 }
 
+/**
+ * PlantUML use case syntax that carries no keyword: a colon actor, or a parenthesised
+ * use case, with an optional alias and an optional relation on the same line.
+ * `:User: --> (Login)` and `(Login) as (L)` are the whole header of such a file.
+ */
+const USECASE_SYNTAX = /^[ \t]*(?::[^:\n]+:(?:[ \t]+as[ \t]+[A-Za-z_][A-Za-z0-9_]*)?|\([^()\n]+\)(?:[ \t]+as[ \t]+\(?[^()\n]+\)?)?)[ \t]*(?:$|-->|->|\.\.>|\.>|--\|>|<\|--|--)/m
+
 function detectDiagram(text: string): 'state' | 'activity' | 'sequence' {
   if (/^\s*stateDiagram/m.test(text)) return 'state'
   if (/^\s*(flowchart|graph)\b/m.test(text)) return 'activity'
@@ -732,6 +739,13 @@ function detectDiagram(text: string): 'state' | 'activity' | 'sequence' {
     // PlantUML declares the diagram kind by its body; the state keyword is the only
     // structural one logicprobe emits, everything else in that family is a state diagram too.
     if (/^\s*participant\b/m.test(text) || /->>\s*/.test(text)) return 'sequence'
+    // A use case diagram has no keyword header at all. The state parser below would read
+    // its arrows as transitions and return a plausible machine with no finding, so the
+    // family is refused by name. Its own model, and the tool that reads it, live in the
+    // dsh-model-everything plugin.
+    if (USECASE_SYNTAX.test(text)) {
+      throw new UmlError('this text is a use case diagram (`:Actor: --> (UseCase)`, `(UseCase) as (U)`), which this plugin does not model: it models state machines and flows, and reading it as one returns a machine the diagram never drew. The dsh-model-everything plugin renders, reads and reviews use case diagrams; keep this diagram as its own view.', 'UML_NOT_A_STATE_DIAGRAM')
+    }
     return 'state'
   }
   throw new UmlError('cannot tell which diagram kind this text declares')

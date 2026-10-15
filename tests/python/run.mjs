@@ -395,6 +395,13 @@ for (const entry of umlCorpus.slice(0, 2)) {
   })
 }
 
+check('use case refusal parity (refused by name, with the same message)', () => {
+  const plantuml = ['@startuml', ':User: --> (Login)', '(Login) .> (Validate) : include', '@enduml'].join('\n')
+  compareUml(() => parseUml(plantuml), ['uml-parse', writeDiagram(plantuml)])
+  const mermaid = ['usecase-beta', '  actor Customer', '  Customer --> Checkout'].join('\n')
+  compareUml(() => parseUml(mermaid), ['uml-parse', writeDiagram(mermaid)])
+})
+
 // ---- view x intent entry check parity ---------------------------------------
 // A refusal is a report, so both engines have to print the same code and the same
 // message: the entry check is where a caller learns their view cannot serve their

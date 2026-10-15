@@ -18,6 +18,11 @@ logicprobe 核验声称与实物是否一致。事实类对着源码查。行为
 
 **跨平台**：支持 Claude Code、Codex CLI、Cursor、Kimi CLI、OpenCode、ZCode。技能基于 [Agent Skills](https://agentskills.io) 开放标准。
 
+> **用例图与其它 UML 图族**：本插件只建模状态机与流程。用例图（`:Actor: --> (UseCase)`）、类图、
+> 组件图、部署图等会被**按名拒绝**，不会被误读成状态机。需要完整 14 类 UML 2.5 图族的
+> render/parse/review 时，用 [dsh-model-everything](https://github.com/AmethystLuna/dsh-model-everything)：
+> 它承接了本插件的全部图能力（记号语法引擎、能力矩阵、用例与结构族模块）。
+
 ## 功能
 
 | 阶段 | 内容 |

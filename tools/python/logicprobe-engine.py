@@ -4661,7 +4661,7 @@ _PLANTUML_OTHER_CONSTRUCT_RE = re.compile(
 
 # Mermaid diagram-family headers that are neither a state machine nor a flow.
 _MERMAID_OTHER_FAMILIES = (
-    'classDiagram', 'erDiagram', 'gantt', 'pie', 'journey', 'mindmap', 'gitGraph',
+    'classDiagram', 'erDiagram', 'gantt', 'pie', 'journey', 'mindmap', 'gitGraph', 'usecase-beta',
     'C4Context', 'C4Container', 'C4Component', 'C4Dynamic', 'C4Deployment',
     'requirementDiagram', 'timeline', 'quadrantChart', 'sankey-beta', 'block-beta',
     'packet-beta', 'architecture-beta', 'radar-beta', 'treemap-beta', 'xychart-beta',
@@ -4727,6 +4727,11 @@ def _detect_notation(text):
                      'expected `stateDiagram-v2` / `flowchart` / `sequenceDiagram`, or `@startuml`')
 
 
+# PlantUML use case syntax that carries no keyword: a colon actor, or a parenthesised
+# use case, with an optional alias and an optional relation on the same line.
+_USECASE_SYNTAX_RE = re.compile(r'^[ \t]*(?::[^:\n]+:(?:[ \t]+as[ \t]+[A-Za-z_][A-Za-z0-9_]*)?|\([^()\n]+\)(?:[ \t]+as[ \t]+\(?[^()\n]+\)?)?)[ \t]*(?:$|-->|->|\.\.>|\.>|--\|>|<\|--|--)', re.M)
+
+
 def _detect_diagram(text):
     if re.search(r'^\s*stateDiagram', text, re.M):
         return 'state'
@@ -4745,6 +4750,13 @@ def _detect_diagram(text):
         # structural one logicprobe emits, everything else in that family is a state diagram too.
         if re.search(r'^\s*participant\b', text, re.M) or re.search(r'->>\s*', text):
             return 'sequence'
+        # A use case diagram has no keyword header at all: refuse it by name instead of
+        # reading its arrows as transitions. Its own model lives in dsh-model-everything.
+        if _USECASE_SYNTAX_RE.search(text):
+            raise UmlRefusal('this text is a use case diagram (`:Actor: --> (UseCase)`, `(UseCase) as (U)`), which this plugin does not model: '
+                             'it models state machines and flows, and reading it as one returns a machine the diagram never drew. '
+                             'The dsh-model-everything plugin renders, reads and reviews use case diagrams; keep this diagram as its own view.',
+                             'UML_NOT_A_STATE_DIAGRAM')
         return 'state'
     raise UmlRefusal('cannot tell which diagram kind this text declares')
 

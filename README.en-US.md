@@ -23,6 +23,14 @@ logicprobe checks a claim against the thing it describes. Facts go against the s
 
 **Cross-platform**: works with Claude Code, Codex CLI, Cursor, Kimi CLI, OpenCode, and ZCode. Built on the [Agent Skills](https://agentskills.io) open standard.
 
+> **Use case diagrams and the other UML families**: this plugin models state machines
+> and flows only. A use case diagram (`:Actor: --> (UseCase)`), a class, component or
+> deployment diagram is **refused by name** instead of being misread as a state machine.
+> For render/parse/review across all fourteen UML 2.5 diagram families, use
+> [dsh-model-everything](https://github.com/AmethystLuna/dsh-model-everything), which
+> carries this plugin's whole diagram capability (notation syntax engine, capability
+> matrix, use case and structure family modules).
+
 ## What It Does
 
 | Phase | What |
