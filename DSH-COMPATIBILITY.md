@@ -13,7 +13,7 @@ releases listed in `dsh.compatibility.dshReleases` (author-remediation track
 | Node.js | v24.17.0 |
 | npm | 11.13.0 |
 | pnpm | 11.21.0 |
-| Test date | 2026-09-25 (headless rounds) · 2026-09-29 (live-field and degradation rounds) · 2026-10-05 (headless round for 0.2.1-alpha.1) · 2026-10-06 (headless round for 0.9.0 on 0.1.7-rc.2) · 2026-10-09 (headless round for 1.0.0 on 0.2.1-alpha.2) |
+| Test date | 2026-09-25 (headless rounds) · 2026-09-29 (live-field and degradation rounds) · 2026-10-05 (headless round for 0.2.1-alpha.1) · 2026-10-06 (headless round for 0.9.0 on 0.1.7-rc.2) · 2026-10-09 (headless round for 1.0.0 on 0.2.1-alpha.2) · 2026-10-18 (headless round for 1.4.0 on 0.2.1-rc.2 and 0.2.1-rc.1) |
 | Package under test | `dsh-logicprobe` 1.4.0 (bundle patch `cordis.patch.yml`, entry id `logicprobe`) |
 
 ## Method (one disposable profile per version)
@@ -87,6 +87,33 @@ packages were installed into that one profile and both were removed from it. The
 run against the **frozen** checkouts: the manifests printed `1.0.0` and `0.9.2` respectively,
 after the version bump and the compatibility-declaration change, so the log describes the
 artifacts this document declares rather than a pre-release intermediate.
+
+The 2026-10-18 round (`1.4.0`) ran two release candidates, each in its own npm prefix
+and its own fresh `DSH_HOME` under one task scratch root, against this repository's
+checkout. The manifest printed `1.4.0` before the install, and no source file changed
+during the round, so the measured artifact is the publishing-state package. Two steps
+were added to the four-step procedure: the installed package was inspected on disk for
+its `skills/*/SKILL.md` tree and its `locale/*.json` files, and one tool was called
+from that installed copy after the boot.
+
+```bash
+npm install --prefix <root>/<release>/prefix @deepseek-ai/dsh@<release>
+export DSH_HOME=<root>/<release>/home     # fresh; asserted to sit under the scratch root
+<prefix>/node_modules/.bin/dsh plugin --profile headless add "file:<this-repo>"
+<prefix>/node_modules/.bin/dsh --profile headless --dump-config
+<prefix>/node_modules/.bin/dsh --profile headless "reply OK"   # deliberately invalid key
+node <root>/<release>/probe/tool-call.mjs
+<prefix>/node_modules/.bin/dsh plugin --profile headless remove dsh-logicprobe
+```
+
+The tool call is a direct invocation of the `logicprobe_verify` handler that this
+package's `apply` registered, in a Cordis context whose `@deepseek-ai/*` imports
+resolved from that release's install prefix (`@deepseek-ai/dsh-tools` `0.2.1-rc.2` and
+`0.2.1-rc.1` respectively) and never from this checkout, which has its own copy of the
+family. It is **not** a model-driven call: the boot stops at provider authentication, so
+no session exists to carry one. What it establishes is that the shipped `lib/` code
+loads and returns its report contract against that release's declarations. It does not
+replace the session-log seam scans of the 0.1.7 rounds, which observed a real session.
 
 The live-field round (2026-09-29) used a different procedure, because the
 capability it measures lives in the Web client rather than the headless path:
@@ -167,13 +194,86 @@ carries the `logicprobe:mode` section. The 0.1.5-alpha.2, 0.1.5-rc.1, 0.1.5-rc.2
 
 ## Results
 
-The results fall into five groups, kept apart on purpose. The first group is the row measured
-for 1.0.0 on dsh 0.2.1-alpha.2. The second group is the row measured for 0.9.0 on dsh
-0.1.7-rc.2. The third group is the row re-measured on the 0.8.x builds (0.2.1-alpha.1). The
-fourth group is the rows re-measured against the 0.7.1 build on 2026-09-29. The last group is
-the rows carried over from earlier rounds. A carried-over row is still declared compatible. It
-was produced by an earlier round's procedure, though, and was not re-run against this build, so
-presenting it as newly verified would overstate the evidence.
+The results fall into six groups, kept apart on purpose. The first group is the rows measured
+for 1.4.0 on dsh 0.2.1-rc.2 and 0.2.1-rc.1. The second group is the row measured for 1.0.0 on
+dsh 0.2.1-alpha.2. The third group is the row measured for 0.9.0 on dsh 0.1.7-rc.2. The fourth
+group is the row re-measured on the 0.8.x builds (0.2.1-alpha.1). The fifth group is the rows
+re-measured against the 0.7.1 build on 2026-09-29. The last group is the rows carried over from
+earlier rounds. A carried-over row is still declared compatible. It was produced by an earlier
+round's procedure, though, and was not re-run against this build, so presenting it as newly
+verified would overstate the evidence.
+
+### Measured on `0.2.1-rc.2` and `0.2.1-rc.1` (`1.4.0` on 2026-10-18)
+
+| dsh release | install | host boot | uninstall | rows active | client bundles in `__DSH_BOOT__` | settings namespace served | Web switch |
+|---|---|---:|---:|---|---:|---:|---|
+| 0.2.1-rc.2 | pass | pass | pass | not probed (headless round) | not probed | not probed | not probed |
+| 0.2.1-rc.1 | pass | pass | pass | not probed (headless round) | not probed | not probed | not probed |
+
+Each release got its own npm prefix and its own fresh `DSH_HOME`. The prefix installs reported
+`added 611 packages in 3m` for `0.2.1-rc.2` and `added 609 packages in 1m` for `0.2.1-rc.1`,
+both from `registry.npmjs.org`. The plugin installs exited 0 and printed only pnpm's
+`Issues with peer dependencies found` advisory, the same one earlier rows record, plus
+`Packages: +1`.
+
+| assertion | `0.2.1-rc.2` | `0.2.1-rc.1` |
+|---|---:|---:|
+| `plugin add` exits 0 | pass | pass |
+| `plugin add` reports no preflight refusal (`incompatible`, `nothing was installed`, `crashes or data loss`) | pass | pass |
+| `--dump-config` carries `id: logicprobe` / `name: dsh-logicprobe` | pass | pass |
+| the row is `enabled: true` with `interaction: follow-approval` | pass | pass |
+| `--dump-config` carries no `disabling profile plugin` line | pass | pass |
+| the installed package contains every `skills/*/SKILL.md` and both `locale/*.json` files | pass | pass |
+| the boot reaches the model provider (`AUTH` only) | pass | pass |
+| the boot log has no plugin load error (`plugin tree failed to load`, `volatile is not a function`, `ERR_MODULE_NOT_FOUND`, `Cannot find module`, `incompatible`, `skipping profile bundle`) | pass | pass |
+| the installed copy registers the `logicprobe_*` tools and the inspect status is fully `true` | pass | pass |
+| `logicprobe_verify` returns `logicprobe/verify/v1` | pass | pass |
+| after `plugin remove`, the row is gone | pass | pass |
+
+The composed tree and the boot output are the same on both releases:
+
+```text
+# == dsh-logicprobe
+- id: logicprobe
+  name: dsh-logicprobe
+  config:
+    enabled: true
+    interaction: follow-approval
+```
+
+```text
+dsh: AUTH: Authentication Fails, Your api key: ****test is invalid (request_id: …)
+```
+
+The tool call returned the same report contract on both releases. The probe mounts the
+installed `lib/index.js`, captures the handlers `ctx.tools.register` receives, and calls the
+`logicprobe_verify` handler with a two-state model and one transition. The output below is from
+`0.2.1-rc.2`; `0.2.1-rc.1` differs only in the host peer version.
+
+```text
+package        dsh-logicprobe@1.4.0
+tool           logicprobe_verify
+report.schema  logicprobe/verify/v1
+verdict        pass
+verdictReason  no error or warning findings
+checks         22 (S1-S8, A1-A14)
+modelHash      d42440cffc6d75bf9d9255369452401290726a55bdbc6c4d960ce975cbaec9c3
+host peer      @deepseek-ai/dsh-tools 0.2.1-rc.2
+```
+
+Two method caveats belong here, and they make these rows weaker than the session-log rows,
+not stronger. Both are **headless** rounds: `rows active`, `__DSH_BOOT__`, the settings
+namespace and the live Web switch were not probed. And because the boot stops at provider
+authentication, no session was opened, so the session-log seam scan was not re-run; the tool
+call above is a direct handler invocation, not a model-driven call. The installs consumed the
+`file:` checkout rather than the published tarball, so the installed tree is the checkout's
+package. The publish whitelist was checked separately with `npm pack --dry-run`: the tarball
+carries `skills/` and `locale/`.
+
+Neither release was refused by the plugin-compatibility preflight. The declared peer range
+already admitted both under `includePrerelease: true` — `^0.2.1-alpha.2` covers the `0.2.1`
+tuple — so the `|| ^0.2.1-rc.1 || ^0.2.1-rc.2` branches added in this round record the
+releases that were run; they do not gate these installs.
 
 ### Re-measured on `0.2.1-alpha.2` (`1.0.0` on 2026-10-09)
 
@@ -407,7 +507,7 @@ unverified.
 
 ## Declared compatibility (package.json)
 
-Quoted from the manifest of 1.0.0. The `peerDependencies` block is included because
+Quoted from the manifest of 1.4.0. The `peerDependencies` block is included because
 the install preflight evaluates it, not `dshReleases`
 (`@deepseek-ai/dsh-app-boot/lib/index.js:289-293`).
 
@@ -415,17 +515,17 @@ the install preflight evaluates it, not `dshReleases`
 "engines": { "node": ">=20" },
 "peerDependencies": {
   "@deepseek-ai/cordis": "^4.0.4",
-  "@deepseek-ai/dsh-agent": "^0.1.0-rc.6 || ^0.2.0-rc.1 || ^0.2.1-alpha.1 || ^0.2.1-alpha.2",
-  "@deepseek-ai/dsh-llm": "^0.1.0-rc.6 || ^0.2.0-rc.1 || ^0.2.1-alpha.1 || ^0.2.1-alpha.2",
-  "@deepseek-ai/dsh-session": "^0.1.0-rc.6 || ^0.2.0-rc.1 || ^0.2.1-alpha.1 || ^0.2.1-alpha.2",
-  "@deepseek-ai/dsh-skill-filesystem": "^0.1.0-rc.8 || ^0.2.0-rc.1 || ^0.2.1-alpha.1 || ^0.2.1-alpha.2",
-  "@deepseek-ai/dsh-tools": "^0.1.0-rc.6 || ^0.2.0-rc.1 || ^0.2.1-alpha.1 || ^0.2.1-alpha.2",
+  "@deepseek-ai/dsh-agent": "^0.1.0-rc.6 || ^0.2.0-rc.1 || ^0.2.1-alpha.1 || ^0.2.1-alpha.2 || ^0.2.1-rc.1 || ^0.2.1-rc.2",
+  "@deepseek-ai/dsh-llm": "^0.1.0-rc.6 || ^0.2.0-rc.1 || ^0.2.1-alpha.1 || ^0.2.1-alpha.2 || ^0.2.1-rc.1 || ^0.2.1-rc.2",
+  "@deepseek-ai/dsh-session": "^0.1.0-rc.6 || ^0.2.0-rc.1 || ^0.2.1-alpha.1 || ^0.2.1-alpha.2 || ^0.2.1-rc.1 || ^0.2.1-rc.2",
+  "@deepseek-ai/dsh-skill-filesystem": "^0.1.0-rc.8 || ^0.2.0-rc.1 || ^0.2.1-alpha.1 || ^0.2.1-alpha.2 || ^0.2.1-rc.1 || ^0.2.1-rc.2",
+  "@deepseek-ai/dsh-tools": "^0.1.0-rc.6 || ^0.2.0-rc.1 || ^0.2.1-alpha.1 || ^0.2.1-alpha.2 || ^0.2.1-rc.1 || ^0.2.1-rc.2",
   "@deepseek-ai/schemastery": "^3.18.4"
 },
 "dsh": {
   "engines": { "dsh": ">=0.1.0-rc.7" },
   "compatibility": {
-    "dsh": "^0.1.0-rc.7 || ^0.1.1-rc.1 || ^0.1.2-alpha.2 || ^0.1.2-alpha.3 || ^0.1.2-alpha.4 || ^0.1.2-alpha.5 || ^0.1.2-rc.1 || ^0.1.3-alpha.1 || ^0.1.3-alpha.2 || ^0.1.5-alpha.1 || ^0.1.5-rc.1 || ^0.1.5-alpha.2 || ^0.1.5-rc.2 || ^0.1.5-rc.3 || ^0.1.6-alpha.1 || ^0.1.6-alpha.2 || ^0.1.7-alpha.1 || ^0.1.7-alpha.2 || ^0.1.7-rc.1 || ^0.1.7-rc.2 || ^0.2.0-rc.1 || ^0.2.1-alpha.1 || ^0.2.1-alpha.2",
+    "dsh": "^0.1.0-rc.7 || ^0.1.1-rc.1 || ^0.1.2-alpha.2 || ^0.1.2-alpha.3 || ^0.1.2-alpha.4 || ^0.1.2-alpha.5 || ^0.1.2-rc.1 || ^0.1.3-alpha.1 || ^0.1.3-alpha.2 || ^0.1.5-alpha.1 || ^0.1.5-rc.1 || ^0.1.5-alpha.2 || ^0.1.5-rc.2 || ^0.1.5-rc.3 || ^0.1.6-alpha.1 || ^0.1.6-alpha.2 || ^0.1.7-alpha.1 || ^0.1.7-alpha.2 || ^0.1.7-rc.1 || ^0.1.7-rc.2 || ^0.2.0-rc.1 || ^0.2.1-alpha.1 || ^0.2.1-alpha.2 || ^0.2.1-rc.1 || ^0.2.1-rc.2",
     "dshReleases": {
       "0.1.0-rc.7": "compatible",
       "0.1.0-rc.8": "compatible",
@@ -452,7 +552,9 @@ the install preflight evaluates it, not `dshReleases`
       "0.2.0-rc.1": "compatible",
       "0.2.0-rc.2": "compatible",
       "0.2.1-alpha.1": "compatible",
-      "0.2.1-alpha.2": "compatible"
+      "0.2.1-alpha.2": "compatible",
+      "0.2.1-rc.1": "compatible",
+      "0.2.1-rc.2": "compatible"
     },
     "profiles": ["headless", "web"]
   }
@@ -480,14 +582,34 @@ that `0.2.1-alpha.2` ships `schemastery` 3.18.5-alpha.1, which satisfies the dec
 `^3.18.4` peer, so the preflight has no schemastery reason to refuse this bundle there
 either.
 
+The `|| ^0.2.1-rc.1 || ^0.2.1-rc.2` branches record the 2026-10-18 round. Both releases
+were installed, mounted, booted, tool-called and uninstalled, and neither `plugin add`
+reported the preflight refusal. The branches document what was run rather than tighten a
+boundary: `^0.2.1-alpha.2` already covers the `0.2.1` tuple under
+`includePrerelease: true`, which is why the installs passed before the branches existed.
+
 ## Notes
 
 These bullets are grouped by the round that produced them. The first governs
-1.0.0. Several later ones describe what an **older** plugin version was verified
-against, so where one reads "keeps 0.1.0-rc.7 … X working" it means that round's
-plugin version, not this one. The Results tables above are the authoritative
-statement for 1.0.0.
+1.4.0 and the second governs 1.0.0. Several later ones describe what an **older**
+plugin version was verified against, so where one reads "keeps 0.1.0-rc.7 … X working"
+it means that round's plugin version, not this one. The Results tables above are the
+authoritative statement for the release each row names.
 
+- **The 0.2.1-rc.2 and 0.2.1-rc.1 round measured five steps, headless, and one
+  direct tool call.** Install, mount, boot, tool call and uninstall were re-run on
+  2026-10-18 for this plugin alone, each release in its own npm prefix and its own
+  fresh `DSH_HOME`. See the Results section. The Web half was **not** probed
+  (`rows active`, `__DSH_BOOT__`, the settings namespace, the live switch), and the
+  session-log seam scan was not re-run because the boot stops at provider
+  authentication, so no session exists. The tool call was a direct invocation of
+  the registered `logicprobe_verify` handler against the installed copy, with the
+  host packages resolved from that release's prefix. That establishes that the
+  shipped `lib/` code runs on the release's own declarations. It does not prove a
+  model reaches the tool through a session, and it does not stand in for the
+  seam-scan rows. The round also checked what the earlier rounds did not: the
+  installed package carries the bundled `skills/` tree and its `locale/` files, and
+  `npm pack --dry-run` reports both in the publish whitelist.
 - **The 0.2.1-alpha.2 round measured four steps, not the Web half.** Install,
   mount, headless boot and uninstall were re-run on 2026-10-09 for this plugin and
   its sibling `dsh-embedded-workbench` 0.9.2, both in one disposable `headless`
