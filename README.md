@@ -2,6 +2,14 @@
 
 <p align="center"><a href="README.en-US.md">English</a> · <strong>中文</strong></p>
 
+> **状态**：本插件核验设计、代码与计划中的声称。它继续以 `dsh-model-everything`
+> 的形式发展，同样覆盖声称、行为、结构、UML、数据模型、并发、导出与报告对比，
+> 并加上设计原则审查（分层、边界、可替换性、接口宽度、图形状）、报告阅读技能、
+> 标签口径解释和可选的会话启动路由。它不是本插件的 API 镜像：UML 能力拆在多个
+> 工具里，本插件只有一个 `logicprobe_uml`。新插件尚未发布，所以只写名字，不给
+> 链接。现有安装继续可用。0.2.1-rc.2 与 0.2.1-rc.1 上已实测安装、挂载、启动、
+> 工具调用与卸载；逐版本证据见 [DSH-COMPATIBILITY.md](DSH-COMPATIBILITY.md)。
+
 没验证过的设计，翻车只是时间问题；再复杂的代码，建模再跑就清楚了。
 
 logicprobe 核验声称与实物是否一致。事实类对着源码查。行为类跑模型：状态机、协议、组合、数据模型、迁移。图按依赖图读，单层或多层。改动前后用基线对比。验不了的维度明说，并指出该用哪个工具。
@@ -290,7 +298,7 @@ cp -r logicprobe/skills/* .zcode/skills/
 ## 环境要求
 
 - 宿主：Claude Code v2.1+ / Codex CLI 最新 / Cursor 2.5+ / Kimi CLI 最新 / OpenCode 最新 / ZCode 3.0+
-- DeepSeek Harness (dsh)：dev preview，声明支持 `>= 0.1.0-rc.7`。最新一轮在 0.2.1-alpha.1 上实测了安装、挂载、启动与卸载；更早一轮实测覆盖 0.1.5-rc.2 到 0.2.0-rc.2。逐版本证据见 [DSH-COMPATIBILITY.md](DSH-COMPATIBILITY.md)。
+- DeepSeek Harness (dsh)：dev preview，声明支持 `>= 0.1.0-rc.7`。最新一轮在 0.2.1-rc.2 与 0.2.1-rc.1 上实测了安装、挂载、启动与卸载；更早一轮实测覆盖 0.1.5-rc.2 到 0.2.0-rc.2。逐版本证据见 [DSH-COMPATIBILITY.md](DSH-COMPATIBILITY.md)。
 - Web 端的「Gate 注入」开关需要 **dsh ≥ 0.1.7-alpha.1**，因为设置服务必须能投影即时字段。更早的 dsh 上插件照常加载、照常注入，只是开关不出现，也不报错。
 - Python 3.8+（标准库），在 dsh 之外运行验证所需；手动兜底模式不需要任何依赖。
 
