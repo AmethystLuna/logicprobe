@@ -5,6 +5,8 @@ description: "Use when reviewing design docs, specs, plans or migrations claimin
 
 # Logic Probe Data
 
+> **Successor: `dsh-model-everything`.** Its counterpart skill is `model-everything-datamodel`, over `model_datamodel_verify`. Load that one when both plugins are installed; this skill stays accurate for `logicprobe_datamodel_verify`.
+
 An unverified data model fails later. Model the schema and the migration, run them, and it becomes clear. Check every data claim before you act on it.
 
 ## Methodology

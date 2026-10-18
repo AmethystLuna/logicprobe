@@ -5,6 +5,8 @@ description: "Use when a design or plan claims concurrency safety (thread-safe, 
 
 # Logic Probe — Concurrency Claims
 
+> **Successor: `dsh-model-everything`.** Its counterpart skill is `model-everything-interleaving`, which covers the same claims plus async and hands a shared location to `model_compose_verify` instead of routing it. Load that one when both plugins are installed; this skill stays accurate for `logicprobe_concurrency_scan`.
+
 This skill does **not** prove concurrency safety, and no report from it should ever be read as a proof. It mines a document, plan or code review for concurrency claims, marks them `UNVERIFIED`, and routes each one to the tool that can actually decide it.
 
 The claim-verification doctrine it inherits — enumerate verifiable claims, cite `file:line`, read `verdict` and never `ok` — lives in the `logicprobe` skill. Load that one when the task is behavioural verification of a state machine rather than a judgement about concurrency claims.

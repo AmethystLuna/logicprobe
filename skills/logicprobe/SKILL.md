@@ -5,6 +5,15 @@ description: "Use when you want to verify something about code: a design doc, sp
 
 # Logic Probe
 
+> **Successor: `dsh-model-everything`.** This plugin continues as
+> <https://github.com/AmethystLuna/dsh-model-everything>: the same domains, a superset of the
+> tooling, and a skill for each of them. If both are installed, load the
+> `model-everything` skill for new work — it routes to `model-everything-uml`,
+> `model-everything-structure`, `model-everything-datamodel` and
+> `model-everything-interleaving` — and keep this plugin's skills as the reference for its
+> own tool names (`logicprobe_*`). The two do not share a registry: a claim verified through
+> one is not verified in the other.
+
 For an unverified design, failure is only a matter of time. Complex code becomes clear once you model it and run it. Check every claim before you act on it.
 
 ## When This Skill Applies
@@ -445,6 +454,20 @@ This skill owns behavioural claims. Three neighbouring domains have their own sk
 | Reviewing architecture, module structure or a dependency diagram (isolated nodes, dangling endpoints, cycles, allowed-dependency and layer violations, missing required edges) | `logicprobe-structure` |
 | Concurrency claims — "thread-safe", "lock-free", "no data race", "ISR-safe" — mined and routed to TSan/Helgrind/CBMC/TLA+, never proven here | `logicprobe-concurrency` |
 | Entities, fields, relationships, data invariants, schema migrations (DS1-DS4, DA1-DA12, DD1-DD4) | `logicprobe-datamodel` |
+
+### The Same Domains in the Successor
+
+`dsh-model-everything` covers each domain above with one skill, and adds two this plugin does not have. Use the mapping when both plugins are installed — the successor's skill is the one to load for new work, because its tools are the ones its own guidance names:
+
+| This plugin | `dsh-model-everything` | What the successor adds |
+|---|---|---|
+| `logicprobe` | `model-everything` | the same doctrine over `model_verify`, `model_compose_verify` and `model_export` |
+| `logicprobe-uml` | `model-everything-uml` | more diagram families (timing, profile, composite, communication, interaction overview) |
+| `logicprobe-structure` | `model-everything-structure` | multi-level refinement between drawings |
+| `logicprobe-datamodel` | `model-everything-datamodel` | the same DS/DA/DD families over `model_datamodel_verify` |
+| `logicprobe-concurrency` | `model-everything-interleaving` | async vocabulary, a family per claim, and a lost update decided rather than routed |
+| — | `model-everything-design` | layering, substitutability, interface width (no counterpart here) |
+| — | `model-everything-report-reading` | how to read a report (no counterpart here) |
 
 ---
 

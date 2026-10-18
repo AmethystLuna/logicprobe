@@ -5,6 +5,8 @@ description: "Use when reviewing architecture, module structure or a dependency 
 
 # Logic Probe — Structure and Dependency Review
 
+> **Successor: `dsh-model-everything`.** Its counterpart skill is `model-everything-structure`, over `uml_structure_verify`, which also checks several drawings against each other. Load that one when both plugins are installed; this skill stays accurate for `logicprobe_structure_verify`.
+
 A component diagram is a model of an architecture, and a model can be wrong. This skill audits the graph the diagram actually draws — nodes and dependency arrows — against a declared dependency matrix, and says plainly what that does and does not prove.
 
 The claim-verification doctrine it inherits — cite evidence, read `verdict` and never `ok` — lives in the `logicprobe` skill. Load that one for behavioural claims (state machines, protocols, timing); load this one when the question is *where the dependencies point*.

@@ -5,6 +5,8 @@ description: "Use when drawing a code flow as UML or auditing a diagram someone 
 
 # Logic Probe — UML Modelling
 
+> **Successor: `dsh-model-everything`.** Its counterpart skill is `model-everything-uml`, which draws and reads more diagram families. Load that one when both plugins are installed; this skill stays accurate for `logicprobe_uml`.
+
 A diagram is a model, and a model can be wrong. A tidy flow chart is not evidence about the code, and a diagram that disagrees with its own model is worse than no diagram, because a reader will believe it.
 
 This skill covers the diagram half of the Logic Probe toolbox. The claim-verification doctrine it inherits — enumerate verifiable claims, cite `file:line`, read `verdict` and never `ok` — lives in the `logicprobe` skill; load that one when the task is to verify behaviour rather than to draw or audit a diagram.
