@@ -5,8 +5,8 @@ description: "Use when you want to verify something about code: a design doc, sp
 
 # Logic Probe
 
-> **Successor: `dsh-model-everything`.** This plugin continues as
-> `dsh-model-everything`: the same domains, a superset of the
+> **Successor: [`dsh-model-everything`](https://github.com/AmethystLuna/dsh-model-everything).**
+> This plugin continues as `dsh-model-everything`: the same domains, a superset of the
 > tooling, and a skill for each of them. If both are installed, load the
 > `model-everything` skill for new work — it routes to `model-everything-uml`,
 > `model-everything-structure`, `model-everything-datamodel` and
@@ -457,7 +457,7 @@ This skill owns behavioural claims. Three neighbouring domains have their own sk
 
 ### The Same Domains in the Successor
 
-`dsh-model-everything` covers each domain above with one skill, and adds two this plugin does not have. Use the mapping when both plugins are installed — the successor's skill is the one to load for new work, because its tools are the ones its own guidance names:
+[dsh-model-everything](https://github.com/AmethystLuna/dsh-model-everything) covers each domain above with one skill, and adds two this plugin does not have. Use the mapping when both plugins are installed — the successor's skill is the one to load for new work, because its tools are the ones its own guidance names:
 
 | This plugin | `dsh-model-everything` | What the successor adds |
 |---|---|---|

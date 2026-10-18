@@ -8,10 +8,12 @@
 > review engine (layering, boundaries, substitutability, interface width, graph
 > shape), a report-reading skill, label explanation, and an optional session-start
 > routing component. It is not an API twin: the UML capability is split across tools
-> where this plugin has one `logicprobe_uml`. The new plugin is not published yet, so
-> it is named here without a link. Existing installs keep working. Installation,
-> mount, boot, tool call and uninstall were measured on 0.2.1-rc.2 and 0.2.1-rc.1;
-> per-release evidence is in [DSH-COMPATIBILITY.md](DSH-COMPATIBILITY.md).
+> where this plugin has one `logicprobe_uml`. It is published as
+> [`dsh-model-everything`](https://github.com/AmethystLuna/dsh-model-everything)
+> ([npm](https://www.npmjs.com/package/dsh-model-everything)). Existing installs
+> keep working. Installation, mount, boot, tool call and uninstall were measured on
+> 0.2.1-rc.2 and 0.2.1-rc.1; per-release evidence is in
+> [DSH-COMPATIBILITY.md](DSH-COMPATIBILITY.md).
 
 [![HOL Guard Scanner](https://img.shields.io/badge/HOL%20Guard-passing-00a67e)](https://github.com/hashgraph-online/hol-guard)
 

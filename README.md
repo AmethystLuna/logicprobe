@@ -6,9 +6,11 @@
 > 的形式发展，同样覆盖声称、行为、结构、UML、数据模型、并发、导出与报告对比，
 > 并加上设计原则审查（分层、边界、可替换性、接口宽度、图形状）、报告阅读技能、
 > 标签口径解释和可选的会话启动路由。它不是本插件的 API 镜像：UML 能力拆在多个
-> 工具里，本插件只有一个 `logicprobe_uml`。新插件尚未发布，所以只写名字，不给
-> 链接。现有安装继续可用。0.2.1-rc.2 与 0.2.1-rc.1 上已实测安装、挂载、启动、
-> 工具调用与卸载；逐版本证据见 [DSH-COMPATIBILITY.md](DSH-COMPATIBILITY.md)。
+> 工具里，本插件只有一个 `logicprobe_uml`。它已发布为
+> [`dsh-model-everything`](https://github.com/AmethystLuna/dsh-model-everything)
+> （[npm](https://www.npmjs.com/package/dsh-model-everything)）。现有安装继续可用。
+> 0.2.1-rc.2 与 0.2.1-rc.1 上已实测安装、挂载、启动、工具调用与卸载；逐版本证据见
+> [DSH-COMPATIBILITY.md](DSH-COMPATIBILITY.md)。
 
 没验证过的设计，翻车只是时间问题；再复杂的代码，建模再跑就清楚了。
 
