@@ -2,6 +2,14 @@
 
 <p align="center"><a href="README.en-US.md">English</a> · <strong>中文</strong></p>
 
+<p align="center">
+  <a href="https://github.com/AmethystLuna/logicprobe/actions/workflows/dsh-bundle.yml"><img src="https://github.com/AmethystLuna/logicprobe/actions/workflows/dsh-bundle.yml/badge.svg" alt="CI"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License: MIT"></a>
+  <a href="https://nodejs.org/"><img src="https://img.shields.io/badge/node-%3E%3D20-blue.svg" alt="Node 20+"></a>
+  <a href="https://github.com/hashgraph-online/hol-guard"><img src="https://img.shields.io/badge/HOL%20Guard-passing-00a67e" alt="HOL Guard"></a>
+  <a href="https://afdian.com/a/amethystluna"><img src="https://img.shields.io/badge/%E7%88%B1%E5%8F%91%E7%94%B5-Afdian-946CE6" alt="在爱发电上赞助"></a>
+</p>
+
 > **状态**：本插件核验设计、代码与计划中的声称。它继续以 `dsh-model-everything`
 > 的形式发展，同样覆盖声称、行为、结构、UML、数据模型、并发、导出与报告对比，
 > 并加上设计原则审查（分层、边界、可替换性、接口宽度、图形状）、报告阅读技能、

@@ -2,6 +2,14 @@
 
 <p align="center"><strong>English</strong> · <a href="README.md">中文</a></p>
 
+<p align="center">
+  <a href="https://github.com/AmethystLuna/logicprobe/actions/workflows/dsh-bundle.yml"><img src="https://github.com/AmethystLuna/logicprobe/actions/workflows/dsh-bundle.yml/badge.svg" alt="CI"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License: MIT"></a>
+  <a href="https://nodejs.org/"><img src="https://img.shields.io/badge/node-%3E%3D20-blue.svg" alt="Node 20+"></a>
+  <a href="https://github.com/hashgraph-online/hol-guard"><img src="https://img.shields.io/badge/HOL%20Guard-passing-00a67e" alt="HOL Guard"></a>
+  <a href="https://afdian.com/a/amethystluna"><img src="https://img.shields.io/badge/%E7%88%B1%E5%8F%91%E7%94%B5-Afdian-946CE6" alt="Sponsor on Afdian"></a>
+</p>
+
 > **Status**: this plugin checks claims about designs, code and plans. It continues
 > as `dsh-model-everything`, which covers the same claim, behaviour, structure, UML,
 > data-model, concurrency, export and report-comparison ground, and adds a design
@@ -14,8 +22,6 @@
 > keep working. Installation, mount, boot, tool call and uninstall were measured on
 > 0.2.1-rc.2 and 0.2.1-rc.1; per-release evidence is in
 > [DSH-COMPATIBILITY.md](DSH-COMPATIBILITY.md).
-
-[![HOL Guard Scanner](https://img.shields.io/badge/HOL%20Guard-passing-00a67e)](https://github.com/hashgraph-online/hol-guard)
 
 For an unverified design, failure is only a matter of time. However complex the code, model it and run it — then it becomes clear.
 
