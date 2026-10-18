@@ -386,3 +386,9 @@ npm run build
 ## 致谢
 
 声称核查方法论（逻辑原语、对抗探测、重构前后对比）与触发测试框架（`tests/skill-triggering/`）遵循 [Superpowers](https://github.com/obra/superpowers)（Jesse Vincent，MIT License）的约定，经 [embedded-workbench](https://github.com/AmethystLuna/embedded-workbench) 插件改编而来。
+
+## 赞助
+
+本插件以 MIT 许可证开源。如果它节省了你的时间，可以在[爱发电](https://afdian.com/a/amethystluna)赞助开发。
+
+赞助完全自愿，不影响许可证，也不改变任何功能。

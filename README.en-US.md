@@ -395,3 +395,9 @@ To report a security vulnerability, do **not** open a public issue. Use the priv
 ## Acknowledgments
 
 The claim-verification methodology (logic primitives, adversarial probing, refactoring before/after comparison) and the trigger test framework (`tests/skill-triggering/`) follow the conventions of [Superpowers](https://github.com/obra/superpowers) by Jesse Vincent (MIT License), as adapted in the [embedded-workbench](https://github.com/AmethystLuna/embedded-workbench) plugin.
+
+## Sponsor
+
+This plugin is open source under the MIT license. If it saves you time, you can support development on [Afdian](https://afdian.com/a/amethystluna).
+
+Sponsorship is voluntary and changes neither the license nor the features.
