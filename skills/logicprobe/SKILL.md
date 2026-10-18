@@ -6,7 +6,7 @@ description: "Use when you want to verify something about code: a design doc, sp
 # Logic Probe
 
 > **Successor: `dsh-model-everything`.** This plugin continues as
-> <https://github.com/AmethystLuna/dsh-model-everything>: the same domains, a superset of the
+> `dsh-model-everything`: the same domains, a superset of the
 > tooling, and a skill for each of them. If both are installed, load the
 > `model-everything` skill for new work — it routes to `model-everything-uml`,
 > `model-everything-structure`, `model-everything-datamodel` and
