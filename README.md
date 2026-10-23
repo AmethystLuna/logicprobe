@@ -17,7 +17,7 @@
 > 工具里，本插件只有一个 `logicprobe_uml`。它已发布为
 > [`dsh-model-everything`](https://github.com/AmethystLuna/dsh-model-everything)
 > （[npm](https://www.npmjs.com/package/dsh-model-everything)）。现有安装继续可用。
-> 0.2.1-rc.2 与 0.2.1-rc.1 上已实测安装、挂载、启动、工具调用与卸载；逐版本证据见
+> 0.2.1-rc.3 上已实测安装、挂载、启动、工具调用与卸载；逐版本证据见
 > [DSH-COMPATIBILITY.md](DSH-COMPATIBILITY.md)。
 
 没验证过的设计，翻车只是时间问题；再复杂的代码，建模再跑就清楚了。
@@ -313,7 +313,7 @@ cp -r logicprobe/skills/* .zcode/skills/
 ## 环境要求
 
 - 宿主：Claude Code v2.1+ / Codex CLI 最新 / Cursor 2.5+ / Kimi CLI 最新 / OpenCode 最新 / ZCode 3.0+
-- DeepSeek Harness (dsh)：dev preview，声明支持 `>= 0.1.0-rc.7`。最新一轮在 0.2.1-rc.2 与 0.2.1-rc.1 上实测了安装、挂载、启动与卸载；更早一轮实测覆盖 0.1.5-rc.2 到 0.2.0-rc.2。逐版本证据见 [DSH-COMPATIBILITY.md](DSH-COMPATIBILITY.md)。
+- DeepSeek Harness (dsh)：dev preview，声明支持 `>= 0.1.0-rc.7`。最新一轮在 0.2.1-rc.3 上实测了安装、挂载、启动与卸载；更早一轮实测覆盖 0.1.5-rc.2 到 0.2.1-rc.2。逐版本证据见 [DSH-COMPATIBILITY.md](DSH-COMPATIBILITY.md)。
 - Web 端的「Gate 注入」开关需要 **dsh ≥ 0.1.7-alpha.1**，因为设置服务必须能投影即时字段。更早的 dsh 上插件照常加载、照常注入，只是开关不出现，也不报错。
 - Python 3.8+（标准库），在 dsh 之外运行验证所需；手动兜底模式不需要任何依赖。
 

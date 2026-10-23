@@ -20,7 +20,7 @@
 > [`dsh-model-everything`](https://github.com/AmethystLuna/dsh-model-everything)
 > ([npm](https://www.npmjs.com/package/dsh-model-everything)). Existing installs
 > keep working. Installation, mount, boot, tool call and uninstall were measured on
-> 0.2.1-rc.2 and 0.2.1-rc.1; per-release evidence is in
+> 0.2.1-rc.3; per-release evidence is in
 > [DSH-COMPATIBILITY.md](DSH-COMPATIBILITY.md).
 
 For an unverified design, failure is only a matter of time. However complex the code, model it and run it — then it becomes clear.
@@ -319,7 +319,7 @@ Skills are invoked with `$logicprobe`. See `.zcode/INSTALL.md`.
 ## Requirements
 
 - Host: Claude Code v2.1+ / Codex CLI latest / Cursor 2.5+ / Kimi CLI latest / OpenCode latest / ZCode 3.0+
-- DeepSeek Harness (dsh): dev preview, declared support for `>= 0.1.0-rc.7`. The latest round measured install, mount, boot and uninstall on 0.2.1-rc.2 and 0.2.1-rc.1. The earlier round measured 0.1.5-rc.2 through 0.2.0-rc.2. Per-release evidence is in [DSH-COMPATIBILITY.md](DSH-COMPATIBILITY.md).
+- DeepSeek Harness (dsh): dev preview, declared support for `>= 0.1.0-rc.7`. The latest round measured install, mount, boot and uninstall on 0.2.1-rc.3. The earlier round measured 0.1.5-rc.2 through 0.2.1-rc.2. Per-release evidence is in [DSH-COMPATIBILITY.md](DSH-COMPATIBILITY.md).
 - The Web Plugins-page "Gate injection" switch requires **dsh ≥ 0.1.7-alpha.1**, because its settings service must be able to project live fields. On older dsh the plugin still loads and still injects. The switch is simply absent, with no error.
 - Python 3.8+ (standard library), needed to run the checks outside dsh. The manual mode needs no dependencies.
 
