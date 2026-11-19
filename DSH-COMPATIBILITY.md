@@ -13,8 +13,8 @@ releases listed in `dsh.compatibility.dshReleases` (author-remediation track
 | Node.js | v24.17.0 |
 | npm | 11.13.0 |
 | pnpm | 11.21.0 |
-| Test date | 2026-09-25 (headless rounds) · 2026-09-29 (live-field and degradation rounds) · 2026-10-05 (headless round for 0.2.1-alpha.1) · 2026-10-06 (headless round for 0.9.0 on 0.1.7-rc.2) · 2026-10-09 (headless round for 1.0.0 on 0.2.1-alpha.2) · 2026-10-18 (headless round for 1.4.0 on 0.2.1-rc.2 and 0.2.1-rc.1) · 2026-10-24 (headless round for 1.4.2 on 0.2.1-rc.3) · 2026-10-27 (headless round for 1.4.3 on 0.2.1-rc.4) · 2026-10-31 (headless round for 1.4.4 on 0.2.1-rc.5 and 0.2.2-alpha.2) · 2026-11-05 (headless round for 1.4.5 on 0.2.2-rc.1 and 0.2.2-alpha.3) · 2026-11-14 (headless round for 1.4.6 on 0.2.2-rc.3) |
-| Package under test | `dsh-logicprobe` 1.4.6 (bundle patch `cordis.patch.yml`, entry id `logicprobe`) |
+| Test date | 2026-09-25 (headless rounds) · 2026-09-29 (live-field and degradation rounds) · 2026-10-05 (headless round for 0.2.1-alpha.1) · 2026-10-06 (headless round for 0.9.0 on 0.1.7-rc.2) · 2026-10-09 (headless round for 1.0.0 on 0.2.1-alpha.2) · 2026-10-18 (headless round for 1.4.0 on 0.2.1-rc.2 and 0.2.1-rc.1) · 2026-10-24 (headless round for 1.4.2 on 0.2.1-rc.3) · 2026-10-27 (headless round for 1.4.3 on 0.2.1-rc.4) · 2026-10-31 (headless round for 1.4.4 on 0.2.1-rc.5 and 0.2.2-alpha.2) · 2026-11-05 (headless round for 1.4.5 on 0.2.2-rc.1 and 0.2.2-alpha.3) · 2026-11-14 (headless round for 1.4.6 on 0.2.2-rc.3) · 2026-11-19 (headless round for 1.4.6 on 0.2.2-rc.5) |
+| Package under test | `dsh-logicprobe` 1.4.7 (bundle patch `cordis.patch.yml`, entry id `logicprobe`) |
 
 ## Method (one disposable profile per version)
 
@@ -194,18 +194,59 @@ carries the `logicprobe:mode` section. The 0.1.5-alpha.2, 0.1.5-rc.1, 0.1.5-rc.2
 
 ## Results
 
-The results fall into eleven groups, kept apart on purpose. The first group is the rows measured
-for 1.4.6 on dsh 0.2.2-rc.3. The second group is the rows measured
-for 1.4.5 on dsh 0.2.2-rc.1 and 0.2.2-alpha.3. The third group is the rows measured for 1.4.4
-on dsh 0.2.1-rc.5 and 0.2.2-alpha.2. The fourth group is the row measured for 1.4.3 on
-dsh 0.2.1-rc.4. The fifth group is the row measured for 1.4.2 on dsh 0.2.1-rc.3. The sixth group
-is the rows measured for 1.4.0 on dsh 0.2.1-rc.2 and 0.2.1-rc.1. The seventh group is the row
-measured for 1.0.0 on dsh 0.2.1-alpha.2. The eighth group is the row measured for 0.9.0 on dsh
-0.1.7-rc.2. The ninth group is the row re-measured on the 0.8.x builds (0.2.1-alpha.1). The
-tenth group is the rows re-measured against the 0.7.1 build on 2026-09-29. The last group is the
-rows carried over from earlier rounds. A carried-over row is still declared compatible. It was produced by an earlier
-round's procedure, though, and was not re-run against this build, so presenting it as newly
-verified would overstate the evidence.
+The results fall into twelve groups, kept apart on purpose. The first group is the row measured
+for 1.4.7 on dsh 0.2.2-rc.5. The second group is the rows measured for 1.4.6 on dsh 0.2.2-rc.3.
+The third group is the rows measured for 1.4.5 on dsh 0.2.2-rc.1 and 0.2.2-alpha.3. The fourth
+group is the rows measured for 1.4.4 on dsh 0.2.1-rc.5 and 0.2.2-alpha.2. The fifth group is the
+row measured for 1.4.3 on dsh 0.2.1-rc.4. The sixth group is the row measured for 1.4.2 on dsh
+0.2.1-rc.3. The seventh group is the rows measured for 1.4.0 on dsh 0.2.1-rc.2 and 0.2.1-rc.1.
+The eighth group is the row measured for 1.0.0 on dsh 0.2.1-alpha.2. The ninth group is the row
+measured for 0.9.0 on dsh 0.1.7-rc.2. The tenth group is the row re-measured on the 0.8.x builds
+(0.2.1-alpha.1). The eleventh group is the rows re-measured against the 0.7.1 build on
+2026-09-29. The last group is the rows carried over from earlier rounds. A carried-over row is
+still declared compatible. It was produced by an earlier round's procedure, though, and was not
+re-run against this build, so presenting it as newly verified would overstate the evidence.
+
+### Measured on `0.2.2-rc.5` (`1.4.7` on 2026-11-19)
+
+| dsh release | install | host boot | uninstall | rows active | client bundles in `__DSH_BOOT__` | settings namespace served | Web switch |
+|---|---|---:|---:|---|---:|---:|---|
+| 0.2.2-rc.5 | pass | pass | pass | not probed (headless round) | not probed | not probed | not probed |
+
+`0.2.2-rc.5` got its own npm prefix and a fresh `DSH_HOME` under one task scratch root. This
+package, its sibling `dsh-embedded-workbench` 0.9.10 and `dsh-model-everything` 0.7.1 were
+added to one disposable `headless` profile with `file:` from their checkouts. The installed
+manifests printed `1.4.7`, `0.9.10` and `0.7.1`, and no `plugin add` was refused by the
+preflight.
+
+The composed tree carried the row enabled, with `interaction: follow-approval`:
+
+```text
+# == dsh-logicprobe
+- id: logicprobe
+  name: dsh-logicprobe
+  config:
+    enabled: true
+    interaction: follow-approval
+```
+
+The installed package under the profile carried its `skills/` directories and `locale/` with
+`en.json` and `zh.json`. The headless boot with a fake key reached the provider and stopped
+there with no plugin load error:
+
+```text
+[llm-deepseek-api-key] model listing from https://api.deepseek.com/models failed (LlmError: https://api.deepseek.com/models answered HTTP 401); using the bundled catalog
+dsh: AUTH: Authentication Fails, Your api key: ****test is invalid (request_id: …)
+```
+
+This round is **headless**. `rows active`, `__DSH_BOOT__`, the settings namespace and the live
+Web switch were not probed. The direct tool call was **not** re-run this round. All three
+packages were removed from the profile afterwards, and the composed tree contained none of
+their rows.
+
+The previous `^0.2.2-rc.3` branch already admits this release under `includePrerelease: true`,
+so the added `|| ^0.2.2-rc.5` branch records the release this round ran. The release ships
+`schemastery` 3.19.0 and `cordis` 4.1.0, the same pair as `0.2.2-rc.3`.
 
 ### Measured on `0.2.2-rc.3` (`1.4.6` on 2026-11-14)
 
@@ -871,17 +912,17 @@ the install preflight evaluates it, not `dshReleases`
 "engines": { "node": ">=20" },
 "peerDependencies": {
   "@deepseek-ai/cordis": "^4.0.5",
-  "@deepseek-ai/dsh-agent": "^0.1.0-rc.6 || ^0.2.0-rc.1 || ^0.2.1-alpha.1 || ^0.2.1-alpha.2 || ^0.2.1-rc.1 || ^0.2.1-rc.2 || ^0.2.1-rc.3 || ^0.2.1-rc.4 || ^0.2.1-rc.5 || ^0.2.2-alpha.2 || ^0.2.2-rc.1 || ^0.2.2-alpha.3 || ^0.2.2-rc.3",
-  "@deepseek-ai/dsh-llm": "^0.1.0-rc.6 || ^0.2.0-rc.1 || ^0.2.1-alpha.1 || ^0.2.1-alpha.2 || ^0.2.1-rc.1 || ^0.2.1-rc.2 || ^0.2.1-rc.3 || ^0.2.1-rc.4 || ^0.2.1-rc.5 || ^0.2.2-alpha.2 || ^0.2.2-rc.1 || ^0.2.2-alpha.3 || ^0.2.2-rc.3",
-  "@deepseek-ai/dsh-session": "^0.1.0-rc.6 || ^0.2.0-rc.1 || ^0.2.1-alpha.1 || ^0.2.1-alpha.2 || ^0.2.1-rc.1 || ^0.2.1-rc.2 || ^0.2.1-rc.3 || ^0.2.1-rc.4 || ^0.2.1-rc.5 || ^0.2.2-alpha.2 || ^0.2.2-rc.1 || ^0.2.2-alpha.3 || ^0.2.2-rc.3",
-  "@deepseek-ai/dsh-skill-filesystem": "^0.1.0-rc.8 || ^0.2.0-rc.1 || ^0.2.1-alpha.1 || ^0.2.1-alpha.2 || ^0.2.1-rc.1 || ^0.2.1-rc.2 || ^0.2.1-rc.3 || ^0.2.1-rc.4 || ^0.2.1-rc.5 || ^0.2.2-alpha.2 || ^0.2.2-rc.1 || ^0.2.2-alpha.3 || ^0.2.2-rc.3",
-  "@deepseek-ai/dsh-tools": "^0.1.0-rc.6 || ^0.2.0-rc.1 || ^0.2.1-alpha.1 || ^0.2.1-alpha.2 || ^0.2.1-rc.1 || ^0.2.1-rc.2 || ^0.2.1-rc.3 || ^0.2.1-rc.4 || ^0.2.1-rc.5 || ^0.2.2-alpha.2 || ^0.2.2-rc.1 || ^0.2.2-alpha.3 || ^0.2.2-rc.3",
+  "@deepseek-ai/dsh-agent": "^0.1.0-rc.6 || ^0.2.0-rc.1 || ^0.2.1-alpha.1 || ^0.2.1-alpha.2 || ^0.2.1-rc.1 || ^0.2.1-rc.2 || ^0.2.1-rc.3 || ^0.2.1-rc.4 || ^0.2.1-rc.5 || ^0.2.2-alpha.2 || ^0.2.2-rc.1 || ^0.2.2-alpha.3 || ^0.2.2-rc.3 || ^0.2.2-rc.5",
+  "@deepseek-ai/dsh-llm": "^0.1.0-rc.6 || ^0.2.0-rc.1 || ^0.2.1-alpha.1 || ^0.2.1-alpha.2 || ^0.2.1-rc.1 || ^0.2.1-rc.2 || ^0.2.1-rc.3 || ^0.2.1-rc.4 || ^0.2.1-rc.5 || ^0.2.2-alpha.2 || ^0.2.2-rc.1 || ^0.2.2-alpha.3 || ^0.2.2-rc.3 || ^0.2.2-rc.5",
+  "@deepseek-ai/dsh-session": "^0.1.0-rc.6 || ^0.2.0-rc.1 || ^0.2.1-alpha.1 || ^0.2.1-alpha.2 || ^0.2.1-rc.1 || ^0.2.1-rc.2 || ^0.2.1-rc.3 || ^0.2.1-rc.4 || ^0.2.1-rc.5 || ^0.2.2-alpha.2 || ^0.2.2-rc.1 || ^0.2.2-alpha.3 || ^0.2.2-rc.3 || ^0.2.2-rc.5",
+  "@deepseek-ai/dsh-skill-filesystem": "^0.1.0-rc.8 || ^0.2.0-rc.1 || ^0.2.1-alpha.1 || ^0.2.1-alpha.2 || ^0.2.1-rc.1 || ^0.2.1-rc.2 || ^0.2.1-rc.3 || ^0.2.1-rc.4 || ^0.2.1-rc.5 || ^0.2.2-alpha.2 || ^0.2.2-rc.1 || ^0.2.2-alpha.3 || ^0.2.2-rc.3 || ^0.2.2-rc.5",
+  "@deepseek-ai/dsh-tools": "^0.1.0-rc.6 || ^0.2.0-rc.1 || ^0.2.1-alpha.1 || ^0.2.1-alpha.2 || ^0.2.1-rc.1 || ^0.2.1-rc.2 || ^0.2.1-rc.3 || ^0.2.1-rc.4 || ^0.2.1-rc.5 || ^0.2.2-alpha.2 || ^0.2.2-rc.1 || ^0.2.2-alpha.3 || ^0.2.2-rc.3 || ^0.2.2-rc.5",
   "@deepseek-ai/schemastery": "^3.18.5"
 },
 "dsh": {
   "engines": { "dsh": ">=0.1.0-rc.7" },
   "compatibility": {
-    "dsh": "^0.1.0-rc.7 || ^0.1.1-rc.1 || ^0.1.2-alpha.2 || ^0.1.2-alpha.3 || ^0.1.2-alpha.4 || ^0.1.2-alpha.5 || ^0.1.2-rc.1 || ^0.1.3-alpha.1 || ^0.1.3-alpha.2 || ^0.1.5-alpha.1 || ^0.1.5-rc.1 || ^0.1.5-alpha.2 || ^0.1.5-rc.2 || ^0.1.5-rc.3 || ^0.1.6-alpha.1 || ^0.1.6-alpha.2 || ^0.1.7-alpha.1 || ^0.1.7-alpha.2 || ^0.1.7-rc.1 || ^0.1.7-rc.2 || ^0.2.0-rc.1 || ^0.2.1-alpha.1 || ^0.2.1-alpha.2 || ^0.2.1-rc.1 || ^0.2.1-rc.2 || ^0.2.1-rc.3 || ^0.2.1-rc.4 || ^0.2.1-rc.5 || ^0.2.2-alpha.2 || ^0.2.2-rc.1 || ^0.2.2-alpha.3 || ^0.2.2-rc.3",
+    "dsh": "^0.1.0-rc.7 || ^0.1.1-rc.1 || ^0.1.2-alpha.2 || ^0.1.2-alpha.3 || ^0.1.2-alpha.4 || ^0.1.2-alpha.5 || ^0.1.2-rc.1 || ^0.1.3-alpha.1 || ^0.1.3-alpha.2 || ^0.1.5-alpha.1 || ^0.1.5-rc.1 || ^0.1.5-alpha.2 || ^0.1.5-rc.2 || ^0.1.5-rc.3 || ^0.1.6-alpha.1 || ^0.1.6-alpha.2 || ^0.1.7-alpha.1 || ^0.1.7-alpha.2 || ^0.1.7-rc.1 || ^0.1.7-rc.2 || ^0.2.0-rc.1 || ^0.2.1-alpha.1 || ^0.2.1-alpha.2 || ^0.2.1-rc.1 || ^0.2.1-rc.2 || ^0.2.1-rc.3 || ^0.2.1-rc.4 || ^0.2.1-rc.5 || ^0.2.2-alpha.2 || ^0.2.2-rc.1 || ^0.2.2-alpha.3 || ^0.2.2-rc.3 || ^0.2.2-rc.5",
     "dshReleases": {
       "0.1.0-rc.7": "compatible",
       "0.1.0-rc.8": "compatible",
@@ -917,7 +958,8 @@ the install preflight evaluates it, not `dshReleases`
       "0.2.2-alpha.2": "compatible",
       "0.2.2-rc.1": "compatible",
       "0.2.2-alpha.3": "compatible",
-      "0.2.2-rc.3": "compatible"
+      "0.2.2-rc.3": "compatible",
+      "0.2.2-rc.5": "compatible"
     },
     "profiles": ["headless", "web"]
   }
@@ -959,12 +1001,17 @@ branch documents what was run rather than tightening a boundary. That release sh
 
 ## Notes
 
-These bullets are grouped by the round that produced them. The first governs
-1.4.6 and the second governs 1.4.5. Several later ones describe what an **older**
+These bullets are grouped by the round that produced them. The first governs 1.4.7, the second
+1.4.6, the third 1.4.5. Several later ones describe what an **older**
 plugin version was verified against, so where one reads "keeps 0.1.0-rc.7 … X working"
 it means that round's plugin version, not this one. The Results tables above are the
 authoritative statement for the release each row names.
 
+- **The 0.2.2-rc.5 round was headless and measured install, mount, boot and uninstall.**
+  It ran on 2026-11-19, in its own npm tree and a fresh `DSH_HOME` under one task scratch root,
+  with this package and both siblings added from their checkouts. The Web half was **not**
+  probed, the direct tool call was **not** re-run, and the session-log seam scan was not run
+  because the boot stops at provider authentication.
 - **The 0.2.2-rc.3 round measured five steps, headless, and one direct tool call.** Install,
   mount, boot, tool call and uninstall ran on 2026-11-14, in their own npm tree and a fresh
   `DSH_HOME` under one task scratch root, with both plugins added from their checkouts after
